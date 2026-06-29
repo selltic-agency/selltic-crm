@@ -1,5 +1,3 @@
-// lib/supabase/middleware.ts
-// Odświeża sesję na każdym żądaniu i chroni /admin.
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -23,14 +21,12 @@ export async function updateSession(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  // Ochrona panelu: brak sesji + ścieżka /admin → login
   const path = request.nextUrl.pathname;
   if (!user && path.startsWith("/admin")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
-  // Zalogowany wchodzi na /login → przekieruj do panelu
   if (user && path === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/admin";
