@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { tokens, inputStyle, primaryButton } from "@/lib/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,22 +41,39 @@ export default function LoginPage() {
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
+        background: tokens.bg,
       }}
     >
       <form
         onSubmit={handleSubmit}
         style={{
           width: "100%",
-          maxWidth: 360,
-          background: "#fff",
-          border: "1px solid #e5e7eb",
-          borderRadius: 12,
-          padding: 28,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+          maxWidth: 380,
+          background: tokens.card,
+          border: `1px solid ${tokens.border}`,
+          borderRadius: tokens.radius,
+          padding: 32,
+          boxShadow: "0 12px 40px rgba(15,18,28,0.06)",
         }}
       >
-        <h1 style={{ margin: "0 0 4px", fontSize: 22 }}>Selltic</h1>
-        <p style={{ margin: "0 0 20px", color: "#6b7280", fontSize: 14 }}>
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 11,
+            background: tokens.accent,
+            color: "#fff",
+            display: "grid",
+            placeItems: "center",
+            fontWeight: 800,
+            fontSize: 20,
+            marginBottom: 16,
+          }}
+        >
+          S
+        </div>
+        <h1 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 700 }}>Selltic</h1>
+        <p style={{ margin: "0 0 22px", color: tokens.muted, fontSize: 14 }}>
           Zaloguj się do panelu
         </p>
 
@@ -66,7 +84,7 @@ export default function LoginPage() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          style={inputStyle}
+          style={{ ...inputStyle, marginBottom: 16 }}
         />
 
         <label style={labelStyle}>Hasło</label>
@@ -76,16 +94,20 @@ export default function LoginPage() {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          style={inputStyle}
+          style={{ ...inputStyle, marginBottom: 16 }}
         />
 
         {error && (
-          <p style={{ color: "#dc2626", fontSize: 13, margin: "0 0 12px" }}>
+          <p style={{ color: tokens.danger, fontSize: 13, margin: "0 0 14px" }}>
             {error}
           </p>
         )}
 
-        <button type="submit" disabled={loading} style={buttonStyle(loading)}>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{ ...primaryButton, width: "100%", padding: "11px 12px", opacity: loading ? 0.6 : 1 }}
+        >
           {loading ? "Logowanie…" : "Zaloguj się"}
         </button>
       </form>
@@ -99,27 +121,3 @@ const labelStyle: React.CSSProperties = {
   fontWeight: 600,
   margin: "0 0 6px",
 };
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "10px 12px",
-  marginBottom: 16,
-  border: "1px solid #d1d5db",
-  borderRadius: 8,
-  fontSize: 14,
-};
-
-function buttonStyle(loading: boolean): React.CSSProperties {
-  return {
-    width: "100%",
-    padding: "11px 12px",
-    background: loading ? "#9ca3af" : "#111827",
-    color: "#fff",
-    border: "none",
-    borderRadius: 8,
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: loading ? "default" : "pointer",
-  };
-}
