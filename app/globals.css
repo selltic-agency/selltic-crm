@@ -1,0 +1,76 @@
+/* app/globals.css — globalne style + animacje (REQUIREMENTS §9). */
+
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --border: #eceef3;
+  --text: #1a1d26;
+  --muted: #8a92a6;
+  --accent: #6c5ce7;
+  --accent-soft: rgba(108, 92, 231, 0.1);
+  --success: #18a957;
+  --warning: #f2994a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Karta kontaktu — uniesienie i podświetlenie ramki przy hover. */
+.card-hover {
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 6px 20px rgba(108, 92, 231, 0.12);
+}
+
+/* Szuflada kontaktu — scrim + wsuwanie z prawej (cubic-bezier z §9). */
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.drawer-scrim {
+  animation: scrim-in 0.2s ease forwards;
+}
+.drawer-panel {
+  animation: drawer-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-hover,
+  .drawer-scrim,
+  .drawer-panel {
+    animation: none !important;
+    transition: none !important;
+  }
+}
