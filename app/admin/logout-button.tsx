@@ -3,7 +3,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { tokens } from "@/lib/theme";
 
 export default function LogoutButton() {
   const router = useRouter();
@@ -22,15 +24,21 @@ export default function LogoutButton() {
       onClick={logout}
       disabled={loading}
       style={{
-        padding: "8px 14px",
-        background: "#fff",
-        border: "1px solid #d1d5db",
-        borderRadius: 8,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        padding: "8px 12px",
+        background: tokens.card,
+        border: `1px solid ${tokens.border}`,
+        borderRadius: 10,
         fontSize: 13,
         fontWeight: 600,
+        color: tokens.muted,
         cursor: loading ? "default" : "pointer",
       }}
     >
+      <LogOut size={16} />
       {loading ? "Wylogowywanie…" : "Wyloguj"}
     </button>
   );

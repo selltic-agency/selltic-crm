@@ -1,119 +1,98 @@
-// app/admin/page.tsx — panel admina (lista formularzy).
-// Chronione przez middleware; tu dodatkowy strażnik dla pewności.
-import { redirect } from "next/navigation";
-import { createSupabaseServer } from "@/lib/supabase/server";
-import LogoutButton from "./logout-button";
+// app/admin/page.tsx — Dashboard (placeholder w Fazie 1).
+// Karty szybkich akcji + miejsca na "Leady w toku" i "Ostatnia aktywność".
+import Link from "next/link";
+import { FileText, UserPlus, CheckSquare, BarChart3 } from "lucide-react";
+import { tokens } from "@/lib/theme";
 
-export const dynamic = "force-dynamic";
+const ACTIONS = [
+  { label: "New Form", icon: FileText, href: "/admin/forms" },
+  { label: "New Contact", icon: UserPlus, href: "/admin/pipeline" },
+  { label: "New Task", icon: CheckSquare, href: "/admin/tasks" },
+  { label: "Analytics", icon: BarChart3, href: "/admin/analytics" },
+];
 
-type FormRow = {
-  id: string;
-  title: string | null;
-  slug: string | null;
-  status: string | null;
-  updated_at: string | null;
-};
-
-export default async function AdminPage() {
-  const supabase = await createSupabaseServer();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  const { data: forms, error } = await supabase
-    .from("forms")
-    .select("id, title, slug, status, updated_at")
-    .order("updated_at", { ascending: false });
-
-  const rows = (forms ?? []) as FormRow[];
-
+export default function DashboardPage() {
   return (
-    <main style={{ maxWidth: 880, margin: "0 auto", padding: "32px 24px" }}>
-      <header
+    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      <h1 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 700 }}>Dashboard</h1>
+      <p style={{ margin: "0 0 24px", color: tokens.muted, fontSize: 14 }}>
+        Przegląd Twojego pipeline’u i ostatnich zdarzeń.
+      </p>
+
+      {/* Karty szybkich akcji */}
+      <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+          gap: 16,
           marginBottom: 28,
         }}
       >
-        <div>
-          <h1 style={{ margin: "0 0 2px", fontSize: 24 }}>Panel</h1>
-          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-            Zalogowano jako {user.email}
-          </p>
-        </div>
-        <LogoutButton />
-      </header>
+        {ACTIONS.map(({ label, icon: Icon, href }) => (
+          <Link key={label} href={href} style={actionCardStyle}>
+            <span
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 11,
+                background: tokens.accentSoft,
+                color: tokens.accent,
+                display: "grid",
+                placeItems: "center",
+              }}
+            >
+              <Icon size={20} />
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 600 }}>{label}</span>
+          </Link>
+        ))}
+      </div>
 
-      <section
+      {/* Placeholdery dwóch sekcji */}
+      <div
         style={{
-          background: "#fff",
-          border: "1px solid #e5e7eb",
-          borderRadius: 12,
-          overflow: "hidden",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: 16,
         }}
       >
-        <div
-          style={{
-            padding: "14px 18px",
-            borderBottom: "1px solid #e5e7eb",
-            fontWeight: 600,
-            fontSize: 14,
-          }}
-        >
-          Formularze
-        </div>
-
-        {error ? (
-          <p style={{ padding: 18, margin: 0, color: "#dc2626", fontSize: 14 }}>
-            Nie udało się wczytać formularzy. Upewnij się, że schemat bazy
-            (schema.sql) został wgrany w Supabase.
-          </p>
-        ) : rows.length === 0 ? (
-          <p style={{ padding: 18, margin: 0, color: "#6b7280", fontSize: 14 }}>
-            Brak formularzy. Kreator formularzy pojawi się w kolejnej fazie.
-          </p>
-        ) : (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {rows.map((f) => (
-              <li
-                key={f.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "14px 18px",
-                  borderTop: "1px solid #f1f3f5",
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>
-                    {f.title || "Bez tytułu"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#6b7280" }}>
-                    {f.slug ? `/${f.slug}` : "brak adresu"}
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    padding: "3px 10px",
-                    borderRadius: 999,
-                    background: f.status === "published" ? "#dcfce7" : "#f3f4f6",
-                    color: f.status === "published" ? "#166534" : "#6b7280",
-                  }}
-                >
-                  {f.status === "published" ? "opublikowany" : "szkic"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+        <Placeholder title="Leads in progress" hint="Wkrótce: kontakty spoza etapów Won/Lost." />
+        <Placeholder title="Recent activity" hint="Wkrótce: oś czasu ostatnich zdarzeń." />
+      </div>
+    </div>
   );
 }
+
+function Placeholder({ title, hint }: { title: string; hint: string }) {
+  return (
+    <section style={cardStyle}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{title}</div>
+      <div
+        style={{
+          color: tokens.muted,
+          fontSize: 14,
+          padding: "28px 0",
+          textAlign: "center",
+        }}
+      >
+        {hint}
+      </div>
+    </section>
+  );
+}
+
+const cardStyle: React.CSSProperties = {
+  background: tokens.card,
+  border: `1px solid ${tokens.border}`,
+  borderRadius: tokens.radius,
+  padding: 20,
+};
+
+const actionCardStyle: React.CSSProperties = {
+  ...cardStyle,
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  textDecoration: "none",
+  color: tokens.text,
+};

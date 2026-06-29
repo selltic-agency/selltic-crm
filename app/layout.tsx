@@ -1,6 +1,10 @@
 // app/layout.tsx — główny layout aplikacji (wymagany przez App Router).
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { Inter } from "next/font/google";
+import { tokens } from "@/lib/theme";
+
+const inter = Inter({ subsets: ["latin", "latin-ext"], display: "swap" });
 
 export const metadata: Metadata = {
   title: "Selltic — panel",
@@ -9,14 +13,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="pl">
+    <html lang="pl" className={inter.className}>
       <body
         style={{
           margin: 0,
-          fontFamily:
-            "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
-          background: "#f6f7f9",
-          color: "#111827",
+          background: tokens.bg,
+          color: tokens.text,
+          WebkitFontSmoothing: "antialiased",
         }}
       >
         {children}
