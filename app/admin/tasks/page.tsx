@@ -4,6 +4,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import { Plus, Trash2, Clock, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -180,12 +181,15 @@ export default function TasksPage() {
         </>
       )}
 
-      {drawerContact && (
-        <ContactDrawer
-          contactId={drawerContact}
-          onClose={() => setDrawerContact(null)}
-        />
-      )}
+      <AnimatePresence>
+        {drawerContact && (
+          <ContactDrawer
+            key="drawer"
+            contactId={drawerContact}
+            onClose={() => setDrawerContact(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

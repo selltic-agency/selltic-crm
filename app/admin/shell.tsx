@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -300,9 +301,15 @@ export default function Shell({
         </main>
       </div>
 
-      {drawerContact && (
-        <ContactDrawer contactId={drawerContact} onClose={() => setDrawerContact(null)} />
-      )}
+      <AnimatePresence>
+        {drawerContact && (
+          <ContactDrawer
+            key="drawer"
+            contactId={drawerContact}
+            onClose={() => setDrawerContact(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

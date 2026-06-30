@@ -3,6 +3,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Plus, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -17,6 +18,7 @@ import ContactDrawer from "@/components/ContactDrawer";
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
+  const reduce = useReducedMotion();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawerContact, setDrawerContact] = useState<string | null>(null);
@@ -136,37 +138,47 @@ export default function PipelinePage() {
                       Brak kontaktów
                     </p>
                   ) : (
-                    list.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => setDrawerContact(c.id)}
-                        style={{
-                          textAlign: "left",
-                          background: tokens.card,
-                          border: `1px solid ${tokens.border}`,
-                          borderRadius: 12,
-                          padding: "12px 13px",
-                          cursor: "pointer",
-                          display: "grid",
-                          gap: 6,
-                        }}
-                      >
-                        <div style={{ fontSize: 14, fontWeight: 600 }}>
-                          {c.name || "Bez nazwy"}
-                        </div>
-                        {c.company && (
-                          <div style={{ fontSize: 12.5, color: tokens.muted }}>{c.company}</div>
-                        )}
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                          <span style={{ fontSize: 11.5, color: tokens.muted }}>
-                            {c.source ? `📋 ${c.source}` : "ręcznie"}
-                          </span>
-                          {Number(c.value) > 0 && (
-                            <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(c.value)}</span>
+                    <AnimatePresence initial={false}>
+                      {list.map((c) => (
+                        <motion.button
+                          key={c.id}
+                          layout={!reduce}
+                          onClick={() => setDrawerContact(c.id)}
+                          initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+                          whileHover={reduce ? undefined : { scale: 1.02, y: -2 }}
+                          transition={
+                            reduce ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 32 }
+                          }
+                          style={{
+                            textAlign: "left",
+                            background: tokens.card,
+                            border: `1px solid ${tokens.border}`,
+                            borderRadius: 12,
+                            padding: "12px 13px",
+                            cursor: "pointer",
+                            display: "grid",
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontSize: 14, fontWeight: 600 }}>
+                            {c.name || "Bez nazwy"}
+                          </div>
+                          {c.company && (
+                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{c.company}</div>
                           )}
-                        </div>
-                      </button>
-                    ))
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ fontSize: 11.5, color: tokens.muted }}>
+                              {c.source ? `📋 ${c.source}` : "ręcznie"}
+                            </span>
+                            {Number(c.value) > 0 && (
+                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(c.value)}</span>
+                            )}
+                          </div>
+                        </motion.button>
+                      ))}
+                    </AnimatePresence>
                   )}
                 </div>
               </div>
@@ -185,7 +197,11 @@ export default function PipelinePage() {
         />
       )}
 
-      {drawerContact && <ContactDrawer contactId={drawerContact} onClose={closeDrawer} />}
+      <AnimatePresence>
+        {drawerContact && (
+          <ContactDrawer key="drawer" contactId={drawerContact} onClose={closeDrawer} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

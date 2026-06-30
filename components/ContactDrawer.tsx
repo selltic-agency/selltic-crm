@@ -4,6 +4,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import {
   X,
   StickyNote,
@@ -60,6 +61,7 @@ export default function ContactDrawer({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
+  const reduce = useReducedMotion();
   const [contact, setContact] = useState<Contact | null>(null);
   const [defs, setDefs] = useState<PropertyDef[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -204,22 +206,29 @@ export default function ContactDrawer({
   return (
     <>
       {/* scrim */}
-      <div
+      <motion.div
         onClick={onClose}
-        data-selltic-drawer
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: reduce ? 0 : 0.2 }}
         style={{
           position: "fixed",
           inset: 0,
           background: "rgba(15,18,28,0.40)",
           zIndex: 40,
-          animation: "selltic-fade .2s ease",
         }}
       />
       {/* panel */}
-      <aside
+      <motion.aside
         role="dialog"
         aria-modal="true"
-        data-selltic-drawer
+        initial={{ x: reduce ? 0 : "100%" }}
+        animate={{ x: 0 }}
+        exit={{ x: reduce ? 0 : "100%", opacity: reduce ? 0 : 1 }}
+        transition={
+          reduce ? { duration: 0 } : { type: "spring", stiffness: 320, damping: 34 }
+        }
         style={{
           position: "fixed",
           top: 0,
@@ -232,17 +241,8 @@ export default function ContactDrawer({
           zIndex: 41,
           display: "flex",
           flexDirection: "column",
-          animation: `selltic-slide-in .32s ${tokens.ease}`,
         }}
       >
-        <style>{`
-          @keyframes selltic-slide-in { from { transform: translateX(100%);} to { transform: translateX(0);} }
-          @keyframes selltic-fade { from { opacity: 0;} to { opacity: 1;} }
-          @media (prefers-reduced-motion: reduce){
-            [data-selltic-drawer]{ animation: none !important; }
-          }
-        `}</style>
-
         {/* Header */}
         <div
           style={{
@@ -297,18 +297,36 @@ export default function ContactDrawer({
                       key={s.key}
                       onClick={() => changeStage(s.key)}
                       style={{
+                        position: "relative",
                         padding: "6px 12px",
                         borderRadius: 999,
                         fontSize: 12.5,
                         fontWeight: 600,
                         cursor: "pointer",
                         border: `1px solid ${active ? s.color : tokens.border}`,
-                        background: active ? s.color : "#fff",
+                        background: active ? "transparent" : "#fff",
                         color: active ? "#fff" : tokens.muted,
-                        transition: `all .15s ${tokens.ease}`,
+                        transition: `color .15s ${tokens.ease}, border-color .15s ${tokens.ease}`,
                       }}
                     >
-                      {s.label}
+                      {active && (
+                        <motion.span
+                          layoutId="selltic-stage-pill"
+                          transition={
+                            reduce
+                              ? { duration: 0 }
+                              : { type: "spring", stiffness: 400, damping: 32 }
+                          }
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            borderRadius: 999,
+                            background: s.color,
+                            zIndex: 0,
+                          }}
+                        />
+                      )}
+                      <span style={{ position: "relative", zIndex: 1 }}>{s.label}</span>
                     </button>
                   );
                 })}
@@ -492,7 +510,7 @@ export default function ContactDrawer({
             </>
           )}
         </div>
-      </aside>
+      </motion.aside>
     </>
   );
 }
