@@ -27,6 +27,13 @@ app/api/submit/route.ts        ← submission → kontakt → aktywność → ma
 
 2. **Supabase**: załóż projekt na supabase.com → SQL Editor → wklej `schema.sql` → Run.
 
+   **Aktualizujesz istniejący projekt sprzed Fazy 9?** `schema.sql` używa
+   `create table if not exists`, więc samo ponowne uruchomienie go NIE doda
+   tabeli `leads` ani nie przeniesie `stage`/`value`/`source`/`form_id` z
+   `contacts` na `leads`. Uruchom dodatkowo `migration_phase9.sql` (SQL Editor
+   → Run) — bez tego dodawanie/tworzenie leadów oraz zapisywanie zgłoszeń z
+   formularzy (które tworzą leada) będzie się nie udawać.
+
 3. **Zmienne**: skopiuj `.env.example` → `.env.local`, wklej klucze z Supabase
    (Project Settings → API). `SUPABASE_SERVICE_ROLE_KEY` to sekret — nigdy do kodu klienta.
 

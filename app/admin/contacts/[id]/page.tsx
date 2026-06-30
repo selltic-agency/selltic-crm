@@ -305,7 +305,7 @@ export default function ContactPage() {
     if (data) {
       router.push(`/admin/leads/${(data as Lead).id}`);
     } else if (error) {
-      toast.error("Nie udało się dodać leada.");
+      toast.error(`Nie udało się dodać leada: ${error.message}`);
     }
   }
 
