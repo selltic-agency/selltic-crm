@@ -1,12 +1,15 @@
-// components/ContactTable.tsx — widok tabeli kontaktów (Faza 8.5).
+// components/LeadTable.tsx — widok tabeli LEADÓW (Faza 9.4, było: ContactTable).
+// Kolumny łączą pola leada (etap, wartość, źródło, otwarcie) z polami kontaktu
+// (nazwa, firma, e-mail, telefon + właściwości własne). Klik wiersza → lead.
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Reorder } from "framer-motion";
 import { ChevronUp, ChevronDown, Settings2, GripVertical, X } from "lucide-react";
-import { tokens, formatDateTime, ghostButton } from "@/lib/ui";
-import { Contact, PropertyDef } from "@/lib/types";
+import { tokens, formatPLN, formatDateTime, ghostButton } from "@/lib/ui";
+import { LeadWithContact, PropertyDef } from "@/lib/types";
+import { useStages } from "@/lib/stages";
 import { createClient } from "@/lib/supabase/client";
 
 type SortConfig = {
@@ -22,25 +25,29 @@ type TableColumn = {
   position: number;
 };
 
-type ContactTableProps = {
-  contacts: Contact[];
+type LeadTableProps = {
+  leads: LeadWithContact[];
   onRowClick: (id: string) => void;
 };
 
-// Faza 9.1: etap/wartość/źródło przeniesione na leady — kolumny kontaktów to
-// teraz sama tożsamość + pola własne. Kolumny leadowe wrócą z widokiem leadów.
+// Pola kontaktu (czytane z lead.contacts) vs pola leada (bezpośrednio).
+const CONTACT_KEYS = new Set(["name", "company", "email", "phone"]);
+
 const BUILT_IN_COLUMNS = [
   { key: "name", label: "Nazwa", width: 180 },
   { key: "company", label: "Firma", width: 150 },
   { key: "email", label: "E-mail", width: 200 },
   { key: "phone", label: "Telefon", width: 130 },
-  { key: "created_at", label: "Utworzono", width: 160 },
+  { key: "stage", label: "Etap", width: 130 },
+  { key: "value", label: "Wartość", width: 120 },
+  { key: "source", label: "Źródło", width: 120 },
+  { key: "opened_at", label: "Otwarto", width: 160 },
 ];
 
-export default function ContactTable({ contacts, onRowClick }: ContactTableProps) {
+export default function LeadTable({ leads, onRowClick }: LeadTableProps) {
   const supabase = useMemo(() => createClient(), []);
-  const [sort, setSort] = useState<SortConfig>({ key: "created_at", direction: "desc" });
-  const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
+  const { stageMeta } = useStages();
+  const [sort, setSort] = useState<SortConfig>({ key: "opened_at", direction: "desc" });
   const [config, setConfig] = useState<TableColumn[]>([]);
   const [showConfig, setShowConfig] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -49,7 +56,6 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
   const colBtnRef = useRef<HTMLButtonElement>(null);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 1. Fetch prop_defs and table_view_config
   useEffect(() => {
     async function loadConfig() {
       const [defsRes, configRes] = await Promise.all([
@@ -58,11 +64,8 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
       ]);
 
       const defs = (defsRes.data as PropertyDef[]) || [];
-      setPropDefs(defs);
+      const savedCols = configRes.data?.columns as TableColumn[] | undefined;
 
-      const savedCols = configRes.data?.columns as any[];
-
-      // Merge built-in + custom props
       const allPossible: TableColumn[] = [
         ...BUILT_IN_COLUMNS.map((c, i) => ({ ...c, visible: true, position: i })),
         ...defs.map((d, i) => ({
@@ -75,13 +78,9 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
       ];
 
       if (savedCols && Array.isArray(savedCols)) {
-        // Apply saved visibility, width, and position
-        const merged = allPossible.map(col => {
-          const saved = savedCols.find(s => s.key === col.key);
-          if (saved) {
-            return { ...col, ...saved };
-          }
-          return col;
+        const merged = allPossible.map((col) => {
+          const saved = savedCols.find((s) => s.key === col.key);
+          return saved ? { ...col, ...saved } : col;
         });
         setConfig(merged.sort((a, b) => a.position - b.position));
       } else {
@@ -92,24 +91,23 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
     loadConfig();
   }, [supabase]);
 
-  // 2. Sorting logic
-  const sortedContacts = useMemo(() => {
-    setPage(1); // Reset page on sort change
-    const sorted = [...contacts].sort((a, b) => {
+  const sortedLeads = useMemo(() => {
+    setPage(1);
+    return [...leads].sort((a, b) => {
       const aVal = getVal(a, sort.key);
       const bVal = getVal(b, sort.key);
-
       if (aVal === bVal) return 0;
       const res = aVal > bVal ? 1 : -1;
       return sort.direction === "asc" ? res : -res;
     });
-    return sorted;
-  }, [contacts, sort]);
+  }, [leads, sort]);
 
-  function getVal(c: Contact, key: string): any {
-    if (key === "created_at") return new Date(c.created_at).getTime();
-    if (key in c) return (c as any)[key] || "";
-    return c.props?.[key] || "";
+  function getVal(l: LeadWithContact, key: string): string | number {
+    if (key === "value") return Number(l.value || 0);
+    if (key === "opened_at") return new Date(l.opened_at).getTime();
+    if (key === "stage" || key === "source") return (l[key] as string) || "";
+    if (CONTACT_KEYS.has(key)) return (l.contacts?.[key as "name"] as string) || "";
+    return l.contacts?.props?.[key] || "";
   }
 
   const handleSort = (key: string) => {
@@ -119,29 +117,24 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
     }));
   };
 
-  // 3. Persistence — zmiany stosujemy natychmiast (tabela reaguje od razu),
-  //    a zapis do bazy jest debounce'owany (drag/reorder strzela często).
   async function persistConfig(newConfig: TableColumn[]) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
     await supabase.from("table_view_config").upsert({
       owner: user.id,
-      // position liczona z kolejności w tablicy (źródło prawdy dla układu).
       columns: newConfig.map(({ key, visible, width }, i) => ({ key, visible, width, position: i })),
     });
   }
 
   function updateConfig(newConfig: TableColumn[]) {
-    setConfig(newConfig); // natychmiastowe odbicie w tabeli (bez przeładowania)
+    setConfig(newConfig);
     if (persistTimer.current) clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(() => persistConfig(newConfig), 400);
   }
 
-  const visibleColumns = useMemo(() => config.filter(c => c.visible), [config]);
-
-  const totalPages = Math.ceil(sortedContacts.length / pageSize);
-  const paginatedContacts = sortedContacts.slice((page - 1) * pageSize, page * pageSize);
+  const visibleColumns = useMemo(() => config.filter((c) => c.visible), [config]);
+  const totalPages = Math.ceil(sortedLeads.length / pageSize);
+  const paginated = sortedLeads.slice((page - 1) * pageSize, page * pageSize);
 
   if (loadingConfig) {
     return <div style={{ padding: 40, textAlign: "center", color: tokens.muted }}>Wczytywanie konfiguracji...</div>;
@@ -182,38 +175,33 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {col.label.toUpperCase()}
-                    {sort.key === col.key && (
-                      sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
-                    )}
+                    {sort.key === col.key &&
+                      (sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
                   </div>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {paginatedContacts.map((c) => (
+            {paginated.map((l) => (
               <tr
-                key={c.id}
-                onClick={() => onRowClick(c.id)}
-                style={{
-                  borderBottom: `1px solid ${tokens.border}`,
-                  cursor: "pointer",
-                  transition: "background 0.15s ease",
-                }}
+                key={l.id}
+                onClick={() => onRowClick(l.id)}
+                style={{ borderBottom: `1px solid ${tokens.border}`, cursor: "pointer", transition: "background 0.15s ease" }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                {visibleColumns.map(col => (
+                {visibleColumns.map((col) => (
                   <td key={col.key} style={{ ...tdStyle, width: col.width, maxWidth: col.width }}>
-                    {renderCell(c, col.key)}
+                    {renderCell(l, col.key, stageMeta)}
                   </td>
                 ))}
               </tr>
             ))}
-            {paginatedContacts.length === 0 && (
+            {paginated.length === 0 && (
               <tr>
                 <td colSpan={visibleColumns.length} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
-                  Brak kontaktów spełniających kryteria.
+                  Brak leadów spełniających kryteria.
                 </td>
               </tr>
             )}
@@ -234,19 +222,19 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
           }}
         >
           <div>
-            Pokazano {(page - 1) * pageSize + 1} – {Math.min(page * pageSize, sortedContacts.length)} z {sortedContacts.length}
+            Pokazano {(page - 1) * pageSize + 1} – {Math.min(page * pageSize, sortedLeads.length)} z {sortedLeads.length}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               disabled={page === 1}
-              onClick={() => setPage(p => p - 1)}
+              onClick={() => setPage((p) => p - 1)}
               style={{ ...ghostButton, padding: "4px 10px", fontSize: 12, opacity: page === 1 ? 0.5 : 1 }}
             >
               Poprzednia
             </button>
             <button
               disabled={page === totalPages}
-              onClick={() => setPage(p => p + 1)}
+              onClick={() => setPage((p) => p + 1)}
               style={{ ...ghostButton, padding: "4px 10px", fontSize: 12, opacity: page === totalPages ? 0.5 : 1 }}
             >
               Następna
@@ -267,12 +255,26 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
   );
 }
 
-function renderCell(c: Contact, key: string) {
-  if (key === "created_at") return formatDateTime(c.created_at);
-  if (key === "name") return <span style={{ fontWeight: 600 }}>{c.name || "—"}</span>;
-
-  if (key in c) return (c as any)[key] || "—";
-  return c.props?.[key] || "—";
+function renderCell(
+  l: LeadWithContact,
+  key: string,
+  stageMeta: (k: string) => { color: string; label: string }
+) {
+  if (key === "stage") {
+    const meta = stageMeta(l.stage);
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
+        {meta.label}
+      </div>
+    );
+  }
+  if (key === "value") return formatPLN(l.value);
+  if (key === "opened_at") return formatDateTime(l.opened_at);
+  if (key === "source") return l.source || "ręcznie";
+  if (key === "name") return <span style={{ fontWeight: 600 }}>{l.contacts?.name || "—"}</span>;
+  if (CONTACT_KEYS.has(key)) return (l.contacts?.[key as "company"] as string) || "—";
+  return l.contacts?.props?.[key] || "—";
 }
 
 const PANEL_WIDTH = 300;
@@ -286,15 +288,12 @@ function ColumnConfigPanel({ anchorRef, config, onChange, onClose }: {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
-  // Zakotwiczenie pod przyciskiem „Kolumny" z detekcją krawędzi viewportu,
-  // przez portal do <body> — nie przycina go żaden rodzic z overflow:hidden.
   useLayoutEffect(() => {
     function place() {
       const btn = anchorRef.current;
       if (!btn) return;
       const r = btn.getBoundingClientRect();
       const margin = 12;
-      // Domyślnie wyrównaj prawą krawędź panelu do prawej krawędzi przycisku.
       let left = r.right - PANEL_WIDTH;
       left = Math.max(margin, Math.min(left, window.innerWidth - PANEL_WIDTH - margin));
       const top = Math.min(r.bottom + 8, window.innerHeight - margin);
@@ -309,7 +308,6 @@ function ColumnConfigPanel({ anchorRef, config, onChange, onClose }: {
     };
   }, [anchorRef]);
 
-  // Zamknięcie po kliknięciu poza panelem lub klawiszem Escape.
   useEffect(() => {
     function onDown(e: MouseEvent) {
       const t = e.target as Node;
@@ -329,10 +327,6 @@ function ColumnConfigPanel({ anchorRef, config, onChange, onClose }: {
 
   const toggleVisible = (key: string) =>
     onChange(config.map((c) => (c.key === key ? { ...c, visible: !c.visible } : c)));
-
-  // Zachowujemy te same referencje obiektów podczas przeciągania (jak w
-  // Settings → etapy) — inaczej Reorder gubi śledzenie elementu w trakcie gestu.
-  const handleReorder = (next: TableColumn[]) => onChange(next);
 
   const panel = (
     <div
@@ -364,7 +358,7 @@ function ColumnConfigPanel({ anchorRef, config, onChange, onClose }: {
       <Reorder.Group
         axis="y"
         values={config}
-        onReorder={handleReorder}
+        onReorder={onChange}
         style={{ flex: 1, overflowY: "auto", padding: 8, listStyle: "none", margin: 0 }}
       >
         {config.map((col) => (

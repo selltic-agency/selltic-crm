@@ -17,11 +17,18 @@ type FieldDef = {
   options?: string[];
 };
 
-// Faza 9.1: etap/źródło/wartość przeniesione do leadów — w filtrach kontaktów
-// zostaje data utworzenia oraz pola własne (props). Filtry leadowe wrócą wraz
-// z widokiem leadów w kolejnych fazach.
-const BUILT_IN_FIELDS: FieldDef[] = [
-  { key: "created_at", label: "Data utworzenia", type: "date" },
+// Faza 9.4: filtry lejka rozdzielone na poziom LEADA i poziom KONTAKTU.
+const LEAD_FIELDS: FieldDef[] = [
+  { key: "stage", label: "Etap", type: "stage" },
+  { key: "value", label: "Wartość", type: "value" },
+  { key: "source", label: "Źródło", type: "source" },
+  { key: "opened_at", label: "Data otwarcia", type: "date" },
+];
+const CONTACT_BUILT_IN_FIELDS: FieldDef[] = [
+  { key: "name", label: "Nazwa", type: "text" },
+  { key: "email", label: "E-mail", type: "text" },
+  { key: "phone", label: "Telefon", type: "text" },
+  { key: "company", label: "Firma", type: "text" },
 ];
 
 export default function FilterBar({
@@ -84,15 +91,21 @@ export default function FilterBar({
     router.replace(`${pathname}?${params.toString()}`);
   };
 
-  const allFields = useMemo(() => {
+  // Pola kontaktu = wbudowane + właściwości własne (props).
+  const contactFields = useMemo(() => {
     const custom: FieldDef[] = propDefs.map((p) => ({
       key: p.key,
       label: p.key,
       type: p.type,
       options: p.options || undefined,
     }));
-    return [...BUILT_IN_FIELDS, ...custom];
+    return [...CONTACT_BUILT_IN_FIELDS, ...custom];
   }, [propDefs]);
+
+  const allFields = useMemo(
+    () => [...LEAD_FIELDS, ...contactFields],
+    [contactFields]
+  );
 
   const removeFilter = (index: number) => {
     updateFilters(filters.filter((_, i) => i !== index));
@@ -160,28 +173,8 @@ export default function FilterBar({
                 padding: 6,
               }}
             >
-              {allFields.map((f) => (
-                <button
-                  key={f.key}
-                  onClick={() => addFilter(f)}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    border: "none",
-                    background: "none",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    fontSize: 13,
-                    color: tokens.text,
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                >
-                  {f.label}
-                </button>
-              ))}
+              <FieldGroup label="Lead" fields={LEAD_FIELDS} onPick={addFilter} />
+              <FieldGroup label="Kontakt" fields={contactFields} onPick={addFilter} />
             </div>
           )}
         </div>
@@ -299,6 +292,57 @@ export default function FilterBar({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Grupa pól w rozwijanej liście „Dodaj filtr" (Lead / Kontakt).
+function FieldGroup({
+  label,
+  fields,
+  onPick,
+}: {
+  label: string;
+  fields: FieldDef[];
+  onPick: (f: FieldDef) => void;
+}) {
+  if (fields.length === 0) return null;
+  return (
+    <div>
+      <div
+        style={{
+          padding: "8px 10px 4px",
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: tokens.muted,
+        }}
+      >
+        {label}
+      </div>
+      {fields.map((f) => (
+        <button
+          key={f.key}
+          onClick={() => onPick(f)}
+          style={{
+            display: "block",
+            width: "100%",
+            textAlign: "left",
+            padding: "8px 10px",
+            border: "none",
+            background: "none",
+            borderRadius: 8,
+            cursor: "pointer",
+            fontSize: 13,
+            color: tokens.text,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+        >
+          {f.label}
+        </button>
+      ))}
     </div>
   );
 }

@@ -115,8 +115,12 @@ export default function Shell({
               boxShadow: navOpen ? "12px 0 40px rgba(15,18,28,0.18)" : "none",
             }
           : {
-              position: "sticky",
+              // Stałe przypięcie do lewej krawędzi — zostaje na miejscu przy
+              // przewijaniu. (position: sticky nie działa, bo body ma
+              // overflow-x: hidden, co czyni go kontenerem przewijania.)
+              position: "fixed",
               top: 0,
+              left: 0,
               height: "100vh",
               // Wyżej niż topbar (z-index 5), żeby wystający przycisk zwijania
               // (right: -12) nie był przykryty paskiem górnym i pozostał klikalny.
@@ -241,7 +245,14 @@ export default function Shell({
       )}
 
       {/* ── Główny obszar ───────────────────────────────────── */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+      {/* Sidebar jest poza układem (fixed) na desktopie, więc odsuwamy treść
+          o jego szerokość — animowaną tym samym springiem co sidebar. */}
+      <motion.div
+        initial={false}
+        animate={{ marginLeft: isMobile ? 0 : collapsed ? 72 : 230 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}
+      >
         {/* Topbar */}
         <header
           style={{
@@ -324,7 +335,7 @@ export default function Shell({
         <main className="selltic-main" style={{ flex: 1, minWidth: 0 }}>
           {children}
         </main>
-      </div>
+      </motion.div>
     </div>
   );
 }

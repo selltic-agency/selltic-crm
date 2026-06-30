@@ -1,5 +1,6 @@
-// app/admin/pipeline/page.tsx — lista kontaktów (karty / tabela).
-// Faza 9.3: klik w kontakt prowadzi na stronę kontaktu (/admin/contacts/[id]).
+// app/admin/pipeline/page.tsx — lejek sprzedaży (kanban / tabela) na LEADACH.
+// Faza 9.4: karty/wiersze to leady, złączone z danymi kontaktu. Klik prowadzi
+// na stronę leada (/admin/leads/[id]).
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -12,28 +13,30 @@ import {
   inputStyle,
   primaryButton,
   ghostButton,
+  formatPLN,
 } from "@/lib/ui";
-import { type Contact } from "@/lib/types";
-import ContactTable from "@/components/ContactTable";
+import { type LeadWithContact, type Stage } from "@/lib/types";
+import { useStages } from "@/lib/stages";
+import LeadTable from "@/components/LeadTable";
 import FilterBar from "@/components/FilterBar";
 import { Filter, buildFilterQuery } from "@/lib/filters";
+
+const LEAD_SELECT = "*, contacts!inner(id, name, company, email, phone, props)";
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
   const router = useRouter();
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const { stages } = useStages();
+  const [leads, setLeads] = useState<LeadWithContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
 
-  // Load viewMode from localStorage
   useEffect(() => {
     const saved = localStorage.getItem("selltic_pipeline_view");
-    if (saved === "kanban" || saved === "table") {
-      setViewMode(saved);
-    }
+    if (saved === "kanban" || saved === "table") setViewMode(saved);
   }, []);
 
   const toggleView = (mode: "kanban" | "table") => {
@@ -44,14 +47,14 @@ export default function PipelinePage() {
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
     let query = supabase
-      .from("contacts")
-      .select("*")
-      .order("updated_at", { ascending: false });
+      .from("leads")
+      .select(LEAD_SELECT)
+      .order("opened_at", { ascending: false });
 
     query = buildFilterQuery(query, activeFilters);
 
     const { data } = await query;
-    setContacts((data as Contact[]) ?? []);
+    setLeads((data as LeadWithContact[]) ?? []);
     setLoading(false);
   }, [supabase]);
 
@@ -59,7 +62,17 @@ export default function PipelinePage() {
     load(filters);
   }, [load, filters]);
 
-  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
+  const openLead = (id: string) => router.push(`/admin/leads/${id}`);
+
+  const byStage = useMemo(() => {
+    const map: Record<Stage, LeadWithContact[]> = {};
+    for (const s of stages) map[s.key] = [];
+    for (const l of leads) {
+      if (!map[l.stage]) map[l.stage] = [];
+      map[l.stage].push(l);
+    }
+    return map;
+  }, [leads, stages]);
 
   return (
     <div>
@@ -113,7 +126,7 @@ export default function PipelinePage() {
           style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}
         >
           <Plus size={16} />
-          Dodaj kontakt
+          Dodaj lead
         </button>
       </div>
 
@@ -122,69 +135,143 @@ export default function PipelinePage() {
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : viewMode === "kanban" ? (
-        // Faza 9.1: etap/wartość/źródło przeniesione na leady. Lejek leadów
-        // (kanban po etapach) wraca w Fazie 9.4 z osobnym widokiem leadów.
-        // Tu pokazujemy kontakty jako tożsamości — siatka kart.
-        contacts.length === 0 ? (
-          <p style={{ fontSize: 13, color: tokens.muted }}>Brak kontaktów.</p>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-              gap: 12,
-            }}
-          >
-            <AnimatePresence initial={false}>
-              {contacts.map((c) => (
-                <motion.button
-                  key={c.id}
-                  layout={!reduce}
-                  onClick={() => openContact(c.id)}
-                  initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
-                  whileHover={reduce ? undefined : { scale: 1.02, y: -2 }}
-                  transition={
-                    reduce ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 32 }
-                  }
+        <div
+          className="selltic-scroll-x"
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${stages.length}, minmax(200px, 1fr))`,
+            gap: 14,
+            overflowX: "auto",
+            paddingBottom: 8,
+          }}
+        >
+          {stages.map((s) => {
+            const list = byStage[s.key] ?? [];
+            const total = list.reduce((sum, l) => sum + Number(l.value || 0), 0);
+            return (
+              <div key={s.key} style={{ minWidth: 220 }}>
+                <div
                   style={{
-                    textAlign: "left",
-                    background: tokens.card,
-                    border: `1px solid ${tokens.border}`,
-                    borderRadius: 12,
-                    padding: "12px 13px",
-                    cursor: "pointer",
-                    display: "grid",
+                    display: "flex",
+                    flexDirection: "column",
                     gap: 6,
+                    marginBottom: 10,
+                    padding: "0 2px",
                   }}
                 >
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>
-                    {c.name || "Bez nazwy"}
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: "50%",
+                        background: s.color,
+                        flexShrink: 0,
+                        marginTop: 5,
+                      }}
+                    />
+                    <span
+                      title={s.label}
+                      style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.3, wordBreak: "break-word" }}
+                    >
+                      {s.label}
+                    </span>
                   </div>
-                  {c.company && (
-                    <div style={{ fontSize: 12.5, color: tokens.muted }}>{c.company}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 17 }}>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: tokens.muted,
+                        background: tokens.card,
+                        border: `1px solid ${tokens.border}`,
+                        borderRadius: 999,
+                        padding: "1px 8px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {list.length}
+                    </span>
+                    <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 600, color: tokens.muted }}>
+                      {formatPLN(total)}
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 8,
+                    background: tokens.bg,
+                    borderRadius: 12,
+                    minHeight: 60,
+                    padding: 4,
+                  }}
+                >
+                  {list.length === 0 ? (
+                    <p style={{ fontSize: 12.5, color: tokens.muted, padding: "12px 8px", margin: 0 }}>
+                      Brak leadów
+                    </p>
+                  ) : (
+                    <AnimatePresence initial={false}>
+                      {list.map((l) => (
+                        <motion.button
+                          key={l.id}
+                          layout={!reduce}
+                          onClick={() => openLead(l.id)}
+                          initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+                          whileHover={reduce ? undefined : { scale: 1.02, y: -2 }}
+                          transition={
+                            reduce ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 32 }
+                          }
+                          style={{
+                            textAlign: "left",
+                            background: tokens.card,
+                            border: `1px solid ${tokens.border}`,
+                            borderRadius: 12,
+                            padding: "12px 13px",
+                            cursor: "pointer",
+                            display: "grid",
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontSize: 14, fontWeight: 600 }}>
+                            {l.contacts?.name || "Bez nazwy"}
+                          </div>
+                          {l.contacts?.company && (
+                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{l.contacts.company}</div>
+                          )}
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <span style={{ fontSize: 11.5, color: tokens.muted }}>
+                              {l.source ? `📋 ${l.source}` : "ręcznie"}
+                            </span>
+                            {Number(l.value) > 0 && (
+                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(l.value)}</span>
+                            )}
+                          </div>
+                        </motion.button>
+                      ))}
+                    </AnimatePresence>
                   )}
-                  {c.email && (
-                    <div style={{ fontSize: 11.5, color: tokens.muted }}>{c.email}</div>
-                  )}
-                </motion.button>
-              ))}
-            </AnimatePresence>
-          </div>
-        )
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <ContactTable contacts={contacts} onRowClick={openContact} />
+          <LeadTable leads={leads} onRowClick={openLead} />
         </div>
       )}
 
       {showAdd && (
-        <AddContactModal
+        <AddLeadModal
           onClose={() => setShowAdd(false)}
-          onCreated={(c) => {
-            setContacts((list) => [c, ...list]);
+          onCreated={() => {
             setShowAdd(false);
+            load(filters);
           }}
         />
       )}
@@ -192,18 +279,22 @@ export default function PipelinePage() {
   );
 }
 
-function AddContactModal({
+// Ręczne dodanie leada: tworzy (lub reużywa po e-mailu) kontakt, a potem lead.
+function AddLeadModal({
   onClose,
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: (c: Contact) => void;
+  onCreated: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const { stages } = useStages();
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [value, setValue] = useState("");
+  const [stage, setStage] = useState<Stage>(stages[0]?.key ?? "new");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -219,25 +310,54 @@ function AddContactModal({
       setSaving(false);
       return;
     }
-    // Faza 9.1: kontakt to sama tożsamość. Tworzenie leada (etap/wartość/
-    // źródło) dochodzi z widokiem leadów w kolejnych fazach.
-    const { data, error } = await supabase
+
+    // Kontakt: utwórz, a przy kolizji e-maila (unique owner,email) reużyj.
+    const cleanEmail = email.trim() || null;
+    let contactId: string | null = null;
+    const { data: created, error: cErr } = await supabase
       .from("contacts")
       .insert({
         owner: user.id,
         name: name.trim(),
         company: company.trim() || null,
-        email: email.trim() || null,
+        email: cleanEmail,
         phone: phone.trim() || null,
       })
-      .select()
+      .select("id")
       .single();
-    setSaving(false);
-    if (error) {
-      setError("Nie udało się zapisać (czy e-mail nie jest już użyty?).");
+
+    if (created) {
+      contactId = created.id;
+    } else if (cErr && cleanEmail) {
+      const { data: existing } = await supabase
+        .from("contacts")
+        .select("id")
+        .eq("owner", user.id)
+        .eq("email", cleanEmail)
+        .maybeSingle();
+      contactId = existing?.id ?? null;
+    }
+
+    if (!contactId) {
+      setSaving(false);
+      setError("Nie udało się zapisać kontaktu.");
       return;
     }
-    if (data) onCreated(data as Contact);
+
+    const { error: lErr } = await supabase.from("leads").insert({
+      owner: user.id,
+      contact_id: contactId,
+      stage,
+      value: value ? Number(value) : 0,
+      source: "ręcznie",
+    });
+
+    setSaving(false);
+    if (lErr) {
+      setError("Nie udało się zapisać leada.");
+      return;
+    }
+    onCreated();
   }
 
   return (
@@ -264,7 +384,7 @@ function AddContactModal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Nowy kontakt</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Nowy lead</h2>
           <button
             onClick={onClose}
             aria-label="Zamknij"
@@ -296,6 +416,20 @@ function AddContactModal({
             </Field>
             <Field label="Telefon">
               <input value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
+            </Field>
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <Field label="Wartość (zł)">
+              <input type="number" value={value} onChange={(e) => setValue(e.target.value)} style={inputStyle} />
+            </Field>
+            <Field label="Etap">
+              <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} style={inputStyle}>
+                {stages.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
             </Field>
           </div>
 

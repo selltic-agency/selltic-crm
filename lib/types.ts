@@ -47,6 +47,20 @@ export type Lead = {
   updated_at: string;
 };
 
+// Lead złączony z danymi kontaktu (do lejka i tabeli — Faza 9.4).
+export type LeadContact = {
+  id: string;
+  name: string | null;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  props: Record<string, string>;
+};
+
+export type LeadWithContact = Lead & {
+  contacts: LeadContact | null;
+};
+
 // Flaga potencjalnego duplikatu kontaktu (Faza 9.2) — surfaced w UI w 9.3.
 export type DuplicateFlag = {
   id: string;
