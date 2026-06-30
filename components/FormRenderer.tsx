@@ -5,7 +5,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  AnimatePresence,
+  motion,
+  useAnimationControls,
+  useReducedMotion,
+} from "framer-motion";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import {
   type FormSchema,
@@ -13,10 +18,19 @@ import {
   NEXT,
   SUBMIT,
   googleFontHref,
+  isTextInput,
+  validateStepValue,
 } from "@/lib/forms";
+import {
+  COUNTRY_PREFIXES,
+  DEFAULT_PHONE_PREFIX,
+  splitPhone,
+} from "@/lib/phone";
 import { useIsMobile } from "@/lib/responsive";
 
 export type Answers = Record<string, string | string[]>;
+
+const ERROR_COLOR = "#EB5757";
 
 type Props = {
   form: FormSchema;
@@ -28,13 +42,12 @@ type Props = {
   preview?: boolean;
 };
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Props) {
   const steps = form.steps ?? [];
   const theme = form.theme;
   const isMobile = useIsMobile(680);
   const reduce = useReducedMotion();
+  const shake = useAnimationControls();
 
   // Sprężyste przejście (lub natychmiastowe przy prefers-reduced-motion).
   const spring = reduce
@@ -46,6 +59,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   const [answers, setAnswers] = useState<Answers>({});
   const [dir, setDir] = useState<"fwd" | "back">("fwd");
   const [error, setError] = useState<string | null>(null);
+  const [phonePrefix, setPhonePrefix] = useState<string>(DEFAULT_PHONE_PREFIX);
   const submittedRef = useRef(false);
 
   // Wstrzyknij arkusz Google Fonts dla wybranej czcionki.
@@ -83,6 +97,16 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   );
   const currentIndex = steps.findIndex((s) => s.id === current?.id);
   const progress = steps.length > 1 ? (currentIndex / (steps.length - 1)) * 100 : 0;
+
+  // Inicjalizuj prefiks telefonu przy wejściu na krok „phone”
+  // (z zapisanej odpowiedzi lub domyślnego prefiksu kroku).
+  useEffect(() => {
+    if (current?.type === "phone") {
+      const stored = (answers[current.id] as string) || "";
+      const { prefix } = splitPhone(stored, current.phonePrefix || DEFAULT_PHONE_PREFIX);
+      setPhonePrefix(prefix);
+    }
+  }, [current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setAnswer = useCallback(
     (val: string | string[]) => {
@@ -127,18 +151,29 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
     [steps, currentIndex, current, submit]
   );
 
+  // Waliduje bieżące pole tekstowe. Ustawia komunikat błędu i (opcjonalnie)
+  // uruchamia animację „shake”. Zwraca true gdy pole jest poprawne.
+  const validateCurrent = useCallback(
+    (withShake: boolean) => {
+      if (!current || (!isTextInput(current.type) && current.type !== "phone")) return true;
+      const v = (answers[current.id] as string) || "";
+      const msg = validateStepValue(current, v);
+      setError(msg);
+      if (msg && withShake && !reduce) {
+        shake.start({
+          x: [0, -8, 8, -6, 6, -3, 3, 0],
+          transition: { duration: 0.4 },
+        });
+      }
+      return !msg;
+    },
+    [current, answers, reduce, shake]
+  );
+
   const advance = useCallback(() => {
     if (!current) return;
-    // Walidacja
-    if (current.type === "email") {
-      const v = (answers[current.id] as string) || "";
-      if (current.required && !v.trim()) return setError("To pole jest wymagane.");
-      if (v.trim() && !EMAIL_RE.test(v.trim())) return setError("Podaj poprawny e-mail.");
-    }
-    if ((current.type === "short_text" || current.type === "long_text") && current.required) {
-      const v = (answers[current.id] as string) || "";
-      if (!v.trim()) return setError("To pole jest wymagane.");
-    }
+    // Walidacja (blokuje dalsze przejście dla pól tekstowych).
+    if (!validateCurrent(true)) return;
 
     // Routing
     let target = current.next || NEXT;
@@ -148,7 +183,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
       if (opt) target = opt.next || NEXT;
     }
     resolveTarget(target);
-  }, [current, answers, resolveTarget]);
+  }, [current, answers, resolveTarget, validateCurrent]);
 
   const back = useCallback(() => {
     setHistory((h) => {
@@ -352,34 +387,77 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
           )}
 
           {/* Pola wg typu */}
-          {current.type === "short_text" && (
-            <input
-              autoFocus
-              value={(answers[current.id] as string) || ""}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder={current.placeholder}
-              style={fieldStyle(text)}
-            />
-          )}
-          {current.type === "email" && (
-            <input
-              autoFocus
-              type="email"
-              value={(answers[current.id] as string) || ""}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder={current.placeholder}
-              style={fieldStyle(text)}
-            />
-          )}
-          {current.type === "long_text" && (
-            <textarea
-              autoFocus
-              rows={4}
-              value={(answers[current.id] as string) || ""}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder={current.placeholder}
-              style={{ ...fieldStyle(text), resize: "vertical" }}
-            />
+          {(isTextInput(current.type) || current.type === "phone") && (
+            <motion.div animate={shake}>
+              {current.type === "phone" && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <select
+                    value={phonePrefix}
+                    onChange={(e) => {
+                      const prefix = e.target.value;
+                      setPhonePrefix(prefix);
+                      const local = splitPhone(
+                        (answers[current.id] as string) || "",
+                        prefix
+                      ).local;
+                      setAnswer(local.trim() ? `${prefix} ${local}` : "");
+                    }}
+                    aria-label="Prefiks kraju"
+                    style={{ ...fieldStyle(text, !!error), width: "auto", flexShrink: 0 }}
+                  >
+                    {COUNTRY_PREFIXES.map((p) => (
+                      <option key={p.iso} value={p.code}>
+                        {p.flag} {p.code}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    autoFocus
+                    type="tel"
+                    value={splitPhone((answers[current.id] as string) || "", phonePrefix).local}
+                    onChange={(e) => {
+                      const local = e.target.value;
+                      setAnswer(local.trim() ? `${phonePrefix} ${local}` : "");
+                    }}
+                    onBlur={() => validateCurrent(false)}
+                    placeholder={current.placeholder}
+                    style={fieldStyle(text, !!error)}
+                  />
+                </div>
+              )}
+              {current.type === "short_text" && (
+                <input
+                  autoFocus
+                  value={(answers[current.id] as string) || ""}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  onBlur={() => validateCurrent(false)}
+                  placeholder={current.placeholder}
+                  style={fieldStyle(text, !!error)}
+                />
+              )}
+              {current.type === "email" && (
+                <input
+                  autoFocus
+                  type="email"
+                  value={(answers[current.id] as string) || ""}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  onBlur={() => validateCurrent(false)}
+                  placeholder={current.placeholder}
+                  style={fieldStyle(text, !!error)}
+                />
+              )}
+              {current.type === "long_text" && (
+                <textarea
+                  autoFocus
+                  rows={4}
+                  value={(answers[current.id] as string) || ""}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  onBlur={() => validateCurrent(false)}
+                  placeholder={current.placeholder}
+                  style={{ ...fieldStyle(text, !!error), resize: "vertical" }}
+                />
+              )}
+            </motion.div>
           )}
 
           {current.type === "single_choice" && (
@@ -419,7 +497,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
           )}
 
           {error && (
-            <p style={{ color: "#E5484D", fontSize: 14, margin: "10px 0 0" }}>{error}</p>
+            <p style={{ color: ERROR_COLOR, fontSize: 14, margin: "10px 0 0" }}>{error}</p>
           )}
 
           {/* Przyciski akcji (nie dla single_choice ani end) */}
@@ -444,13 +522,13 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   );
 }
 
-function fieldStyle(text: string): React.CSSProperties {
+function fieldStyle(text: string, invalid = false): React.CSSProperties {
   return {
     width: "100%",
     boxSizing: "border-box",
     padding: "14px 16px",
     fontSize: 17,
-    border: "1px solid rgba(0,0,0,0.15)",
+    border: invalid ? `1.5px solid ${ERROR_COLOR}` : "1px solid rgba(0,0,0,0.15)",
     borderRadius: 12,
     background: "rgba(255,255,255,0.8)",
     color: text,

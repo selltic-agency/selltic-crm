@@ -28,7 +28,8 @@ import {
 } from "recharts";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, formatPLN } from "@/lib/ui";
-import { type Contact, STAGES } from "@/lib/types";
+import { type Contact } from "@/lib/types";
+import { useStages } from "@/lib/stages";
 
 type Kpis = {
   contacts: number;
@@ -49,6 +50,7 @@ const SOURCE_COLORS = [
 
 export default function AnalyticsPage() {
   const supabase = useMemo(() => createClient(), []);
+  const { stages } = useStages();
   const [loading, setLoading] = useState(true);
   const [kpis, setKpis] = useState<Kpis>({ contacts: 0, conversion: 0, won: 0, wonValue: 0 });
   const [perDay, setPerDay] = useState<{ label: string; value: number }[]>([]);
@@ -76,7 +78,8 @@ export default function AnalyticsPage() {
 
     // ── KPI ──────────────────────────────────────────────────────────────
     const total = contacts.length;
-    const won = contacts.filter((c) => c.stage === "won");
+    const wonKeys = stages.filter((s) => s.is_won).map((s) => s.key);
+    const won = contacts.filter((c) => wonKeys.includes(c.stage));
     const wonValue = won.reduce((sum, c) => sum + Number(c.value || 0), 0);
     setKpis({
       contacts: total,
@@ -106,7 +109,7 @@ export default function AnalyticsPage() {
 
     // ── Kontakty wg etapu ────────────────────────────────────────────────
     setPerStage(
-      STAGES.map((s) => ({
+      stages.map((s) => ({
         label: s.label,
         value: contacts.filter((c) => c.stage === s.key).length,
         color: s.color,
@@ -126,7 +129,7 @@ export default function AnalyticsPage() {
     );
 
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, stages]);
 
   useEffect(() => {
     load();

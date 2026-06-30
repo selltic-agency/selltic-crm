@@ -6,7 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
-import { type Contact, stageMeta } from "@/lib/types";
+import { type Contact } from "@/lib/types";
+import { useStages } from "@/lib/stages";
 
 type Hit = Pick<Contact, "id" | "name" | "email" | "company" | "stage">;
 
@@ -18,6 +19,7 @@ export default function GlobalSearch({
   fullWidth?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const { stageMeta } = useStages();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [open, setOpen] = useState(false);

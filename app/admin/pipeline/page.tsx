@@ -13,12 +13,14 @@ import {
   ghostButton,
   formatPLN,
 } from "@/lib/ui";
-import { type Contact, type Stage, STAGES } from "@/lib/types";
+import { type Contact, type Stage } from "@/lib/types";
+import { useStages } from "@/lib/stages";
 import ContactDrawer from "@/components/ContactDrawer";
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
+  const { stages } = useStages();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawerContact, setDrawerContact] = useState<string | null>(null);
@@ -39,16 +41,14 @@ export default function PipelinePage() {
   }, [load]);
 
   const byStage = useMemo(() => {
-    const map: Record<Stage, Contact[]> = {
-      new: [],
-      contact: [],
-      offer: [],
-      won: [],
-      lost: [],
-    };
-    for (const c of contacts) (map[c.stage] ?? map.new).push(c);
+    const map: Record<Stage, Contact[]> = {};
+    for (const s of stages) map[s.key] = [];
+    for (const c of contacts) {
+      if (!map[c.stage]) map[c.stage] = [];
+      map[c.stage].push(c);
+    }
     return map;
-  }, [contacts]);
+  }, [contacts, stages]);
 
   // Po zamknięciu panelu odśwież (etap mógł się zmienić w drawerze).
   function closeDrawer() {
@@ -83,14 +83,14 @@ export default function PipelinePage() {
           className="selltic-scroll-x"
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${STAGES.length}, minmax(200px, 1fr))`,
+            gridTemplateColumns: `repeat(${stages.length}, minmax(200px, 1fr))`,
             gap: 14,
             overflowX: "auto",
             paddingBottom: 8,
           }}
         >
-          {STAGES.map((s) => {
-            const list = byStage[s.key];
+          {stages.map((s) => {
+            const list = byStage[s.key] ?? [];
             const total = list.reduce((sum, c) => sum + Number(c.value || 0), 0);
             return (
               <div key={s.key} style={{ minWidth: 220 }}>
@@ -214,12 +214,13 @@ function AddContactModal({
   onCreated: (c: Contact) => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const { stages } = useStages();
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [value, setValue] = useState("");
-  const [stage, setStage] = useState<Stage>("new");
+  const [stage, setStage] = useState<Stage>(stages[0]?.key ?? "new");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -321,7 +322,7 @@ function AddContactModal({
             </Field>
             <Field label="Etap">
               <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} style={inputStyle}>
-                {STAGES.map((s) => (
+                {stages.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
                   </option>

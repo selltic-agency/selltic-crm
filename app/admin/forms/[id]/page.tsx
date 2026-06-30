@@ -15,6 +15,7 @@ import {
   Type,
   AlignLeft,
   AtSign,
+  Phone,
   CircleDot,
   ListChecks,
   MessageSquare,
@@ -28,16 +29,21 @@ import {
   type Step,
   type StepType,
   type FormStatus,
+  type FieldValidation,
   NEXT,
   SUBMIT,
   STEP_TYPES,
   FONTS,
+  VALIDATION_PRESETS,
   blankStep,
   newStepId,
   isChoice,
   isTextInput,
   stepTypeLabel,
+  detectPreset,
+  hasValidationRules,
 } from "@/lib/forms";
+import { COUNTRY_PREFIXES, DEFAULT_PHONE_PREFIX } from "@/lib/phone";
 import FormRenderer from "@/components/FormRenderer";
 import { useToast } from "@/components/Toast";
 
@@ -46,6 +52,7 @@ const TYPE_ICON: Record<StepType, typeof Type> = {
   short_text: Type,
   long_text: AlignLeft,
   email: AtSign,
+  phone: Phone,
   single_choice: CircleDot,
   multi_choice: ListChecks,
   statement: MessageSquare,
@@ -511,6 +518,40 @@ function StepEditor({
             />
             Pole wymagane
           </label>
+          <ValidationEditor step={step} onPatch={onPatch} />
+        </>
+      )}
+
+      {step.type === "phone" && (
+        <>
+          <Field label="Placeholder">
+            <input value={step.placeholder ?? ""} onChange={(e) => onPatch({ placeholder: e.target.value })} style={inputStyle} />
+          </Field>
+          <Field label="Domyślny prefiks kraju">
+            <select
+              value={step.phonePrefix ?? DEFAULT_PHONE_PREFIX}
+              onChange={(e) => onPatch({ phonePrefix: e.target.value })}
+              style={inputStyle}
+            >
+              {COUNTRY_PREFIXES.map((p) => (
+                <option key={p.iso} value={p.code}>
+                  {p.flag} {p.name} ({p.code})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14, fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={!!step.required}
+              onChange={(e) => onPatch({ required: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: tokens.accent }}
+            />
+            Pole wymagane
+          </label>
+          <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>
+            Numer telefonu jest walidowany automatycznie (8–15 cyfr z prefiksem).
+          </p>
         </>
       )}
 
@@ -583,6 +624,117 @@ function OptionsEditor({
       <button onClick={add} style={{ ...ghostButton, justifySelf: "start", display: "flex", alignItems: "center", gap: 6, padding: "7px 12px" }}>
         <Plus size={14} /> Dodaj opcję
       </button>
+    </div>
+  );
+}
+
+/* ── Edytor walidacji (pola tekstowe) ───────────────────────── */
+function ValidationEditor({
+  step,
+  onPatch,
+}: {
+  step: Step;
+  onPatch: (patch: Partial<Step>) => void;
+}) {
+  const v = step.validation;
+  const preset = detectPreset(v);
+
+  // Scal częściową zmianę walidacji; usuń obiekt, gdy nie ma już reguł.
+  function setV(patch: Partial<FieldValidation>) {
+    const next: FieldValidation = { ...(v ?? {}), ...patch };
+    // Usuń klucze z wartością undefined.
+    (Object.keys(next) as (keyof FieldValidation)[]).forEach((k) => {
+      if (next[k] === undefined) delete next[k];
+    });
+    onPatch({ validation: hasValidationRules(next) || next.customMessage ? next : undefined });
+  }
+
+  function choosePreset(key: string) {
+    if (key === "none") {
+      setV({ pattern: undefined, customMessage: undefined });
+      return;
+    }
+    if (key === "custom") {
+      // Zachowaj istniejący wzorzec lub zacznij od pustego.
+      setV({ pattern: v?.pattern ?? "" });
+      return;
+    }
+    const p = VALIDATION_PRESETS.find((x) => x.key === key);
+    if (p) setV({ pattern: p.pattern, customMessage: p.message });
+  }
+
+  // Pole liczbowe (min/max) sensowne tylko dla krótkiego tekstu; długość dla
+  // wszystkich pól tekstowych.
+  const numInput = (
+    val: number | undefined,
+    onChange: (n: number | undefined) => void,
+    placeholder: string
+  ) => (
+    <input
+      type="number"
+      value={val ?? ""}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+      style={inputStyle}
+    />
+  );
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 12,
+        padding: 12,
+        borderRadius: 12,
+        border: `1px solid ${tokens.border}`,
+        background: tokens.bg,
+      }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 700 }}>Walidacja</span>
+
+      <Field label="Reguła">
+        <select value={preset} onChange={(e) => choosePreset(e.target.value)} style={inputStyle}>
+          {VALIDATION_PRESETS.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {preset === "custom" && (
+        <>
+          <Field label="Wyrażenie regularne">
+            <input
+              value={v?.pattern ?? ""}
+              onChange={(e) => setV({ pattern: e.target.value })}
+              placeholder="np. ^\\d{2}-\\d{3}$"
+              style={{ ...inputStyle, fontFamily: "monospace" }}
+            />
+          </Field>
+          <Field label="Komunikat błędu">
+            <input
+              value={v?.customMessage ?? ""}
+              onChange={(e) => setV({ customMessage: e.target.value || undefined })}
+              placeholder="Nieprawidłowy format."
+              style={inputStyle}
+            />
+          </Field>
+        </>
+      )}
+
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Min. długość">
+            {numInput(v?.minLength, (n) => setV({ minLength: n }), "—")}
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Maks. długość">
+            {numInput(v?.maxLength, (n) => setV({ maxLength: n }), "—")}
+          </Field>
+        </div>
+      </div>
     </div>
   );
 }

@@ -23,8 +23,8 @@ import {
   type Activity,
   type Contact,
   type Task,
-  stageMeta,
 } from "@/lib/types";
+import { useStages } from "@/lib/stages";
 import ContactDrawer from "@/components/ContactDrawer";
 
 const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
@@ -46,6 +46,7 @@ const QUICK = [
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
+  const { stageMeta } = useStages();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<
