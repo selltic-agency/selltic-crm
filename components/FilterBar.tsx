@@ -1,4 +1,4 @@
-// components/FilterBar.tsx — pasek filtrowania kontaktów (Faza 8.4).
+// components/FilterBar.tsx — pasek filtrowania dealów (Faza 8.4 / 10).
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -17,14 +17,13 @@ type FieldDef = {
   options?: string[];
 };
 
-// Faza 9.4: filtry lejka rozdzielone na poziom LEADA i poziom KONTAKTU.
-const LEAD_FIELDS: FieldDef[] = [
+// Faza 10: deal to samodzielny rekord — pola pipeline'u i tożsamości żyją
+// razem na jednym rekordzie, więc lista pól filtrów jest płaska.
+const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
   { key: "stage", label: "Etap", type: "stage" },
   { key: "value", label: "Wartość", type: "value" },
   { key: "source", label: "Źródło", type: "source" },
   { key: "opened_at", label: "Data otwarcia", type: "date" },
-];
-const CONTACT_BUILT_IN_FIELDS: FieldDef[] = [
   { key: "name", label: "Nazwa", type: "text" },
   { key: "email", label: "E-mail", type: "text" },
   { key: "phone", label: "Telefon", type: "text" },
@@ -33,10 +32,8 @@ const CONTACT_BUILT_IN_FIELDS: FieldDef[] = [
 
 export default function FilterBar({
   onFilterChange,
-  scope = "all",
 }: {
   onFilterChange: (filters: Filter[]) => void;
-  scope?: "all" | "lead" | "contact";
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -93,22 +90,16 @@ export default function FilterBar({
     router.replace(`${pathname}?${params.toString()}`);
   };
 
-  // Pola kontaktu = wbudowane + właściwości własne (props).
-  const contactFields = useMemo(() => {
+  // Pola deala = wbudowane + właściwości własne (props).
+  const allFields = useMemo(() => {
     const custom: FieldDef[] = propDefs.map((p) => ({
       key: p.key,
       label: p.key,
       type: p.type,
       options: p.options || undefined,
     }));
-    return [...CONTACT_BUILT_IN_FIELDS, ...custom];
+    return [...DEAL_BUILT_IN_FIELDS, ...custom];
   }, [propDefs]);
-
-  const allFields = useMemo(() => {
-    if (scope === "lead") return LEAD_FIELDS;
-    if (scope === "contact") return contactFields;
-    return [...LEAD_FIELDS, ...contactFields];
-  }, [contactFields, scope]);
 
   const removeFilter = (index: number) => {
     updateFilters(filters.filter((_, i) => i !== index));
@@ -176,12 +167,7 @@ export default function FilterBar({
                 padding: 6,
               }}
             >
-              {scope !== "contact" && (
-                <FieldGroup label="Lead" fields={LEAD_FIELDS} onPick={addFilter} />
-              )}
-              {scope !== "lead" && (
-                <FieldGroup label="Kontakt" fields={contactFields} onPick={addFilter} />
-              )}
+              <FieldGroup label="Deal" fields={allFields} onPick={addFilter} />
             </div>
           )}
         </div>

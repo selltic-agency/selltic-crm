@@ -1,6 +1,6 @@
-// app/admin/pipeline/page.tsx — lejek sprzedaży (kanban / tabela) na LEADACH.
-// Faza 9.4: karty/wiersze to leady, złączone z danymi kontaktu. Klik prowadzi
-// na stronę leada (/admin/leads/[id]).
+// app/admin/pipeline/page.tsx — lejek sprzedaży (kanban / tabela) na DEALACH.
+// Faza 10: karty/wiersze to deale, samodzielne rekordy (tożsamość + szansa
+// sprzedaży razem). Klik prowadzi na stronę deala (/admin/leads/[id]).
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -15,20 +15,18 @@ import {
   ghostButton,
   formatPLN,
 } from "@/lib/ui";
-import { type LeadWithContact, type Stage } from "@/lib/types";
+import { type Deal, type Stage } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import LeadTable from "@/components/LeadTable";
 import FilterBar from "@/components/FilterBar";
 import { Filter, buildFilterQuery } from "@/lib/filters";
-
-const LEAD_SELECT = "*, contacts!inner(id, name, company, email, phone, props)";
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
   const router = useRouter();
   const { stages } = useStages();
-  const [leads, setLeads] = useState<LeadWithContact[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
@@ -47,14 +45,14 @@ export default function PipelinePage() {
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
     let query = supabase
-      .from("leads")
-      .select(LEAD_SELECT)
+      .from("deals")
+      .select("*")
       .order("opened_at", { ascending: false });
 
     query = buildFilterQuery(query, activeFilters);
 
     const { data } = await query;
-    setLeads((data as LeadWithContact[]) ?? []);
+    setDeals((data as Deal[]) ?? []);
     setLoading(false);
   }, [supabase]);
 
@@ -62,17 +60,17 @@ export default function PipelinePage() {
     load(filters);
   }, [load, filters]);
 
-  const openLead = (id: string) => router.push(`/admin/leads/${id}`);
+  const openDeal = (id: string) => router.push(`/admin/leads/${id}`);
 
   const byStage = useMemo(() => {
-    const map: Record<Stage, LeadWithContact[]> = {};
+    const map: Record<Stage, Deal[]> = {};
     for (const s of stages) map[s.key] = [];
-    for (const l of leads) {
-      if (!map[l.stage]) map[l.stage] = [];
-      map[l.stage].push(l);
+    for (const d of deals) {
+      if (!map[d.stage]) map[d.stage] = [];
+      map[d.stage].push(d);
     }
     return map;
-  }, [leads, stages]);
+  }, [deals, stages]);
 
   return (
     <div>
@@ -130,7 +128,7 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      <FilterBar onFilterChange={setFilters} scope="lead" />
+      <FilterBar onFilterChange={setFilters} />
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
@@ -147,7 +145,7 @@ export default function PipelinePage() {
         >
           {stages.map((s) => {
             const list = byStage[s.key] ?? [];
-            const total = list.reduce((sum, l) => sum + Number(l.value || 0), 0);
+            const total = list.reduce((sum, d) => sum + Number(d.value || 0), 0);
             return (
               <div key={s.key} style={{ minWidth: 220 }}>
                 <div
@@ -214,11 +212,11 @@ export default function PipelinePage() {
                     </p>
                   ) : (
                     <AnimatePresence initial={false}>
-                      {list.map((l) => (
+                      {list.map((d) => (
                         <motion.button
-                          key={l.id}
+                          key={d.id}
                           layout={!reduce}
-                          onClick={() => openLead(l.id)}
+                          onClick={() => openDeal(d.id)}
                           initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
@@ -238,17 +236,17 @@ export default function PipelinePage() {
                           }}
                         >
                           <div style={{ fontSize: 14, fontWeight: 600 }}>
-                            {l.contacts?.name || "Bez nazwy"}
+                            {d.name || "Bez nazwy"}
                           </div>
-                          {l.contacts?.company && (
-                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{l.contacts.company}</div>
+                          {d.company && (
+                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{d.company}</div>
                           )}
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                             <span style={{ fontSize: 11.5, color: tokens.muted }}>
-                              {l.source ? `📋 ${l.source}` : "ręcznie"}
+                              {d.source ? `📋 ${d.source}` : "ręcznie"}
                             </span>
-                            {Number(l.value) > 0 && (
-                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(l.value)}</span>
+                            {Number(d.value) > 0 && (
+                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(d.value)}</span>
                             )}
                           </div>
                         </motion.button>
@@ -262,7 +260,7 @@ export default function PipelinePage() {
         </div>
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <LeadTable leads={leads} onRowClick={openLead} />
+          <LeadTable leads={deals} onRowClick={openDeal} />
         </div>
       )}
 
@@ -279,7 +277,7 @@ export default function PipelinePage() {
   );
 }
 
-// Ręczne dodanie leada: tworzy (lub reużywa po e-mailu) kontakt, a potem lead.
+// Ręczne dodanie deala: jeden samodzielny rekord (tożsamość + szansa sprzedaży).
 function AddLeadModal({
   onClose,
   onCreated,
@@ -312,50 +310,20 @@ function AddLeadModal({
       return;
     }
 
-    // Kontakt: utwórz, a przy kolizji e-maila (unique owner,email) reużyj.
-    const cleanEmail = email.trim() || null;
-    let contactId: string | null = null;
-    const { data: created, error: cErr } = await supabase
-      .from("contacts")
-      .insert({
-        owner: user.id,
-        name: name.trim(),
-        company: company.trim() || null,
-        email: cleanEmail,
-        phone: phone.trim() || null,
-      })
-      .select("id")
-      .single();
-
-    if (created) {
-      contactId = created.id;
-    } else if (cErr && cleanEmail) {
-      const { data: existing } = await supabase
-        .from("contacts")
-        .select("id")
-        .eq("owner", user.id)
-        .eq("email", cleanEmail)
-        .maybeSingle();
-      contactId = existing?.id ?? null;
-    }
-
-    if (!contactId) {
-      setSaving(false);
-      setError(cErr?.message ? `Nie udało się zapisać kontaktu: ${cErr.message}` : "Nie udało się zapisać kontaktu.");
-      return;
-    }
-
-    const { error: lErr } = await supabase.from("leads").insert({
+    const { error: dErr } = await supabase.from("deals").insert({
       owner: user.id,
-      contact_id: contactId,
+      name: name.trim(),
+      company: company.trim() || null,
+      email: email.trim() || null,
+      phone: phone.trim() || null,
       stage,
       value: value ? Number(value) : 0,
       source: "ręcznie",
     });
 
     setSaving(false);
-    if (lErr) {
-      setError(`Nie udało się zapisać leada: ${lErr.message}`);
+    if (dErr) {
+      setError(`Nie udało się zapisać deala: ${dErr.message}`);
       return;
     }
     onCreated();

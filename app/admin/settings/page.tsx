@@ -135,13 +135,13 @@ function StagesTab() {
     reload();
   }
 
-  // Usuwanie: jeśli etap ma kontakty — wymagaj wskazania etapu zastępczego.
+  // Usuwanie: jeśli etap ma deale — wymagaj wskazania etapu zastępczego.
   async function confirmDelete(replacementKey: string) {
     if (!deleting) return;
     if (replacementKey) {
-      // Faza 9.1: etap żyje teraz na leadach — przepinamy leady, nie kontakty.
+      // Faza 10: etap żyje na dealach — przepinamy je przy usuwaniu etapu.
       await supabase
-        .from("leads")
+        .from("deals")
         .update({ stage: replacementKey })
         .eq("stage", deleting.key);
     }
@@ -309,9 +309,9 @@ function DeleteStageDialog({
 
   useEffect(() => {
     (async () => {
-      // Faza 9.1: liczymy leady na tym etapie (etap przeniesiony z kontaktów).
+      // Faza 10: liczymy deale na tym etapie.
       const { count: c } = await supabase
-        .from("leads")
+        .from("deals")
         .select("id", { count: "exact", head: true })
         .eq("stage", stage.key);
       setCount(c ?? 0);

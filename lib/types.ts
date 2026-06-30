@@ -21,9 +21,10 @@ export type PropertyType = "text" | "number" | "date" | "select";
 // „Deal Owner” — prosty ręczny przydział (bez modelu workspace z Fazy 11).
 export type Assignee = "dominik" | "kuba";
 
-// Kontakt = trwała tożsamość osoby/firmy (Faza 9.1). Etap/wartość/źródło/
-// formularz przeniesione do `Lead` — jeden kontakt może mieć wiele leadów.
-export type Contact = {
+// Deal = osoba/firma, która już okazała zainteresowanie (Faza 10) — tożsamość
+// i szansa sprzedaży połączone w jeden, samodzielny rekord. Każde zgłoszenie
+// formularza tworzy NOWY deal (z własną kopią tożsamości).
+export type Deal = {
   id: string;
   owner: string;
   name: string | null;
@@ -31,15 +32,6 @@ export type Contact = {
   phone: string | null;
   company: string | null;
   props: Record<string, string>;
-  created_at: string;
-  updated_at: string;
-};
-
-// Lead = pojedyncza szansa sprzedaży przypięta do kontaktu (Faza 9.1).
-export type Lead = {
-  id: string;
-  owner: string;
-  contact_id: string;
   stage: Stage;
   value: number;
   source: string | null;
@@ -51,26 +43,42 @@ export type Lead = {
   updated_at: string;
 };
 
-// Lead złączony z danymi kontaktu (do lejka i tabeli — Faza 9.4).
-export type LeadContact = {
+// Prospekt = zimny lead z Google Maps (Faza 10), zanim wykaże zainteresowanie.
+// Zasilane przez zewnętrzny scraper; status ustawiany ręcznie w CRM.
+export type ProspectingStatus = "new" | "contact_attempted" | "not_interested" | "converted";
+export type WebsiteStatus = "none" | "active" | "broken" | "slow";
+
+export type Prospect = {
   id: string;
-  name: string | null;
-  company: string | null;
-  email: string | null;
+  owner: string;
+  place_id: string;
+  name: string;
   phone: string | null;
-  props: Record<string, string>;
+  website: string | null;
+  address: string | null;
+  rating: number | null;
+  review_count: number | null;
+  business_status: string | null;
+  industry: string | null;
+  city: string | null;
+  source: string;
+  prospecting_status: ProspectingStatus;
+  created_at: string;
+  last_contact_attempt_at: string | null;
+  note: string | null;
+  website_status: WebsiteStatus | null;
+  website_last_checked_at: string | null;
+  lead_score: number | null;
+  lead_score_breakdown: Record<string, unknown> | null;
+  converted_deal_id: string | null;
 };
 
-export type LeadWithContact = Lead & {
-  contacts: LeadContact | null;
-};
-
-// Flaga potencjalnego duplikatu kontaktu (Faza 9.2) — surfaced w UI w 9.3.
+// Flaga potencjalnego duplikatu deala (Faza 9.2) — surfaced w UI w 9.3.
 export type DuplicateFlag = {
   id: string;
   owner: string;
-  contact_a: string;
-  contact_b: string;
+  deal_a: string;
+  deal_b: string;
   reason: string;
   resolved: boolean;
   created_at: string;
@@ -79,8 +87,7 @@ export type DuplicateFlag = {
 export type Activity = {
   id: string;
   owner: string;
-  contact_id: string;
-  lead_id: string | null;
+  deal_id: string;
   type: ActivityType;
   body: string | null;
   meta: Record<string, unknown> | null;
@@ -90,14 +97,14 @@ export type Activity = {
 export type Task = {
   id: string;
   owner: string;
-  contact_id: string | null;
+  deal_id: string | null;
   title: string;
   due_at: string | null;
   done: boolean;
   assignee: Assignee | null;
   created_at: string;
-  // opcjonalna złączona nazwa kontaktu (z select ... contacts(name))
-  contacts?: { id: string; name: string | null } | null;
+  // opcjonalna złączona nazwa deala (z select ... deals(name))
+  deals?: { id: string; name: string | null } | null;
 };
 
 export type PropertyDef = {
@@ -115,19 +122,17 @@ export type Submission = {
   form_id: string;
   answers: Record<string, string | string[]>;
   meta: Record<string, unknown> | null;
-  contact_id: string | null;
-  lead_id: string | null;
+  deal_id: string | null;
   created_at: string;
-  // opcjonalne złączenia (z select ... forms(title), contacts(...), leads(...))
+  // opcjonalne złączenia (z select ... forms(title), deals(...))
   forms?: { id: string; title: string } | null;
-  contacts?: { id: string; name: string | null; email: string | null } | null;
-  leads?: { id: string; stage: string } | null;
+  deals?: { id: string; name: string | null; email: string | null; stage: string } | null;
 };
 
 export type Notification = {
   id: string;
   owner: string;
-  contact_id: string | null;
+  deal_id: string | null;
   type: string;
   body: string;
   read: boolean;

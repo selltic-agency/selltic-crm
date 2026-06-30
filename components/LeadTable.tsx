@@ -1,6 +1,6 @@
-// components/LeadTable.tsx — widok tabeli LEADÓW (Faza 9.4, było: ContactTable).
-// Kolumny łączą pola leada (etap, wartość, źródło, otwarcie) z polami kontaktu
-// (nazwa, firma, e-mail, telefon + właściwości własne). Klik wiersza → lead.
+// components/LeadTable.tsx — widok tabeli DEALÓW (Faza 10, było: ContactTable).
+// Deal to samodzielny rekord: kolumny tożsamości (nazwa, firma, e-mail,
+// telefon) i pipeline'u (etap, wartość, źródło, otwarcie) żyją razem.
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import { Reorder } from "framer-motion";
 import { ChevronUp, ChevronDown, Settings2, GripVertical, X } from "lucide-react";
 import { tokens, formatPLN, formatDateTime, ghostButton } from "@/lib/ui";
-import { LeadWithContact, PropertyDef } from "@/lib/types";
+import { Deal, PropertyDef } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import { createClient } from "@/lib/supabase/client";
 
@@ -26,12 +26,9 @@ type TableColumn = {
 };
 
 type LeadTableProps = {
-  leads: LeadWithContact[];
+  leads: Deal[];
   onRowClick: (id: string) => void;
 };
-
-// Pola kontaktu (czytane z lead.contacts) vs pola leada (bezpośrednio).
-const CONTACT_KEYS = new Set(["name", "company", "email", "phone"]);
 
 const BUILT_IN_COLUMNS = [
   { key: "name", label: "Nazwa", width: 180 },
@@ -102,12 +99,11 @@ export default function LeadTable({ leads, onRowClick }: LeadTableProps) {
     });
   }, [leads, sort]);
 
-  function getVal(l: LeadWithContact, key: string): string | number {
-    if (key === "value") return Number(l.value || 0);
-    if (key === "opened_at") return new Date(l.opened_at).getTime();
-    if (key === "stage" || key === "source") return (l[key] as string) || "";
-    if (CONTACT_KEYS.has(key)) return (l.contacts?.[key as "name"] as string) || "";
-    return l.contacts?.props?.[key] || "";
+  function getVal(d: Deal, key: string): string | number {
+    if (key === "value") return Number(d.value || 0);
+    if (key === "opened_at") return new Date(d.opened_at).getTime();
+    if (key in d) return (d as any)[key] || "";
+    return d.props?.[key] || "";
   }
 
   const handleSort = (key: string) => {
@@ -256,12 +252,12 @@ export default function LeadTable({ leads, onRowClick }: LeadTableProps) {
 }
 
 function renderCell(
-  l: LeadWithContact,
+  d: Deal,
   key: string,
   stageMeta: (k: string) => { color: string; label: string }
 ) {
   if (key === "stage") {
-    const meta = stageMeta(l.stage);
+    const meta = stageMeta(d.stage);
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
@@ -269,12 +265,12 @@ function renderCell(
       </div>
     );
   }
-  if (key === "value") return formatPLN(l.value);
-  if (key === "opened_at") return formatDateTime(l.opened_at);
-  if (key === "source") return l.source || "ręcznie";
-  if (key === "name") return <span style={{ fontWeight: 600 }}>{l.contacts?.name || "—"}</span>;
-  if (CONTACT_KEYS.has(key)) return (l.contacts?.[key as "company"] as string) || "—";
-  return l.contacts?.props?.[key] || "—";
+  if (key === "value") return formatPLN(d.value);
+  if (key === "opened_at") return formatDateTime(d.opened_at);
+  if (key === "source") return d.source || "ręcznie";
+  if (key === "name") return <span style={{ fontWeight: 600 }}>{d.name || "—"}</span>;
+  if (key in d) return (d as any)[key] || "—";
+  return d.props?.[key] || "—";
 }
 
 const PANEL_WIDTH = 300;

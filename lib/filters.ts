@@ -1,6 +1,5 @@
 // lib/filters.ts — pomocnik do budowania zapytań Supabase na podstawie filtrów (8.4).
 
-
 export type FilterOperator =
   | "contains"
   | "equals"
@@ -19,16 +18,13 @@ export type Filter = {
   value: any;
 };
 
-// Faza 9.4: lejek odpytuje tabelę `leads` ze złączonym (inner) `contacts`.
-// Pola leada filtrujemy bezpośrednio; pola kontaktu przez prefiks `contacts.`;
-// właściwości własne kontaktu przez `contacts.props->>klucz`.
-const LEAD_FIELDS = new Set(["stage", "value", "source", "opened_at", "created_at"]);
-const CONTACT_FIELDS = new Set(["name", "email", "phone", "company"]);
+// Faza 10: deal to samodzielny rekord (tożsamość + szansa sprzedaży w
+// jednej tabeli) — pola filtrujemy bezpośrednio, bez prefiksu join'a.
+const DEAL_FIELDS = new Set(["stage", "value", "source", "opened_at", "created_at", "name", "email", "phone", "company"]);
 
 function columnFor(field: string): string {
-  if (LEAD_FIELDS.has(field)) return field;
-  if (CONTACT_FIELDS.has(field)) return `contacts.${field}`;
-  return `contacts.props->>${field}`;
+  if (DEAL_FIELDS.has(field)) return field;
+  return `props->>${field}`;
 }
 
 /**

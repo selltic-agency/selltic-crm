@@ -22,7 +22,7 @@ import { createClient } from "@/lib/supabase/client";
 import { tokens, formatDateTime, formatPLN } from "@/lib/ui";
 import {
   type Activity,
-  type LeadWithContact,
+  type Deal,
   type Task,
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
@@ -38,7 +38,7 @@ const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
 
 const QUICK = [
   { href: "/admin/forms", label: "Nowy formularz", icon: FilePlus2 },
-  { href: "/admin/pipeline", label: "Nowy kontakt", icon: UserPlus },
+  { href: "/admin/pipeline", label: "Nowy deal", icon: UserPlus },
   { href: "/admin/tasks", label: "Nowe zadanie", icon: CheckSquare },
   { href: "/admin/analytics", label: "Analityka", icon: BarChart3 },
 ];
@@ -48,10 +48,10 @@ export default function DashboardPage() {
   const reduce = useReducedMotion();
   const router = useRouter();
   const { stages, stageMeta } = useStages();
-  const [leads, setLeads] = useState<LeadWithContact[]>([]);
+  const [leads, setLeads] = useState<Deal[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<
-    (Activity & { contacts?: { name: string | null } | null })[]
+    (Activity & { deals?: { name: string | null } | null })[]
   >([]);
   const [loading, setLoading] = useState(true);
   const openLead = (id: string) => router.push(`/admin/leads/${id}`);
@@ -67,26 +67,26 @@ export default function DashboardPage() {
 
     const [l, t, a] = await Promise.all([
       supabase
-        .from("leads")
-        .select("*, contacts!inner(id, name, company, email, phone, props)")
+        .from("deals")
+        .select("*")
         .not("stage", "in", `(${wonLost.join(",")})`)
         .order("updated_at", { ascending: false }),
       supabase
         .from("tasks")
-        .select("*, contacts(id, name)")
+        .select("*, deals(id, name)")
         .eq("done", false)
         .not("due_at", "is", null)
         .lte("due_at", end.toISOString())
         .order("due_at", { ascending: true }),
       supabase
         .from("activities")
-        .select("*, contacts(name)")
+        .select("*, deals(name)")
         .order("created_at", { ascending: false })
         .limit(8),
     ]);
-    setLeads((l.data as LeadWithContact[]) ?? []);
+    setLeads((l.data as Deal[]) ?? []);
     setTasks((t.data as Task[]) ?? []);
-    setActivities((a.data as (Activity & { contacts?: { name: string | null } | null })[]) ?? []);
+    setActivities((a.data as (Activity & { deals?: { name: string | null } | null })[]) ?? []);
     setLoading(false);
   }, [supabase, stages]);
 
@@ -198,10 +198,10 @@ export default function DashboardPage() {
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600 }}>
-                        {l.contacts?.name || "Bez nazwy"}
+                        {l.name || "Bez nazwy"}
                       </div>
                       <div style={{ fontSize: 12, color: tokens.muted }}>
-                        {l.contacts?.company || "—"}
+                        {l.company || "—"}
                       </div>
                     </div>
                     <span
@@ -295,8 +295,8 @@ export default function DashboardPage() {
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 14 }}>
                         {a.body || "—"}
-                        {a.contacts?.name ? (
-                          <span style={{ color: tokens.muted }}> · {a.contacts.name}</span>
+                        {a.deals?.name ? (
+                          <span style={{ color: tokens.muted }}> · {a.deals.name}</span>
                         ) : null}
                       </div>
                       <div style={{ fontSize: 12, color: tokens.muted }}>
