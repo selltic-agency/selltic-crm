@@ -3,8 +3,10 @@
 Read REQUIREMENTS.md, BUILD_PHASES.md, and BUILD_PHASE_8.md first for full context.
 This is a STRUCTURAL change to the data model — it touches nearly every existing
 screen (Pipeline, Contact Drawer, Dashboard, Analytics, 8.4 filters, 8.5 table/columns).
-Build sub-phases in strict order. Do NOT skip the migration step (9.1) — existing
-production data must survive this restructure.
+Build sub-phases in strict order.
+
+Note: there is no production data in the database yet, so this is a clean schema
+build, not a data migration — no backfill or zero-data-loss concerns apply.
 
 ---
 
@@ -33,9 +35,9 @@ different contact than the email did) as a potential duplicate needing manual re
 
 ---
 
-## 9.1 — Data Model Migration (do this first, do it carefully)
+## 9.1 — Data Model: Split `contacts` into `contacts` (identity) + `leads` (opportunities)
 
-**Goal: Split `contacts` into `contacts` (identity) + `leads` (opportunities), migrate existing data with zero loss.**
+**Goal: Build the target schema directly. No production data exists yet — this is a clean schema change, not a migration. Drop and recreate rather than ALTER where simpler.**
 
 ### Tasks:
 1. Create new `leads` table:
@@ -56,7 +58,7 @@ different contact than the email did) as a potential duplicate needing manual re
    create index idx_leads_owner_stage on leads (owner, stage);
    create index idx_leads_contact on leads (contact_id, opened_at desc);
    ```
-2. Slim down `contacts` table — remove `stage`, `value`, `source`, `form_id` (these move to `leads`). Keep `name`, `email`, `phone`, `company`, `props`, `owner`, timestamps. Keep the `unique (owner, email)` constraint — contacts are still deduplicated by email.
+2. Update `contacts` table — remove `stage`, `value`, `source`, `form_id` columns (these move to `leads`). Keep `name`, `email`, `phone`, `company`, `props`, `owner`, timestamps. Keep the `unique (owner, email)` constraint — contacts are still deduplicated by email. Since there's no data to preserve, just `alter table contacts drop column ...` directly (no backfill needed).
 3. Add a `lead_id` (nullable) column to `activities`, alongside the existing `contact_id` (NOT NULL, keep it). This is the key mechanic:
    - `contact_id` is ALWAYS set — every activity belongs to a contact's master timeline.
    - `lead_id` is set ONLY if the activity happened while a specific lead was open (i.e., logged via that lead's scoped timeline UI) — null means it's a contact-level-only activity (e.g. a call logged outside any lead context).
@@ -64,19 +66,15 @@ different contact than the email did) as a potential duplicate needing manual re
    alter table activities add column lead_id uuid references leads on delete set null;
    create index idx_activities_lead on activities (lead_id, created_at desc);
    ```
-4. **Migration script** (run once, in this order, inside a transaction):
-   - For every existing row in `contacts`, create one `leads` row carrying over `stage`, `value`, `source`, `form_id`, with `opened_at = contacts.created_at`. If the migrated stage `is_won` or `is_lost` (check against `pipeline_stages`), set `closed_at = contacts.updated_at`.
-   - Update every existing `activities` row: set `lead_id` = the new lead's id created above for that contact (since today everything is 1:1, all historical activity correctly belongs to that single lead AND to the contact's master timeline).
-   - Then drop `stage`, `value`, `source`, `form_id` columns from `contacts`.
-5. Update RLS policies: add `owner = auth.uid()` policy on `leads`, consistent with other tables.
-6. Update `property_defs` — these stay attached to `contacts.props` (properties describe the person/company, not the deal) UNLESS you decide some properties are deal-specific. For this phase, keep ALL existing properties as contact-level. (Lead-level custom properties can be a future phase if needed — don't build it now.)
+4. Update RLS policies: add `owner = auth.uid()` policy on `leads`, consistent with other tables.
+5. `property_defs` stay attached to `contacts.props` (properties describe the person/company, not the deal) — keep ALL properties as contact-level. (Lead-level custom properties can be a future phase if needed — don't build it now.)
+6. Update any existing code (queries, types, components) across Phases 1-8 that reads/writes `contacts.stage`, `contacts.value`, `contacts.source`, or `contacts.form_id` directly — there's no data to break, but the code referencing these columns needs to be found and updated to use `leads` instead, or the app won't build/run.
 
 ### Definition of done:
-- `leads` table exists with all historical data correctly migrated (one lead per pre-existing contact, correct stage/value/source/dates)
+- `leads` table exists with correct schema and RLS
 - `contacts` table no longer has stage/value/source/form_id
-- Every pre-9.1 activity has both `contact_id` (unchanged) and a correctly-backfilled `lead_id`
-- No data loss — spot check a few contacts manually after migration to confirm timeline and lead data match what existed before
-- RLS works identically to before (owner-scoped)
+- `activities` has the new `lead_id` column
+- App builds and runs with no references to the removed `contacts` columns anywhere in the codebase
 
 ---
 
@@ -171,26 +169,25 @@ different contact than the email did) as a potential duplicate needing manual re
 ## Build Order Summary
 
 ```
-9.1 Data migration              → MUST be first, do not skip, do not rush
-9.2 Submission flow rewrite     → depends on 9.1 (needs leads table to exist)
-9.3 Contact page UI             → depends on 9.1
-9.4 Lead page UI + Pipeline     → depends on 9.1, 9.3 (links to contact page)
-9.5 Dashboard/Analytics fixes   → depends on 9.2, 9.4 (needs leads to query correctly)
+9.1 Schema change                → do first (no data to migrate, just build it)
+9.2 Submission flow rewrite      → depends on 9.1 (needs leads table to exist)
+9.3 Contact page UI              → depends on 9.1
+9.4 Lead page UI + Pipeline      → depends on 9.1, 9.3 (links to contact page)
+9.5 Dashboard/Analytics fixes    → depends on 9.2, 9.4 (needs leads to query correctly)
 ```
 
 Recommended: do 9.1 and 9.2 in one sitting if possible (they're tightly coupled —
-a broken submission flow on top of a half-migrated schema is hard to debug), then
+a broken submission flow on top of a half-built schema is hard to debug), then
 9.3 → 9.4 → 9.5 each as their own checkpoint.
 
 ---
 
 ## Notes for Claude Code
 
-- This is the highest-risk phase so far because it changes the meaning of the
-  primary entity the rest of the app (8.4 filters, 8.5 table/columns, 8.6 saved
-  views if built) was written against. After 9.1, expect to revisit 8.4/8.5/8.6
-  code wherever it directly queries/displays `contacts.stage` or `contacts.value`
-  — those fields no longer exist on contacts.
+- This phase changes the meaning of the primary entity the rest of the app
+  (8.4 filters, 8.5 table/columns, 8.6 saved views if built) was written against.
+  After 9.1, expect to revisit 8.4/8.5/8.6 code wherever it directly queries/displays
+  `contacts.stage` or `contacts.value` — those fields no longer exist on contacts.
 - Do NOT attempt a "merge contacts" feature in this phase — duplicate flags are
   surfaced for manual awareness only. Merging two contacts (combining their leads
   and activity histories, deciding which email/phone/props win) is meaningfully
