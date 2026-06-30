@@ -1,10 +1,10 @@
 // app/admin/tasks/page.tsx — samodzielne zarządzanie zadaniami.
 // Dodawanie, oznaczanie jako zrobione / ponowne otwarcie, usuwanie.
-// Optymistyczny UI; zadania powiązane z kontaktem otwierają ContactDrawer.
+// Optymistyczny UI; zadania powiązane z kontaktem prowadzą na stronę kontaktu.
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Plus, Trash2, Clock, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -14,18 +14,18 @@ import {
   formatDateTime,
 } from "@/lib/ui";
 import type { Task } from "@/lib/types";
-import ContactDrawer from "@/components/ContactDrawer";
 import { useToast } from "@/components/Toast";
 
 export default function TasksPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
+  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
   const [adding, setAdding] = useState(false);
-  const [drawerContact, setDrawerContact] = useState<string | null>(null);
+  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -155,7 +155,7 @@ export default function TasksPage() {
                   task={t}
                   onToggle={() => toggleDone(t)}
                   onDelete={() => removeTask(t)}
-                  onOpenContact={(id) => setDrawerContact(id)}
+                  onOpenContact={openContact}
                 />
               ))}
             </div>
@@ -172,7 +172,7 @@ export default function TasksPage() {
                     task={t}
                     onToggle={() => toggleDone(t)}
                     onDelete={() => removeTask(t)}
-                    onOpenContact={(id) => setDrawerContact(id)}
+                    onOpenContact={openContact}
                   />
                 ))}
               </div>
@@ -180,16 +180,6 @@ export default function TasksPage() {
           )}
         </>
       )}
-
-      <AnimatePresence>
-        {drawerContact && (
-          <ContactDrawer
-            key="drawer"
-            contactId={drawerContact}
-            onClose={() => setDrawerContact(null)}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

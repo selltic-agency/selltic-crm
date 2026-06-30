@@ -3,8 +3,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   FilePlus2,
   UserPlus,
@@ -24,7 +25,6 @@ import {
   type Contact,
   type Task,
 } from "@/lib/types";
-import ContactDrawer from "@/components/ContactDrawer";
 
 const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
   note: StickyNote,
@@ -45,13 +45,14 @@ const QUICK = [
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
+  const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<
     (Activity & { contacts?: { name: string | null } | null })[]
   >([]);
   const [loading, setLoading] = useState(true);
-  const [drawerContact, setDrawerContact] = useState<string | null>(null);
+  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -173,7 +174,7 @@ export default function DashboardPage() {
               {contacts.slice(0, 8).map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => setDrawerContact(c.id)}
+                  onClick={() => openContact(c.id)}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -285,16 +286,6 @@ export default function DashboardPage() {
           )}
         </Card>
       </div>
-
-      <AnimatePresence>
-        {drawerContact && (
-          <ContactDrawer
-            key="drawer"
-            contactId={drawerContact}
-            onClose={() => setDrawerContact(null)}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

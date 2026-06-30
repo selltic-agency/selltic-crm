@@ -4,7 +4,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -25,7 +25,6 @@ import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
 import NotificationBell from "@/components/NotificationBell";
 import GlobalSearch from "@/components/GlobalSearch";
-import ContactDrawer from "@/components/ContactDrawer";
 
 const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
@@ -46,8 +45,11 @@ export default function Shell({
   const router = useRouter();
   const isMobile = useIsMobile(900);
   const [navOpen, setNavOpen] = useState(false);
-  const [drawerContact, setDrawerContact] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+
+  // Faza 9.3: klik w kontakt (wyszukiwarka, dzwonek) prowadzi na stronę
+  // kontaktu zamiast otwierać dawny wszystko-w-jednym panel.
+  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
 
   // Load sidebar state from localStorage
   useEffect(() => {
@@ -280,16 +282,16 @@ export default function Shell({
               >
                 S
               </span>
-              <GlobalSearch onOpenContact={setDrawerContact} fullWidth />
+              <GlobalSearch onOpenContact={openContact} fullWidth />
             </>
           ) : (
             <>
-              <GlobalSearch onOpenContact={setDrawerContact} />
+              <GlobalSearch onOpenContact={openContact} />
               <div style={{ flex: 1 }} />
             </>
           )}
 
-          <NotificationBell onOpenContact={setDrawerContact} />
+          <NotificationBell onOpenContact={openContact} />
 
           <button
             onClick={logout}
@@ -323,16 +325,6 @@ export default function Shell({
           {children}
         </main>
       </div>
-
-      <AnimatePresence>
-        {drawerContact && (
-          <ContactDrawer
-            key="drawer"
-            contactId={drawerContact}
-            onClose={() => setDrawerContact(null)}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

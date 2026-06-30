@@ -1,9 +1,10 @@
-// app/admin/pipeline/page.tsx — lejek sprzedaży (kanban).
-// 5 kolumn etapów; karty kontaktów; klik karty otwiera ContactDrawer.
+// app/admin/pipeline/page.tsx — lista kontaktów (karty / tabela).
+// Faza 9.3: klik w kontakt prowadzi na stronę kontaktu (/admin/contacts/[id]).
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Plus, X, KanbanSquare, Table } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -13,7 +14,6 @@ import {
   ghostButton,
 } from "@/lib/ui";
 import { type Contact } from "@/lib/types";
-import ContactDrawer from "@/components/ContactDrawer";
 import ContactTable from "@/components/ContactTable";
 import FilterBar from "@/components/FilterBar";
 import { Filter, buildFilterQuery } from "@/lib/filters";
@@ -21,9 +21,9 @@ import { Filter, buildFilterQuery } from "@/lib/filters";
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
+  const router = useRouter();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
-  const [drawerContact, setDrawerContact] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
@@ -59,11 +59,7 @@ export default function PipelinePage() {
     load(filters);
   }, [load, filters]);
 
-  // Po zamknięciu panelu odśwież.
-  function closeDrawer() {
-    setDrawerContact(null);
-    load(filters);
-  }
+  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
 
   return (
     <div>
@@ -144,7 +140,7 @@ export default function PipelinePage() {
                 <motion.button
                   key={c.id}
                   layout={!reduce}
-                  onClick={() => setDrawerContact(c.id)}
+                  onClick={() => openContact(c.id)}
                   initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
@@ -179,7 +175,7 @@ export default function PipelinePage() {
         )
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <ContactTable contacts={contacts} onRowClick={setDrawerContact} />
+          <ContactTable contacts={contacts} onRowClick={openContact} />
         </div>
       )}
 
@@ -192,12 +188,6 @@ export default function PipelinePage() {
           }}
         />
       )}
-
-      <AnimatePresence>
-        {drawerContact && (
-          <ContactDrawer key="drawer" contactId={drawerContact} onClose={closeDrawer} />
-        )}
-      </AnimatePresence>
     </div>
   );
 }
