@@ -1,0 +1,68 @@
+/* app/globals.css — globalne resety i drobne korekty responsywne.
+   Większość stylów jest inline w komponentach; tu trzymamy tylko to,
+   co wymaga reguł globalnych / media queries. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /* zapobiega poziomemu przewijaniu całej strony na telefonie */
+  overflow-x: hidden;
+}
+
+/* Kontrolki formularzy dziedziczą font aplikacji (Inter) zamiast systemowego. */
+input,
+button,
+textarea,
+select {
+  font-family: inherit;
+}
+
+/* Pola dotykowe nie zoomują na iOS, gdy font-size >= 16px — pilnujemy tego
+   tam, gdzie pola są mniejsze niż 16px, podbijając minimalny rozmiar na mobile. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* Obszar główny panelu — mniejszy padding na małych ekranach. */
+.selltic-main {
+  padding: 28px 24px;
+}
+
+@media (max-width: 900px) {
+  .selltic-main {
+    padding: 18px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .selltic-main {
+    padding: 14px 12px;
+  }
+}
+
+/* Cienki, dyskretny pasek przewijania dla poziomych list (np. kanban). */
+.selltic-scroll-x {
+  scrollbar-width: thin;
+}
+.selltic-scroll-x::-webkit-scrollbar {
+  height: 8px;
+}
+.selltic-scroll-x::-webkit-scrollbar-thumb {
+  background: #d5d9e2;
+  border-radius: 999px;
+}

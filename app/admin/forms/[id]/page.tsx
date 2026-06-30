@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
+import { useIsMobile } from "@/lib/responsive";
 import {
   type FormSchema,
   type Step,
@@ -57,6 +58,10 @@ export default function FormEditorPage() {
   const id = params.id;
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const isMobile = useIsMobile(900);
+  const [mobilePane, setMobilePane] = useState<"steps" | "editor" | "preview">(
+    "editor"
+  );
 
   const [schema, setSchema] = useState<FormSchema | null>(null);
   const [published, setPublished] = useState<FormSchema | null>(null);
@@ -177,16 +182,31 @@ export default function FormEditorPage() {
   const active = schema.steps.find((st) => st.id === activeId) ?? schema.steps[0];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 120px)" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: isMobile ? "auto" : "calc(100vh - 120px)",
+        minHeight: isMobile ? "calc(100vh - 130px)" : undefined,
+      }}
+    >
       {/* ── Pasek górny ─────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
         <button onClick={() => router.push("/admin/forms")} style={iconBtn} aria-label="Wróć">
           <ArrowLeft size={18} color={tokens.muted} />
         </button>
         <input
           value={schema.title}
           onChange={(e) => patchSchema({ title: e.target.value })}
-          style={{ ...inputStyle, maxWidth: 320, fontWeight: 600 }}
+          style={{ ...inputStyle, flex: isMobile ? "1 1 160px" : "0 1 320px", maxWidth: 320, fontWeight: 600 }}
         />
         <span
           style={{
@@ -219,10 +239,62 @@ export default function FormEditorPage() {
         </button>
       </div>
 
+      {/* ── Przełącznik paneli (tylko mobile) ───────────────── */}
+      {isMobile && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 6,
+            marginBottom: 12,
+          }}
+        >
+          {(
+            [
+              ["steps", "Kroki"],
+              ["editor", "Edytor"],
+              ["preview", "Podgląd"],
+            ] as ["steps" | "editor" | "preview", string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setMobilePane(key)}
+              style={{
+                padding: "9px 8px",
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                border: `1px solid ${mobilePane === key ? tokens.accent : tokens.border}`,
+                background: mobilePane === key ? tokens.accentSoft : "#fff",
+                color: mobilePane === key ? tokens.accent : tokens.muted,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* ── Trzy panele ─────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "230px 1fr 440px", gap: 14, flex: 1, minHeight: 0 }}>
+      <div
+        style={
+          isMobile
+            ? { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }
+            : { display: "grid", gridTemplateColumns: "230px 1fr 440px", gap: 14, flex: 1, minHeight: 0 }
+        }
+      >
         {/* Lewy: lista kroków */}
-        <div style={{ ...pane, position: "relative", overflowY: "auto" }}>
+        <div
+          style={{
+            ...pane,
+            position: "relative",
+            overflowY: "auto",
+            ...(isMobile
+              ? { display: mobilePane === "steps" ? "block" : "none", flex: 1, minHeight: 0 }
+              : {}),
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={paneTitle}>Kroki</span>
             <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj krok">
@@ -326,7 +398,15 @@ export default function FormEditorPage() {
         </div>
 
         {/* Środek: edytor kroku + motyw */}
-        <div style={{ ...pane, overflowY: "auto" }}>
+        <div
+          style={{
+            ...pane,
+            overflowY: "auto",
+            ...(isMobile
+              ? { display: mobilePane === "editor" ? "block" : "none", flex: 1, minHeight: 0 }
+              : {}),
+          }}
+        >
           <StepEditor
             step={active}
             steps={schema.steps}
@@ -337,7 +417,16 @@ export default function FormEditorPage() {
         </div>
 
         {/* Prawy: podgląd */}
-        <div style={{ ...pane, padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <div
+          style={{
+            ...pane,
+            padding: 0,
+            overflow: "hidden",
+            display: isMobile && mobilePane !== "preview" ? "none" : "flex",
+            flexDirection: "column",
+            ...(isMobile ? { flex: 1, minHeight: "60vh" } : {}),
+          }}
+        >
           <div style={{ padding: "10px 14px", borderBottom: `1px solid ${tokens.border}`, fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
             Podgląd na żywo
           </div>

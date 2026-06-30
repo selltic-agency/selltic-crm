@@ -78,9 +78,10 @@ export default function PipelinePage() {
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : (
         <div
+          className="selltic-scroll-x"
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${STAGES.length}, minmax(220px, 1fr))`,
+            gridTemplateColumns: `repeat(${STAGES.length}, minmax(200px, 1fr))`,
             gap: 14,
             overflowX: "auto",
             paddingBottom: 8,
@@ -290,7 +291,7 @@ function AddContactModal({
           <Field label="Firma">
             <input value={company} onChange={(e) => setCompany(e.target.value)} style={inputStyle} />
           </Field>
-          <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <Field label="E-mail">
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
             </Field>
@@ -298,7 +299,7 @@ function AddContactModal({
               <input value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
             </Field>
           </div>
-          <div style={{ display: "flex", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <Field label="Wartość (zł)">
               <input type="number" value={value} onChange={(e) => setValue(e.target.value)} style={inputStyle} />
             </Field>
@@ -331,7 +332,7 @@ function AddContactModal({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: "grid", gap: 5, flex: 1, minWidth: 0 }}>
+    <label style={{ display: "grid", gap: 5, flex: "1 1 140px", minWidth: 0 }}>
       <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
       {children}
     </label>

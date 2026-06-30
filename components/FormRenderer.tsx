@@ -13,6 +13,7 @@ import {
   SUBMIT,
   googleFontHref,
 } from "@/lib/forms";
+import { useIsMobile } from "@/lib/responsive";
 
 export type Answers = Record<string, string | string[]>;
 
@@ -31,6 +32,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Props) {
   const steps = form.steps ?? [];
   const theme = form.theme;
+  const isMobile = useIsMobile(680);
 
   const [currentId, setCurrentId] = useState<string>(steps[0]?.id ?? "");
   const [history, setHistory] = useState<string[]>([]);
@@ -198,7 +200,8 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
     return <div style={{ padding: 40, color: "#8A92A6" }}>Brak kroków.</div>;
   }
 
-  const isSplit = theme.layout === "split" && !!current.image;
+  // Na wąskim ekranie układ „split” składamy do jednej kolumny (obraz nad treścią).
+  const isSplit = theme.layout === "split" && !!current.image && !isMobile;
   const align = theme.layout === "left" ? "left" : isSplit ? "left" : "center";
 
   const accent = theme.primary || "#6C5CE7";
@@ -303,7 +306,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
             width: "100%",
             maxWidth: 520,
             margin: isSplit ? 0 : "0 auto",
-            padding: "48px 32px",
+            padding: isMobile ? "32px 18px" : "48px 32px",
             textAlign: align as React.CSSProperties["textAlign"],
             animation: `${dir === "fwd" ? "selltic-up" : "selltic-down"} .34s cubic-bezier(.22,1,.36,1)`,
           }}
@@ -325,7 +328,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
             />
           )}
 
-          <h2 style={{ fontSize: 28, fontWeight: 700, margin: "0 0 10px", lineHeight: 1.2 }}>
+          <h2 style={{ fontSize: isMobile ? 23 : 28, fontWeight: 700, margin: "0 0 10px", lineHeight: 1.2 }}>
             {current.question || "—"}
           </h2>
           {current.description && (
