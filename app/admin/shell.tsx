@@ -20,6 +20,8 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Inbox,
+  Calendar,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
@@ -31,7 +33,9 @@ const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
   { href: "/admin/contacts", label: "Kontakty", icon: Users },
   { href: "/admin/pipeline", label: "Lejek", icon: KanbanSquare },
+  { href: "/admin/inbox", label: "Zgłoszenia", icon: Inbox },
   { href: "/admin/tasks", label: "Zadania", icon: CheckSquare },
+  { href: "/admin/calendar", label: "Kalendarz", icon: Calendar },
   { href: "/admin/analytics", label: "Analityka", icon: BarChart3 },
   { href: "/admin/forms", label: "Formularze", icon: FileText },
 ];

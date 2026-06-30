@@ -75,8 +75,14 @@ export async function POST(req: Request) {
     const steps = form.published?.steps ?? [];
     const { email, name, phone } = extract(answers, steps);
 
-    // 2. zapis surowego zgłoszenia
-    await db.from("submissions").insert({ form_id: form.id, answers, meta });
+    // 2. zapis surowego zgłoszenia (id potrzebne, by potem dopisać
+    //    contact_id/lead_id — zasila widok Inbox).
+    const { data: submission, error: subErr } = await db
+      .from("submissions")
+      .insert({ form_id: form.id, answers, meta })
+      .select("id")
+      .single();
+    if (subErr) throw subErr;
 
     // 3. kontakt po (owner, email): istniejący → reużyj, brak → utwórz.
     //    Kontakt to TRWAŁA tożsamość — nigdy nie nadpisujemy jego leadów.
@@ -117,6 +123,10 @@ export async function POST(req: Request) {
     }).select("id").single();
     if (lErr) throw lErr;
     const leadId = lead.id;
+
+    // 4b. dopisz contact_id/lead_id do zgłoszenia — żeby Inbox mógł
+    //     linkować zgłoszenie do tego, co utworzyło.
+    await db.from("submissions").update({ contact_id: contactId, lead_id: leadId }).eq("id", submission.id);
 
     // 5. aktywność „zgłoszenie” — z contact_id (oś kontaktu) ORAZ lead_id
     //    (oś tego leada), więc pokazuje się w obu osiach czasu.

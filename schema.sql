@@ -53,6 +53,7 @@ create table if not exists leads (
   value       numeric not null default 0,
   source      text,                            -- 'form:wycena' | 'cold-call' ...
   form_id     uuid references forms on delete set null,
+  assignee    text check (assignee is null or assignee in ('dominik', 'kuba')),  -- „Deal Owner”, ręczny
   opened_at   timestamptz not null default now(),
   closed_at   timestamptz,                      -- ustawiane gdy etap = is_won/is_lost
   created_at  timestamptz not null default now(),
@@ -72,6 +73,13 @@ create table if not exists activities (
   meta        jsonb,
   created_at  timestamptz not null default now()
 );
+
+-- submissions → kontakt/lead, które utworzyło (ustawiane przez /api/submit
+-- po rozwiązaniu kontaktu i utworzeniu leada; zasila widok Inbox).
+alter table submissions add column if not exists contact_id uuid references contacts on delete set null;
+alter table submissions add column if not exists lead_id    uuid references leads on delete set null;
+create index if not exists idx_submissions_contact on submissions (contact_id);
+create index if not exists idx_submissions_lead     on submissions (lead_id);
 
 -- ── FLAGI DUPLIKATÓW ────────────────────────────────────────────────────
 -- Faza 9.2: gdy nowe zgłoszenie ma telefon pasujący do INNEGO kontaktu niż
@@ -129,6 +137,7 @@ create table if not exists tasks (
   title       text not null,
   due_at      timestamptz,
   done        boolean not null default false,
+  assignee    text check (assignee is null or assignee in ('dominik', 'kuba')),  -- „Deal Owner”, ręczny
   created_at  timestamptz not null default now()
 );
 
@@ -158,6 +167,7 @@ create index if not exists idx_activities_contact   on activities (contact_id, c
 create index if not exists idx_activities_lead       on activities (lead_id, created_at desc);
 create index if not exists idx_submissions_form      on submissions (form_id, created_at desc);
 create index if not exists idx_tasks_owner_due       on tasks (owner, due_at) where done = false;
+create index if not exists idx_tasks_assignee        on tasks (assignee) where assignee is not null;
 create index if not exists idx_notifications_owner    on notifications (owner, created_at desc) where read = false;
 
 -- ── updated_at auto ─────────────────────────────────────────────────────
