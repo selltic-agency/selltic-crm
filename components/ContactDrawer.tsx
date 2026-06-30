@@ -27,9 +27,8 @@ import {
   type Contact,
   type PropertyDef,
   type Stage,
-  STAGES,
-  stageMeta,
 } from "@/lib/types";
+import { useStages } from "@/lib/stages";
 import { useToast } from "@/components/Toast";
 
 type ComposerTab = "note" | "call" | "email" | "task";
@@ -62,6 +61,7 @@ export default function ContactDrawer({
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const reduce = useReducedMotion();
+  const { stages, stageMeta } = useStages();
   const [contact, setContact] = useState<Contact | null>(null);
   const [defs, setDefs] = useState<PropertyDef[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -290,7 +290,7 @@ export default function ContactDrawer({
             <>
               {/* Etapy */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 22 }}>
-                {STAGES.map((s) => {
+                {stages.map((s) => {
                   const active = contact.stage === s.key;
                   return (
                     <button

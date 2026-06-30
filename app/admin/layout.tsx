@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import { ToastProvider } from "@/components/Toast";
+import { StagesProvider } from "@/lib/stages";
 import Shell from "./shell";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   return (
     <ToastProvider>
-      <Shell email={user.email ?? ""}>{children}</Shell>
+      <StagesProvider>
+        <Shell email={user.email ?? ""}>{children}</Shell>
+      </StagesProvider>
     </ToastProvider>
   );
 }

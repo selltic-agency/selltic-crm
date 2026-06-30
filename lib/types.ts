@@ -1,6 +1,18 @@
 // lib/types.ts — współdzielone typy domeny (CRM + formularze).
 
-export type Stage = "new" | "contact" | "offer" | "won" | "lost";
+// Etap to teraz dowolny klucz zdefiniowany w pipeline_stages (konfigurowalny).
+export type Stage = string;
+
+export type PipelineStage = {
+  id: string;
+  owner: string;
+  key: string;
+  label: string;
+  color: string;
+  position: number;
+  is_won: boolean;
+  is_lost: boolean;
+};
 
 export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | "task";
 
@@ -70,15 +82,28 @@ export type AppSettings = {
   notify_email: string | null;
 };
 
-// Etykiety etapów lejka (kolejność = kolumny pipeline).
-export const STAGES: { key: Stage; label: string; color: string }[] = [
-  { key: "new", label: "Nowy lead", color: "#6C5CE7" },
-  { key: "contact", label: "Kontakt", color: "#1A73E7" },
-  { key: "offer", label: "Oferta", color: "#F2994A" },
-  { key: "won", label: "Wygrane", color: "#18A957" },
-  { key: "lost", label: "Przegrane", color: "#8A92A6" },
+// Domyślne etapy lejka — używane jako seed (pierwsze wczytanie) oraz jako
+// fallback, gdy tabela pipeline_stages jest pusta lub niedostępna.
+export type StageSeed = {
+  key: string;
+  label: string;
+  color: string;
+  is_won: boolean;
+  is_lost: boolean;
+};
+
+export const DEFAULT_STAGES: StageSeed[] = [
+  { key: "new", label: "Nowy lead", color: "#6C5CE7", is_won: false, is_lost: false },
+  { key: "contact", label: "Kontakt", color: "#1A73E7", is_won: false, is_lost: false },
+  { key: "offer", label: "Oferta", color: "#F2994A", is_won: false, is_lost: false },
+  { key: "won", label: "Wygrane", color: "#18A957", is_won: true, is_lost: false },
+  { key: "lost", label: "Przegrane", color: "#8A92A6", is_won: false, is_lost: true },
 ];
 
-export function stageMeta(stage: Stage) {
-  return STAGES.find((s) => s.key === stage) ?? STAGES[0];
+// Minimalny kształt etapu używany w UI (wystarcza do etykiety/koloru).
+export type StageLike = { key: string; label: string; color: string };
+
+// Znajdź metadane etapu po kluczu na podanej liście (z fallbackiem).
+export function stageMetaFrom<T extends StageLike>(stages: T[], key: Stage): T | StageLike {
+  return stages.find((s) => s.key === key) ?? stages[0] ?? DEFAULT_STAGES[0];
 }

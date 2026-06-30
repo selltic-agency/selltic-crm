@@ -1,10 +1,12 @@
 // lib/forms.ts — typy schematu formularza, stałe routingu i helpery kreatora.
+import { DEFAULT_PHONE_PREFIX } from "@/lib/phone";
 
 export type StepType =
   | "welcome"
   | "short_text"
   | "long_text"
   | "email"
+  | "phone"
   | "single_choice"
   | "multi_choice"
   | "statement"
@@ -41,6 +43,7 @@ export type Step = {
   placeholder?: string;
   required?: boolean;
   validation?: FieldValidation;
+  phonePrefix?: string; // domyślny prefiks kraju dla kroku „phone” (np. "+48")
   cta?: string; // etykieta przycisku (welcome)
   map?: "name" | "email" | "phone"; // mapowanie odpowiedzi → kontakt (Faza 5)
 };
@@ -81,6 +84,7 @@ export const STEP_TYPES: { type: StepType; label: string }[] = [
   { type: "short_text", label: "Krótki tekst" },
   { type: "long_text", label: "Długi tekst" },
   { type: "email", label: "E-mail" },
+  { type: "phone", label: "Telefon" },
   { type: "single_choice", label: "Wybór jednokrotny" },
   { type: "multi_choice", label: "Wybór wielokrotny" },
   { type: "statement", label: "Komunikat" },
@@ -172,6 +176,15 @@ export function validateStepValue(step: Step, raw: string): string | null {
     return step.validation?.customMessage || "Podaj poprawny adres e-mail.";
   }
 
+  // Wbudowana walidacja telefonu: 8–15 cyfr (z prefiksem kraju).
+  if (step.type === "phone") {
+    const digits = value.replace(/\D/g, "");
+    if (digits.length < 8 || digits.length > 15) {
+      return step.validation?.customMessage || "Podaj poprawny numer telefonu.";
+    }
+    return null;
+  }
+
   const v = step.validation;
   if (!v) return null;
 
@@ -240,6 +253,15 @@ export function blankStep(type: StepType): Step {
       return { ...base, question: "Twoje pytanie", placeholder: "Wpisz odpowiedź…", required: false };
     case "email":
       return { ...base, question: "Jaki jest Twój e-mail?", placeholder: "ty@firma.pl", required: true, map: "email" };
+    case "phone":
+      return {
+        ...base,
+        question: "Jaki jest Twój numer telefonu?",
+        placeholder: "123 456 789",
+        required: true,
+        map: "phone",
+        phonePrefix: DEFAULT_PHONE_PREFIX,
+      };
     case "single_choice":
       return {
         ...base,

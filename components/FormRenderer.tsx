@@ -21,6 +21,11 @@ import {
   isTextInput,
   validateStepValue,
 } from "@/lib/forms";
+import {
+  COUNTRY_PREFIXES,
+  DEFAULT_PHONE_PREFIX,
+  splitPhone,
+} from "@/lib/phone";
 import { useIsMobile } from "@/lib/responsive";
 
 export type Answers = Record<string, string | string[]>;
@@ -54,6 +59,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   const [answers, setAnswers] = useState<Answers>({});
   const [dir, setDir] = useState<"fwd" | "back">("fwd");
   const [error, setError] = useState<string | null>(null);
+  const [phonePrefix, setPhonePrefix] = useState<string>(DEFAULT_PHONE_PREFIX);
   const submittedRef = useRef(false);
 
   // Wstrzyknij arkusz Google Fonts dla wybranej czcionki.
@@ -91,6 +97,16 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   );
   const currentIndex = steps.findIndex((s) => s.id === current?.id);
   const progress = steps.length > 1 ? (currentIndex / (steps.length - 1)) * 100 : 0;
+
+  // Inicjalizuj prefiks telefonu przy wejściu na krok „phone”
+  // (z zapisanej odpowiedzi lub domyślnego prefiksu kroku).
+  useEffect(() => {
+    if (current?.type === "phone") {
+      const stored = (answers[current.id] as string) || "";
+      const { prefix } = splitPhone(stored, current.phonePrefix || DEFAULT_PHONE_PREFIX);
+      setPhonePrefix(prefix);
+    }
+  }, [current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setAnswer = useCallback(
     (val: string | string[]) => {
@@ -139,7 +155,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   // uruchamia animację „shake”. Zwraca true gdy pole jest poprawne.
   const validateCurrent = useCallback(
     (withShake: boolean) => {
-      if (!current || !isTextInput(current.type)) return true;
+      if (!current || (!isTextInput(current.type) && current.type !== "phone")) return true;
       const v = (answers[current.id] as string) || "";
       const msg = validateStepValue(current, v);
       setError(msg);
@@ -371,8 +387,44 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
           )}
 
           {/* Pola wg typu */}
-          {isTextInput(current.type) && (
+          {(isTextInput(current.type) || current.type === "phone") && (
             <motion.div animate={shake}>
+              {current.type === "phone" && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <select
+                    value={phonePrefix}
+                    onChange={(e) => {
+                      const prefix = e.target.value;
+                      setPhonePrefix(prefix);
+                      const local = splitPhone(
+                        (answers[current.id] as string) || "",
+                        prefix
+                      ).local;
+                      setAnswer(local.trim() ? `${prefix} ${local}` : "");
+                    }}
+                    aria-label="Prefiks kraju"
+                    style={{ ...fieldStyle(text, !!error), width: "auto", flexShrink: 0 }}
+                  >
+                    {COUNTRY_PREFIXES.map((p) => (
+                      <option key={p.iso} value={p.code}>
+                        {p.flag} {p.code}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    autoFocus
+                    type="tel"
+                    value={splitPhone((answers[current.id] as string) || "", phonePrefix).local}
+                    onChange={(e) => {
+                      const local = e.target.value;
+                      setAnswer(local.trim() ? `${phonePrefix} ${local}` : "");
+                    }}
+                    onBlur={() => validateCurrent(false)}
+                    placeholder={current.placeholder}
+                    style={fieldStyle(text, !!error)}
+                  />
+                </div>
+              )}
               {current.type === "short_text" && (
                 <input
                   autoFocus

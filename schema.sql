@@ -66,6 +66,23 @@ create table if not exists property_defs (
   unique (owner, key)
 );
 
+-- ── ETAPY LEJKA (konfigurowalne) ────────────────────────────────────────
+-- Zastępują zaszyte na sztywno etapy. Każdy właściciel ma własny zestaw.
+-- `key` jest stabilnym identyfikatorem (contacts.stage przechowuje ten klucz
+-- jako zwykły tekst — bez FK, dla prostoty). Etapy domyślne są zasiewane
+-- leniwie w aplikacji przy pierwszym wczytaniu (po owner).
+create table if not exists pipeline_stages (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users on delete cascade,
+  key         text not null,
+  label       text not null,
+  color       text not null,
+  position    int not null default 0,
+  is_won      boolean not null default false,
+  is_lost     boolean not null default false,
+  unique (owner, key)
+);
+
 -- ── ZADANIA ─────────────────────────────────────────────────────────────
 create table if not exists tasks (
   id          uuid primary key default gen_random_uuid(),
@@ -126,6 +143,7 @@ alter table property_defs enable row level security;
 alter table tasks         enable row level security;
 alter table app_settings  enable row level security;
 alter table notifications enable row level security;
+alter table pipeline_stages enable row level security;
 
 -- Właściciel: pełny dostęp do swoich danych
 create policy "own forms"        on forms         for all using (auth.uid() = owner) with check (auth.uid() = owner);
@@ -136,6 +154,7 @@ create policy "own defs"         on property_defs for all using (auth.uid() = ow
 create policy "own tasks"        on tasks         for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own settings"     on app_settings  for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own notifications" on notifications for all using (auth.uid() = owner) with check (auth.uid() = owner);
+create policy "own stages"        on pipeline_stages for all using (auth.uid() = owner) with check (auth.uid() = owner);
 
 -- Publiczny: czytanie WYŁĄCZNIE opublikowanych formularzy (do renderu /f/[slug])
 create policy "public reads published" on forms for select using (status = 'published');

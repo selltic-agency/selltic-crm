@@ -1,13 +1,21 @@
 // app/admin/settings/page.tsx — ustawienia: właściwości globalne + powiadomienia.
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Reorder } from "framer-motion";
+import { Plus, Trash2, GripVertical, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, inputStyle, primaryButton } from "@/lib/ui";
-import type { AppSettings, PropertyDef, PropertyType } from "@/lib/types";
+import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
+import type {
+  AppSettings,
+  PipelineStage,
+  PropertyDef,
+  PropertyType,
+} from "@/lib/types";
+import { useStages } from "@/lib/stages";
+import { useToast } from "@/components/Toast";
 
-type Tab = "properties" | "notifications";
+type Tab = "properties" | "stages" | "notifications";
 
 const TYPE_LABEL: Record<PropertyType, string> = {
   text: "tekst",
@@ -27,6 +35,7 @@ export default function SettingsPage() {
         {(
           [
             ["properties", "Właściwości"],
+            ["stages", "Etapy lejka"],
             ["notifications", "Powiadomienia"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
@@ -49,8 +58,351 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {tab === "properties" ? <PropertiesTab /> : <NotificationsTab />}
+      {tab === "properties" ? (
+        <PropertiesTab />
+      ) : tab === "stages" ? (
+        <StagesTab />
+      ) : (
+        <NotificationsTab />
+      )}
     </div>
+  );
+}
+
+/* ── Etapy lejka ──────────────────────────────────────────── */
+function StagesTab() {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const { stages: ctxStages, loading: ctxLoading, reload } = useStages();
+  const [list, setList] = useState<PipelineStage[]>([]);
+  const [deleting, setDeleting] = useState<PipelineStage | null>(null);
+  const posTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Lokalna kopia do edycji, synchronizowana z kontekstem przy wczytaniu.
+  useEffect(() => {
+    setList(ctxStages);
+  }, [ctxStages]);
+
+  // Aktualizacja pojedynczego pola etapu (lokalnie + zapis do bazy).
+  async function patch(id: string, partial: Partial<PipelineStage>) {
+    setList((l) => l.map((s) => (s.id === id ? { ...s, ...partial } : s)));
+    await supabase.from("pipeline_stages").update(partial).eq("id", id);
+    reload();
+  }
+
+  // Zapis nowej kolejności (debounce — onReorder strzela często podczas drag).
+  function persistOrder(next: PipelineStage[]) {
+    setList(next);
+    if (posTimer.current) clearTimeout(posTimer.current);
+    posTimer.current = setTimeout(async () => {
+      await Promise.all(
+        next.map((s, i) =>
+          s.position === i
+            ? Promise.resolve()
+            : supabase.from("pipeline_stages").update({ position: i }).eq("id", s.id)
+        )
+      );
+      reload();
+    }, 500);
+  }
+
+  async function addStage() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const key = `stage_${Math.random().toString(36).slice(2, 8)}`;
+    const position = list.length;
+    const row = {
+      owner: user.id,
+      key,
+      label: "Nowy etap",
+      color: "#6C5CE7",
+      position,
+      is_won: false,
+      is_lost: false,
+    };
+    const { data, error } = await supabase
+      .from("pipeline_stages")
+      .insert(row)
+      .select()
+      .single();
+    if (error || !data) {
+      toast.error("Nie udało się dodać etapu.");
+      return;
+    }
+    setList((l) => [...l, data as PipelineStage]);
+    reload();
+  }
+
+  // Usuwanie: jeśli etap ma kontakty — wymagaj wskazania etapu zastępczego.
+  async function confirmDelete(replacementKey: string) {
+    if (!deleting) return;
+    if (replacementKey) {
+      await supabase
+        .from("contacts")
+        .update({ stage: replacementKey })
+        .eq("stage", deleting.key);
+    }
+    await supabase.from("pipeline_stages").delete().eq("id", deleting.id);
+    setList((l) => l.filter((s) => s.id !== deleting.id));
+    setDeleting(null);
+    reload();
+    toast.success("Etap usunięty.");
+  }
+
+  if (ctxLoading) {
+    return (
+      <Section>
+        <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section>
+      <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 16px" }}>
+        Etapy lejka są wspólne dla całego CRM. Przeciągnij, by zmienić kolejność.
+        „Wygrany” / „Przegrany” oznaczają etapy końcowe (do statystyk konwersji).
+      </p>
+
+      <Reorder.Group
+        axis="y"
+        values={list}
+        onReorder={persistOrder}
+        style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}
+      >
+        {list.map((s) => (
+          <Reorder.Item
+            key={s.id}
+            value={s}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              border: `1px solid ${tokens.border}`,
+              borderRadius: 10,
+              padding: "8px 12px",
+              background: "#fff",
+            }}
+          >
+            <GripVertical size={16} color={tokens.muted} style={{ cursor: "grab", flexShrink: 0 }} />
+
+            <label
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                flexShrink: 0,
+                background: s.color,
+                border: `1px solid ${tokens.border}`,
+                cursor: "pointer",
+                position: "relative",
+                overflow: "hidden",
+              }}
+              aria-label="Kolor etapu"
+            >
+              <input
+                type="color"
+                value={s.color}
+                onChange={(e) => patch(s.id, { color: e.target.value })}
+                style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+              />
+            </label>
+
+            <input
+              value={s.label}
+              onChange={(e) =>
+                setList((l) => l.map((x) => (x.id === s.id ? { ...x, label: e.target.value } : x)))
+              }
+              onBlur={(e) => patch(s.id, { label: e.target.value.trim() || "Etap" })}
+              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+            />
+
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: tokens.muted }}>
+              <input
+                type="checkbox"
+                checked={s.is_won}
+                onChange={(e) =>
+                  patch(s.id, { is_won: e.target.checked, is_lost: e.target.checked ? false : s.is_lost })
+                }
+                style={{ accentColor: tokens.success }}
+              />
+              Wygrany
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: tokens.muted }}>
+              <input
+                type="checkbox"
+                checked={s.is_lost}
+                onChange={(e) =>
+                  patch(s.id, { is_lost: e.target.checked, is_won: e.target.checked ? false : s.is_won })
+                }
+                style={{ accentColor: tokens.danger }}
+              />
+              Przegrany
+            </label>
+
+            <button
+              onClick={() => {
+                if (list.length <= 1) {
+                  toast.error("Musi pozostać co najmniej jeden etap.");
+                  return;
+                }
+                setDeleting(s);
+              }}
+              aria-label="Usuń etap"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                border: `1px solid ${tokens.border}`,
+                background: "#fff",
+                display: "grid",
+                placeItems: "center",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            >
+              <Trash2 size={15} color={tokens.muted} />
+            </button>
+          </Reorder.Item>
+        ))}
+      </Reorder.Group>
+
+      <button
+        onClick={addStage}
+        style={{ ...ghostButton, marginTop: 14, display: "flex", alignItems: "center", gap: 6 }}
+      >
+        <Plus size={16} /> Dodaj etap
+      </button>
+
+      {deleting && (
+        <DeleteStageDialog
+          stage={deleting}
+          others={list.filter((s) => s.id !== deleting.id)}
+          supabase={supabase}
+          onCancel={() => setDeleting(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
+    </Section>
+  );
+}
+
+function DeleteStageDialog({
+  stage,
+  others,
+  supabase,
+  onCancel,
+  onConfirm,
+}: {
+  stage: PipelineStage;
+  others: PipelineStage[];
+  supabase: ReturnType<typeof createClient>;
+  onCancel: () => void;
+  onConfirm: (replacementKey: string) => void;
+}) {
+  const [count, setCount] = useState<number | null>(null);
+  const [replacement, setReplacement] = useState<string>(others[0]?.key ?? "");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { count: c } = await supabase
+        .from("contacts")
+        .select("id", { count: "exact", head: true })
+        .eq("stage", stage.key);
+      setCount(c ?? 0);
+    })();
+  }, [supabase, stage.key]);
+
+  const hasContacts = (count ?? 0) > 0;
+
+  return (
+    <>
+      <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: "rgba(15,18,28,0.40)", zIndex: 40 }} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "min(420px, calc(100vw - 32px))",
+          background: tokens.card,
+          borderRadius: tokens.radius,
+          border: `1px solid ${tokens.border}`,
+          boxShadow: "0 24px 60px rgba(15,18,28,0.18)",
+          zIndex: 41,
+          padding: 22,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Usuń etap „{stage.label}”</h2>
+          <button onClick={onCancel} aria-label="Zamknij" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}>
+            <X size={15} color={tokens.muted} />
+          </button>
+        </div>
+
+        {count === null ? (
+          <p style={{ fontSize: 14, color: tokens.muted }}>Sprawdzanie kontaktów…</p>
+        ) : hasContacts ? (
+          <>
+            <p style={{ fontSize: 14, margin: "0 0 12px" }}>
+              Na tym etapie jest <b>{count}</b> {count === 1 ? "kontakt" : "kontaktów"}.
+              Wybierz etap, na który chcesz je przenieść:
+            </p>
+            <select
+              value={replacement}
+              onChange={(e) => setReplacement(e.target.value)}
+              style={{ ...inputStyle, marginBottom: 18 }}
+            >
+              {others.map((o) => (
+                <option key={o.id} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <p style={{ fontSize: 14, margin: "0 0 18px" }}>
+            Na tym etapie nie ma żadnych kontaktów. Czy na pewno chcesz go usunąć?
+          </p>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button onClick={onCancel} style={ghostButton}>
+            Anuluj
+          </button>
+          <button
+            disabled={busy || count === null || (hasContacts && !replacement)}
+            onClick={() => {
+              setBusy(true);
+              onConfirm(hasContacts ? replacement : "");
+            }}
+            style={{ ...primaryButton, background: tokens.danger }}
+          >
+            {busy ? "Usuwanie…" : "Usuń etap"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Section({ children }: { children: React.ReactNode }) {
+  return (
+    <section
+      style={{
+        background: tokens.card,
+        border: `1px solid ${tokens.border}`,
+        borderRadius: tokens.radius,
+        padding: 20,
+      }}
+    >
+      {children}
+    </section>
   );
 }
 

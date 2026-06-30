@@ -15,6 +15,7 @@ import {
   Type,
   AlignLeft,
   AtSign,
+  Phone,
   CircleDot,
   ListChecks,
   MessageSquare,
@@ -42,6 +43,7 @@ import {
   detectPreset,
   hasValidationRules,
 } from "@/lib/forms";
+import { COUNTRY_PREFIXES, DEFAULT_PHONE_PREFIX } from "@/lib/phone";
 import FormRenderer from "@/components/FormRenderer";
 import { useToast } from "@/components/Toast";
 
@@ -50,6 +52,7 @@ const TYPE_ICON: Record<StepType, typeof Type> = {
   short_text: Type,
   long_text: AlignLeft,
   email: AtSign,
+  phone: Phone,
   single_choice: CircleDot,
   multi_choice: ListChecks,
   statement: MessageSquare,
@@ -516,6 +519,39 @@ function StepEditor({
             Pole wymagane
           </label>
           <ValidationEditor step={step} onPatch={onPatch} />
+        </>
+      )}
+
+      {step.type === "phone" && (
+        <>
+          <Field label="Placeholder">
+            <input value={step.placeholder ?? ""} onChange={(e) => onPatch({ placeholder: e.target.value })} style={inputStyle} />
+          </Field>
+          <Field label="Domyślny prefiks kraju">
+            <select
+              value={step.phonePrefix ?? DEFAULT_PHONE_PREFIX}
+              onChange={(e) => onPatch({ phonePrefix: e.target.value })}
+              style={inputStyle}
+            >
+              {COUNTRY_PREFIXES.map((p) => (
+                <option key={p.iso} value={p.code}>
+                  {p.flag} {p.name} ({p.code})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14, fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={!!step.required}
+              onChange={(e) => onPatch({ required: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: tokens.accent }}
+            />
+            Pole wymagane
+          </label>
+          <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>
+            Numer telefonu jest walidowany automatycznie (8–15 cyfr z prefiksem).
+          </p>
         </>
       )}
 
