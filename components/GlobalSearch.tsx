@@ -7,9 +7,8 @@ import { Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
 import { type Contact } from "@/lib/types";
-import { useStages } from "@/lib/stages";
 
-type Hit = Pick<Contact, "id" | "name" | "email" | "company" | "stage">;
+type Hit = Pick<Contact, "id" | "name" | "email" | "company">;
 
 export default function GlobalSearch({
   onOpenContact,
@@ -19,7 +18,6 @@ export default function GlobalSearch({
   fullWidth?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
-  const { stageMeta } = useStages();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [open, setOpen] = useState(false);
@@ -39,7 +37,7 @@ export default function GlobalSearch({
       const esc = term.replace(/[%,]/g, " ");
       const { data } = await supabase
         .from("contacts")
-        .select("id, name, email, company, stage")
+        .select("id, name, email, company")
         .or(`name.ilike.%${esc}%,email.ilike.%${esc}%,company.ilike.%${esc}%`)
         .order("updated_at", { ascending: false })
         .limit(8);
@@ -131,47 +129,31 @@ export default function GlobalSearch({
               Brak wyników dla „{q.trim()}”.
             </p>
           ) : (
-            hits.map((h) => {
-              const sm = stageMeta(h.stage);
-              return (
-                <button
-                  key={h.id}
-                  onClick={() => pick(h.id)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 14px",
-                    border: "none",
-                    borderTop: `1px solid ${tokens.border}`,
-                    background: "transparent",
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{h.name || "Bez nazwy"}</div>
-                    <div style={{ fontSize: 12, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {h.email || h.company || "—"}
-                    </div>
+            hits.map((h) => (
+              <button
+                key={h.id}
+                onClick={() => pick(h.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "10px 14px",
+                  border: "none",
+                  borderTop: `1px solid ${tokens.border}`,
+                  background: "transparent",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{h.name || "Bez nazwy"}</div>
+                  <div style={{ fontSize: 12, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {h.email || h.company || "—"}
                   </div>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      padding: "3px 9px",
-                      borderRadius: 999,
-                      background: `${sm.color}1A`,
-                      color: sm.color,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {sm.label}
-                  </span>
-                </button>
-              );
-            })
+                </div>
+              </button>
+            ))
           )}
         </div>
       )}

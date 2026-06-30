@@ -78,48 +78,91 @@ export async function POST(req: Request) {
     // 2. zapis surowego zgłoszenia
     await db.from("submissions").insert({ form_id: form.id, answers, meta });
 
-    // 3. upsert kontaktu po (owner, email)
+    // 3. kontakt po (owner, email): istniejący → reużyj, brak → utwórz.
+    //    Kontakt to TRWAŁA tożsamość — nigdy nie nadpisujemy jego leadów.
     let contactId: string;
     const { data: existing } = email
       ? await db.from("contacts").select("id").eq("owner", form.owner).eq("email", email).maybeSingle()
       : { data: null };
 
+    const contactExisted = !!existing;
     if (existing) {
       contactId = existing.id;
       await db.from("contacts").update({ name: name || undefined, phone: phone || undefined }).eq("id", contactId);
     } else {
       const { data: inserted, error: cErr } = await db.from("contacts").insert({
         owner: form.owner, name, email, phone,
-        stage: "new", source: form.slug ? `form:${form.slug}` : "form", form_id: form.id,
       }).select("id").single();
       if (cErr) throw cErr;
       contactId = inserted.id;
     }
 
-    // 4. aktywność na osi czasu
+    // 4. ZAWSZE twórz NOWY lead pod tym kontaktem (osobna szansa sprzedaży).
+    //    Etap startowy = pierwszy etap lejka właściciela (fallback 'new').
+    const { data: firstStage } = await db
+      .from("pipeline_stages")
+      .select("key")
+      .eq("owner", form.owner)
+      .order("position", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const stageKey = firstStage?.key ?? "new";
+
+    const { data: lead, error: lErr } = await db.from("leads").insert({
+      owner: form.owner,
+      contact_id: contactId,
+      stage: stageKey,
+      source: form.slug ? `form:${form.slug}` : "form",
+      form_id: form.id,
+    }).select("id").single();
+    if (lErr) throw lErr;
+    const leadId = lead.id;
+
+    // 5. aktywność „zgłoszenie” — z contact_id (oś kontaktu) ORAZ lead_id
+    //    (oś tego leada), więc pokazuje się w obu osiach czasu.
     const summary = steps
       .filter((s: any) => answers[s.id] != null && answers[s.id] !== "" && s.type !== "welcome" && s.type !== "end")
       .map((s: any) => `${s.question}: ${answers[s.id]}`).join("\n");
     await db.from("activities").insert({
-      owner: form.owner, contact_id: contactId, type: "submission",
+      owner: form.owner, contact_id: contactId, lead_id: leadId, type: "submission",
       body: summary || "Wypełnił formularz", meta: { formId: form.id },
     });
 
-    // 5. powiadomienie w aplikacji (dzwonek) — tylko dla nowych kontaktów
-    if (!existing) {
-      await db.from("notifications").insert({
-        owner: form.owner,
-        contact_id: contactId,
-        type: "new_lead",
-        body: `Nowy lead: ${name}`,
-      });
+    // 6. flaga duplikatu: telefon pasuje do INNEGO kontaktu niż dopasowany.
+    if (phone) {
+      const { data: phoneMatches } = await db
+        .from("contacts")
+        .select("id")
+        .eq("owner", form.owner)
+        .eq("phone", phone)
+        .neq("id", contactId)
+        .limit(1);
+      const phoneMatch = phoneMatches?.[0];
+      if (phoneMatch) {
+        await db.from("duplicate_flags").insert({
+          owner: form.owner,
+          contact_a: contactId,
+          contact_b: phoneMatch.id,
+          reason: "phone match, different email",
+        });
+      }
     }
 
-    // 6. powiadomienie mailowe (jeśli włączone w ustawieniach)
+    // 7. powiadomienie w aplikacji (dzwonek) — per NOWY lead, z rozróżnieniem
+    //    czy kontakt jest nowy, czy powracający.
+    const leadKind = contactExisted ? "Powracający kontakt — nowy lead" : "Nowy kontakt — nowy lead";
+    await db.from("notifications").insert({
+      owner: form.owner,
+      contact_id: contactId,
+      type: "new_lead",
+      body: `${leadKind}: ${name}`,
+    });
+
+    // 8. powiadomienie mailowe (jeśli włączone w ustawieniach)
     const { data: settings } = await db.from("app_settings")
       .select("email_new_lead, notify_email").eq("owner", form.owner).maybeSingle();
     if (settings?.email_new_lead && settings.notify_email) {
-      await notifyNewLead(settings.notify_email, { name, email, phone });
+      await notifyNewLead(settings.notify_email, { name, email, phone, returning: contactExisted });
     }
 
     return NextResponse.json({ ok: true });
@@ -131,8 +174,12 @@ export async function POST(req: Request) {
 
 // Wyślij maila przez Resend (https://resend.com). Działa tylko gdy ustawisz RESEND_API_KEY.
 // Alternatywa: zamiast tego POST do webhooka Make, który wyśle Gmaila.
-async function notifyNewLead(to: string, lead: { name: string; email: string; phone: string }) {
+async function notifyNewLead(
+  to: string,
+  lead: { name: string; email: string; phone: string; returning: boolean }
+) {
   if (!process.env.RESEND_API_KEY) return;
+  const kind = lead.returning ? "Powracający kontakt — nowy lead" : "Nowy kontakt — nowy lead";
   try {
     await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -140,8 +187,9 @@ async function notifyNewLead(to: string, lead: { name: string; email: string; ph
       body: JSON.stringify({
         from: process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>",
         to,
-        subject: `🎯 Nowy lead: ${lead.name}`,
-        html: `<h2>Nowy lead z formularza</h2>
+        subject: `🎯 ${kind}: ${lead.name}`,
+        html: `<h2>${kind}</h2>
+               <p>Nowa szansa sprzedaży z formularza${lead.returning ? " (kontakt już istniał w bazie)" : ""}.</p>
                <p><b>Imię:</b> ${lead.name}</p>
                <p><b>Email:</b> ${lead.email || "—"}</p>
                <p><b>Telefon:</b> ${lead.phone || "—"}</p>`,

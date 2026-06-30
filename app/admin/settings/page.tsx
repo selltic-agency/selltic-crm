@@ -139,8 +139,9 @@ function StagesTab() {
   async function confirmDelete(replacementKey: string) {
     if (!deleting) return;
     if (replacementKey) {
+      // Faza 9.1: etap żyje teraz na leadach — przepinamy leady, nie kontakty.
       await supabase
-        .from("contacts")
+        .from("leads")
         .update({ stage: replacementKey })
         .eq("stage", deleting.key);
     }
@@ -308,8 +309,9 @@ function DeleteStageDialog({
 
   useEffect(() => {
     (async () => {
+      // Faza 9.1: liczymy leady na tym etapie (etap przeniesiony z kontaktów).
       const { count: c } = await supabase
-        .from("contacts")
+        .from("leads")
         .select("id", { count: "exact", head: true })
         .eq("stage", stage.key);
       setCount(c ?? 0);

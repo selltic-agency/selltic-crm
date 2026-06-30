@@ -19,17 +19,17 @@ export type Filter = {
   value: any;
 };
 
-// Pola wbudowane w tabelę 'contacts'.
-const BUILT_IN_FIELDS = [
-  "stage",
-  "source",
-  "value",
-  "created_at",
-  "name",
-  "email",
-  "phone",
-  "company",
-];
+// Faza 9.4: lejek odpytuje tabelę `leads` ze złączonym (inner) `contacts`.
+// Pola leada filtrujemy bezpośrednio; pola kontaktu przez prefiks `contacts.`;
+// właściwości własne kontaktu przez `contacts.props->>klucz`.
+const LEAD_FIELDS = new Set(["stage", "value", "source", "opened_at", "created_at"]);
+const CONTACT_FIELDS = new Set(["name", "email", "phone", "company"]);
+
+function columnFor(field: string): string {
+  if (LEAD_FIELDS.has(field)) return field;
+  if (CONTACT_FIELDS.has(field)) return `contacts.${field}`;
+  return `contacts.props->>${field}`;
+}
 
 /**
  * Aplikuje tablicę filtrów do zapytania Supabase.
@@ -42,9 +42,7 @@ export function buildFilterQuery(
   let q = query;
 
   filters.forEach((f) => {
-    const isBuiltIn = BUILT_IN_FIELDS.includes(f.field);
-    // Dla pól własnych używamy operatora ->>, który wyciąga wartość jako tekst.
-    const column = isBuiltIn ? f.field : `props->>${f.field}`;
+    const column = columnFor(f.field);
 
     switch (f.operator) {
       case "contains":
