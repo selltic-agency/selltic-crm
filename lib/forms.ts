@@ -20,6 +20,16 @@ export type StepOption = {
   next: string; // NEXT | SUBMIT | stepId
 };
 
+// Reguły walidacji pola (Faza 8.1). Wszystkie opcjonalne.
+export type FieldValidation = {
+  pattern?: string; // regex jako string, np. polski telefon
+  minLength?: number;
+  maxLength?: number;
+  min?: number; // dla pól liczbowych (tekst)
+  max?: number;
+  customMessage?: string; // komunikat przy niepowodzeniu
+};
+
 export type Step = {
   id: string;
   type: StepType;
@@ -30,6 +40,7 @@ export type Step = {
   options?: StepOption[];
   placeholder?: string;
   required?: boolean;
+  validation?: FieldValidation;
   cta?: string; // etykieta przycisku (welcome)
   map?: "name" | "email" | "phone"; // mapowanie odpowiedzi → kontakt (Faza 5)
 };
@@ -86,6 +97,106 @@ export function isChoice(type: StepType): boolean {
 
 export function isTextInput(type: StepType): boolean {
   return type === "short_text" || type === "long_text" || type === "email";
+}
+
+// ── Walidacja pól (Faza 8.1) ──────────────────────────────────────────────
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Gotowe presety walidacji. `key === "none"` i `key === "custom"` to tryby UI
+// (bez własnego wzorca). Pozostałe niosą gotowy `pattern` + `message`.
+export type ValidationPreset = {
+  key: string;
+  label: string;
+  pattern?: string;
+  message?: string;
+};
+
+export const VALIDATION_PRESETS: ValidationPreset[] = [
+  { key: "none", label: "Brak" },
+  {
+    key: "email",
+    label: "E-mail",
+    pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+    message: "Podaj poprawny adres e-mail.",
+  },
+  {
+    key: "phone_pl",
+    label: "Telefon (PL)",
+    pattern: "^(\\+48)?\\s?\\d{3}[\\s-]?\\d{3}[\\s-]?\\d{3}$",
+    message: "Podaj poprawny numer telefonu.",
+  },
+  {
+    key: "nip",
+    label: "NIP",
+    pattern: "^\\d{10}$",
+    message: "NIP musi mieć 10 cyfr.",
+  },
+  {
+    key: "postal_pl",
+    label: "Kod pocztowy (PL)",
+    pattern: "^\\d{2}-\\d{3}$",
+    message: "Podaj kod w formacie 00-000.",
+  },
+  { key: "custom", label: "Własne wyrażenie" },
+];
+
+// Wskazuje, który preset odpowiada aktualnemu wzorcowi (do UI edytora).
+export function detectPreset(v?: FieldValidation): string {
+  if (!v?.pattern) return "none";
+  const found = VALIDATION_PRESETS.find((p) => p.pattern && p.pattern === v.pattern);
+  return found ? found.key : "custom";
+}
+
+// Czy obiekt walidacji niesie jakiekolwiek reguły (do czyszczenia pustych).
+export function hasValidationRules(v?: FieldValidation): boolean {
+  if (!v) return false;
+  return (
+    !!v.pattern ||
+    v.minLength != null ||
+    v.maxLength != null ||
+    v.min != null ||
+    v.max != null
+  );
+}
+
+// Główna walidacja wartości kroku. Zwraca komunikat błędu lub null gdy OK.
+export function validateStepValue(step: Step, raw: string): string | null {
+  const value = (raw ?? "").trim();
+
+  if (step.required && !value) return "To pole jest wymagane.";
+  // Puste, ale nieobowiązkowe — brak dalszej walidacji.
+  if (!value) return null;
+
+  // Wbudowany format e-mail dla typu „email”.
+  if (step.type === "email" && !EMAIL_RE.test(value)) {
+    return step.validation?.customMessage || "Podaj poprawny adres e-mail.";
+  }
+
+  const v = step.validation;
+  if (!v) return null;
+
+  if (v.minLength != null && value.length < v.minLength) {
+    return v.customMessage || `Minimalna długość: ${v.minLength} znaków.`;
+  }
+  if (v.maxLength != null && value.length > v.maxLength) {
+    return v.customMessage || `Maksymalna długość: ${v.maxLength} znaków.`;
+  }
+  if (v.min != null && Number(value) < v.min) {
+    return v.customMessage || `Wartość minimalna: ${v.min}.`;
+  }
+  if (v.max != null && Number(value) > v.max) {
+    return v.customMessage || `Wartość maksymalna: ${v.max}.`;
+  }
+  if (v.pattern) {
+    try {
+      if (!new RegExp(v.pattern).test(value)) {
+        return v.customMessage || "Nieprawidłowy format.";
+      }
+    } catch {
+      // Niepoprawny regex w konfiguracji — nie blokuj użytkownika.
+    }
+  }
+  return null;
 }
 
 // ── Czcionki (Google Fonts) ───────────────────────────────────────────────
