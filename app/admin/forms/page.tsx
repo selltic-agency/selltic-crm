@@ -3,10 +3,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, FileText, ExternalLink } from "lucide-react";
+import { Plus, Trash2, FileText, ExternalLink, Share2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, primaryButton } from "@/lib/ui";
 import { blankForm, randomSlug, type FormRow } from "@/lib/forms";
+import ShareModal from "./share-modal";
 
 type FormCard = Pick<FormRow, "id" | "title" | "slug" | "status" | "created_at">;
 
@@ -16,6 +17,7 @@ export default function FormsPage() {
   const [forms, setForms] = useState<FormCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [shareForm, setShareForm] = useState<FormCard | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,21 +190,50 @@ export default function FormsPage() {
                   {f.status === "published" ? "Opublikowany" : "Szkic"}
                 </span>
                 {f.status === "published" && f.slug && (
-                  <a
-                    href={`/f/${f.slug}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ color: tokens.muted, display: "grid", placeItems: "center" }}
-                    aria-label="Otwórz publiczny formularz"
-                  >
-                    <ExternalLink size={15} />
-                  </a>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShareForm(f);
+                      }}
+                      aria-label="Udostępnij / kod osadzenia"
+                      title="Udostępnij"
+                      style={{
+                        border: "none",
+                        background: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        color: tokens.muted,
+                        display: "grid",
+                        placeItems: "center",
+                      }}
+                    >
+                      <Share2 size={15} />
+                    </button>
+                    <a
+                      href={`/f/${f.slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ color: tokens.muted, display: "grid", placeItems: "center" }}
+                      aria-label="Otwórz publiczny formularz"
+                    >
+                      <ExternalLink size={15} />
+                    </a>
+                  </div>
                 )}
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {shareForm?.slug && (
+        <ShareModal
+          slug={shareForm.slug}
+          title={shareForm.title}
+          onClose={() => setShareForm(null)}
+        />
       )}
     </div>
   );
