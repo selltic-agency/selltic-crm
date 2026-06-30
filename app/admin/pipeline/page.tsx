@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Plus, X } from "lucide-react";
+import { Plus, X, KanbanSquare, Table } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   tokens,
@@ -16,6 +16,7 @@ import {
 import { type Contact, type Stage } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import ContactDrawer from "@/components/ContactDrawer";
+import ContactTable from "@/components/ContactTable";
 import FilterBar from "@/components/FilterBar";
 import { Filter, buildFilterQuery } from "@/lib/filters";
 
@@ -28,6 +29,20 @@ export default function PipelinePage() {
   const [drawerContact, setDrawerContact] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
+  const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
+
+  // Load viewMode from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("selltic_pipeline_view");
+    if (saved === "kanban" || saved === "table") {
+      setViewMode(saved);
+    }
+  }, []);
+
+  const toggleView = (mode: "kanban" | "table") => {
+    setViewMode(mode);
+    localStorage.setItem("selltic_pipeline_view", mode);
+  };
 
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
@@ -73,7 +88,43 @@ export default function PipelinePage() {
           marginBottom: 20,
         }}
       >
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Lejek</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Lejek</h1>
+          <div
+            style={{
+              display: "flex",
+              background: tokens.border,
+              padding: 2,
+              borderRadius: 10,
+              gap: 2,
+            }}
+          >
+            <button
+              onClick={() => toggleView("kanban")}
+              style={{
+                ...viewTabBtn,
+                background: viewMode === "kanban" ? tokens.card : "transparent",
+                color: viewMode === "kanban" ? tokens.accent : tokens.muted,
+                boxShadow: viewMode === "kanban" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
+              }}
+              title="Kanban"
+            >
+              <KanbanSquare size={16} />
+            </button>
+            <button
+              onClick={() => toggleView("table")}
+              style={{
+                ...viewTabBtn,
+                background: viewMode === "table" ? tokens.card : "transparent",
+                color: viewMode === "table" ? tokens.accent : tokens.muted,
+                boxShadow: viewMode === "table" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
+              }}
+              title="Tabela"
+            >
+              <Table size={16} />
+            </button>
+          </div>
+        </div>
         <button
           onClick={() => setShowAdd(true)}
           style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}
@@ -87,7 +138,7 @@ export default function PipelinePage() {
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
-      ) : (
+      ) : viewMode === "kanban" ? (
         <div
           className="selltic-scroll-x"
           style={{
@@ -193,6 +244,10 @@ export default function PipelinePage() {
               </div>
             );
           })}
+        </div>
+      ) : (
+        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
+          <ContactTable contacts={contacts} onRowClick={setDrawerContact} />
         </div>
       )}
 
@@ -364,3 +419,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
+
+const viewTabBtn: React.CSSProperties = {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  display: "grid",
+  placeItems: "center",
+  border: "none",
+  cursor: "pointer",
+  transition: "all 0.2s ease",
+};
