@@ -1,8 +1,9 @@
 // app/admin/shell.tsx — chrome panelu: sidebar (230px) + topbar.
 // Client component, bo aktywny element nawigacji zależy od bieżącej ścieżki.
+// Responsywny: na telefonie sidebar zwija się do wysuwanego panelu (hamburger).
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -15,9 +16,12 @@ import {
   Search,
   Bell,
   LogOut,
+  Menu,
+  X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
+import { useIsMobile } from "@/lib/responsive";
 
 const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
@@ -36,6 +40,16 @@ export default function Shell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const isMobile = useIsMobile(900);
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Zamknij wysuwany panel po zmianie trasy / przejściu na desktop.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+  useEffect(() => {
+    if (!isMobile) setNavOpen(false);
+  }, [isMobile]);
 
   function isActive(href: string, exact?: boolean) {
     if (exact) return pathname === href;
@@ -51,22 +65,43 @@ export default function Shell({
 
   const avatarLetter = (email?.[0] ?? "D").toUpperCase();
 
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", background: tokens.bg }}>
-      {/* ── Sidebar ─────────────────────────────────────────── */}
-      <aside
+  // ── Sidebar (treść współdzielona przez desktop i mobilny panel) ──────────
+  const sidebar = (
+    <aside
+      style={{
+        width: 250,
+        flexShrink: 0,
+        background: tokens.card,
+        borderRight: `1px solid ${tokens.border}`,
+        display: "flex",
+        flexDirection: "column",
+        padding: "20px 14px",
+        boxSizing: "border-box",
+        ...(isMobile
+          ? {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              height: "100vh",
+              zIndex: 60,
+              transform: navOpen ? "translateX(0)" : "translateX(-100%)",
+              transition: `transform .28s ${tokens.ease}`,
+              boxShadow: navOpen ? "12px 0 40px rgba(15,18,28,0.18)" : "none",
+            }
+          : {
+              width: 230,
+              position: "sticky",
+              top: 0,
+              height: "100vh",
+            }),
+      }}
+    >
+      <div
         style={{
-          width: 230,
-          flexShrink: 0,
-          background: tokens.card,
-          borderRight: `1px solid ${tokens.border}`,
           display: "flex",
-          flexDirection: "column",
-          padding: "20px 14px",
-          position: "sticky",
-          top: 0,
-          height: "100vh",
-          boxSizing: "border-box",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "4px 8px 18px",
         }}
       >
         <Link
@@ -75,7 +110,6 @@ export default function Shell({
             display: "flex",
             alignItems: "center",
             gap: 10,
-            padding: "4px 8px 18px",
             textDecoration: "none",
             color: tokens.text,
           }}
@@ -97,57 +131,86 @@ export default function Shell({
           </span>
           <span style={{ fontWeight: 700, fontSize: 17 }}>Selltic</span>
         </Link>
+        {isMobile && (
+          <button
+            onClick={() => setNavOpen(false)}
+            aria-label="Zamknij menu"
+            style={iconBtn}
+          >
+            <X size={18} color={tokens.muted} />
+          </button>
+        )}
+      </div>
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-          {NAV.map((item) => {
-            const active = isActive(item.href, item.exact);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 11,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  textDecoration: "none",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: active ? tokens.accent : tokens.muted,
-                  background: active ? tokens.accentSoft : "transparent",
-                  transition: `background .15s ${tokens.ease}`,
-                }}
-              >
-                <Icon size={18} />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
+      <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+        {NAV.map((item) => {
+          const active = isActive(item.href, item.exact);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 11,
+                padding: "10px 12px",
+                borderRadius: 10,
+                textDecoration: "none",
+                fontSize: 14,
+                fontWeight: 600,
+                color: active ? tokens.accent : tokens.muted,
+                background: active ? tokens.accentSoft : "transparent",
+                transition: `background .15s ${tokens.ease}`,
+              }}
+            >
+              <Icon size={18} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
 
-        <Link
-          href="/admin/settings"
+      <Link
+        href="/admin/settings"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          padding: "10px 12px",
+          borderRadius: 10,
+          textDecoration: "none",
+          fontSize: 14,
+          fontWeight: 600,
+          color: isActive("/admin/settings") ? tokens.accent : tokens.muted,
+          background: isActive("/admin/settings")
+            ? tokens.accentSoft
+            : "transparent",
+        }}
+      >
+        <Settings size={18} />
+        Ustawienia
+      </Link>
+    </aside>
+  );
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: tokens.bg }}>
+      {/* ── Sidebar ─────────────────────────────────────────── */}
+      {sidebar}
+
+      {/* Scrim pod wysuwanym panelem (tylko mobile) */}
+      {isMobile && navOpen && (
+        <div
+          onClick={() => setNavOpen(false)}
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 11,
-            padding: "10px 12px",
-            borderRadius: 10,
-            textDecoration: "none",
-            fontSize: 14,
-            fontWeight: 600,
-            color: isActive("/admin/settings") ? tokens.accent : tokens.muted,
-            background: isActive("/admin/settings")
-              ? tokens.accentSoft
-              : "transparent",
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,18,28,0.40)",
+            zIndex: 55,
           }}
-        >
-          <Settings size={18} />
-          Ustawienia
-        </Link>
-      </aside>
+        />
+      )}
 
       {/* ── Główny obszar ───────────────────────────────────── */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
@@ -160,55 +223,72 @@ export default function Shell({
             borderBottom: `1px solid ${tokens.border}`,
             display: "flex",
             alignItems: "center",
-            gap: 16,
-            padding: "0 24px",
+            gap: isMobile ? 10 : 16,
+            padding: isMobile ? "0 14px" : "0 24px",
             position: "sticky",
             top: 0,
             zIndex: 5,
           }}
         >
-          <div
-            style={{
-              flex: 1,
-              maxWidth: 420,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              background: tokens.bg,
-              border: `1px solid ${tokens.border}`,
-              borderRadius: 10,
-              padding: "8px 12px",
-            }}
-          >
-            <Search size={16} color={tokens.muted} />
-            <input
-              placeholder="Szukaj…"
-              style={{
-                border: "none",
-                outline: "none",
-                background: "transparent",
-                fontSize: 14,
-                width: "100%",
-                color: tokens.text,
-              }}
-            />
-          </div>
+          {isMobile ? (
+            <>
+              <button
+                onClick={() => setNavOpen(true)}
+                aria-label="Otwórz menu"
+                style={iconBtn}
+              >
+                <Menu size={20} color={tokens.text} />
+              </button>
+              <span
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 9,
+                  background: tokens.accent,
+                  color: "#fff",
+                  display: "grid",
+                  placeItems: "center",
+                  fontWeight: 800,
+                  fontSize: 16,
+                }}
+              >
+                S
+              </span>
+              <div style={{ flex: 1 }} />
+            </>
+          ) : (
+            <>
+              <div
+                style={{
+                  flex: 1,
+                  maxWidth: 420,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: tokens.bg,
+                  border: `1px solid ${tokens.border}`,
+                  borderRadius: 10,
+                  padding: "8px 12px",
+                }}
+              >
+                <Search size={16} color={tokens.muted} />
+                <input
+                  placeholder="Szukaj…"
+                  style={{
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                    width: "100%",
+                    color: tokens.text,
+                  }}
+                />
+              </div>
+              <div style={{ flex: 1 }} />
+            </>
+          )}
 
-          <div style={{ flex: 1 }} />
-
-          <button
-            aria-label="Powiadomienia"
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              border: `1px solid ${tokens.border}`,
-              background: "#fff",
-              display: "grid",
-              placeItems: "center",
-              cursor: "pointer",
-            }}
-          >
+          <button aria-label="Powiadomienia" style={iconBtn}>
             <Bell size={18} color={tokens.muted} />
           </button>
 
@@ -216,16 +296,7 @@ export default function Shell({
             onClick={logout}
             aria-label="Wyloguj"
             title={`Wyloguj (${email})`}
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              border: `1px solid ${tokens.border}`,
-              background: "#fff",
-              display: "grid",
-              placeItems: "center",
-              cursor: "pointer",
-            }}
+            style={iconBtn}
           >
             <LogOut size={18} color={tokens.muted} />
           </button>
@@ -236,6 +307,7 @@ export default function Shell({
               width: 38,
               height: 38,
               borderRadius: "50%",
+              flexShrink: 0,
               background: tokens.accent,
               color: "#fff",
               display: "grid",
@@ -248,8 +320,22 @@ export default function Shell({
           </div>
         </header>
 
-        <main style={{ flex: 1, padding: "28px 24px", minWidth: 0 }}>{children}</main>
+        <main className="selltic-main" style={{ flex: 1, minWidth: 0 }}>
+          {children}
+        </main>
       </div>
     </div>
   );
 }
+
+const iconBtn: React.CSSProperties = {
+  width: 38,
+  height: 38,
+  borderRadius: 10,
+  flexShrink: 0,
+  border: `1px solid ${tokens.border}`,
+  background: "#fff",
+  display: "grid",
+  placeItems: "center",
+  cursor: "pointer",
+};
