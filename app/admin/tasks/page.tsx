@@ -13,8 +13,10 @@ import {
   primaryButton,
   formatDateTime,
 } from "@/lib/ui";
-import type { Task } from "@/lib/types";
+import type { Assignee, Task } from "@/lib/types";
 import { useToast } from "@/components/Toast";
+
+const ASSIGNEE_LABEL: Record<Assignee, string> = { dominik: "Dominik", kuba: "Kuba" };
 
 export default function TasksPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -24,6 +26,7 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [due, setDue] = useState("");
+  const [assignee, setAssignee] = useState<Assignee | "">("");
   const [adding, setAdding] = useState(false);
   const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
 
@@ -56,13 +59,14 @@ export default function TasksPage() {
     const due_at = due ? new Date(due).toISOString() : null;
     const { data, error } = await supabase
       .from("tasks")
-      .insert({ owner: user.id, title: title.trim(), due_at })
+      .insert({ owner: user.id, title: title.trim(), due_at, assignee: assignee || null })
       .select("*, contacts(id, name)")
       .single();
     if (!error && data) {
       setTasks((list) => [...list, data as Task]);
       setTitle("");
       setDue("");
+      setAssignee("");
       toast.success("Zadanie dodane.");
     } else if (error) {
       toast.error("Nie udało się dodać zadania.");
@@ -86,6 +90,16 @@ export default function TasksPage() {
       );
     } else if (next) {
       toast.success("Zadanie wykonane ✓");
+    }
+  }
+
+  async function reassignTask(task: Task, next: Assignee | "") {
+    const value = next || null;
+    setTasks((list) => list.map((t) => (t.id === task.id ? { ...t, assignee: value } : t)));
+    const { error } = await supabase.from("tasks").update({ assignee: value }).eq("id", task.id);
+    if (error) {
+      setTasks((list) => list.map((t) => (t.id === task.id ? { ...t, assignee: task.assignee } : t)));
+      toast.error("Nie udało się zmienić przypisania.");
     }
   }
 
@@ -133,6 +147,16 @@ export default function TasksPage() {
           onChange={(e) => setDue(e.target.value)}
           style={{ ...inputStyle, flex: "1 1 180px" }}
         />
+        <select
+          value={assignee}
+          onChange={(e) => setAssignee(e.target.value as Assignee | "")}
+          style={{ ...inputStyle, flex: "1 1 140px" }}
+          aria-label="Deal Owner"
+        >
+          <option value="">Nieprzypisane</option>
+          <option value="dominik">Dominik</option>
+          <option value="kuba">Kuba</option>
+        </select>
         <button type="submit" disabled={adding} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
           <Plus size={16} />
           {adding ? "Dodawanie…" : "Dodaj"}
@@ -156,6 +180,7 @@ export default function TasksPage() {
                   onToggle={() => toggleDone(t)}
                   onDelete={() => removeTask(t)}
                   onOpenContact={openContact}
+                  onReassign={(next) => reassignTask(t, next)}
                 />
               ))}
             </div>
@@ -173,6 +198,7 @@ export default function TasksPage() {
                     onToggle={() => toggleDone(t)}
                     onDelete={() => removeTask(t)}
                     onOpenContact={openContact}
+                    onReassign={(next) => reassignTask(t, next)}
                   />
                 ))}
               </div>
@@ -189,11 +215,13 @@ function TaskRow({
   onToggle,
   onDelete,
   onOpenContact,
+  onReassign,
 }: {
   task: Task;
   onToggle: () => void;
   onDelete: () => void;
   onOpenContact: (id: string) => void;
+  onReassign: (next: Assignee | "") => void;
 }) {
   return (
     <div
@@ -253,6 +281,26 @@ function TaskRow({
           )}
         </div>
       </div>
+      <select
+        value={task.assignee ?? ""}
+        onChange={(e) => onReassign(e.target.value as Assignee | "")}
+        aria-label="Deal Owner"
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color: tokens.muted,
+          border: `1px solid ${tokens.border}`,
+          borderRadius: 8,
+          padding: "5px 8px",
+          background: "#fff",
+          cursor: "pointer",
+          flexShrink: 0,
+        }}
+      >
+        <option value="">Nieprzypisane</option>
+        <option value="dominik">{ASSIGNEE_LABEL.dominik}</option>
+        <option value="kuba">{ASSIGNEE_LABEL.kuba}</option>
+      </select>
       <button
         onClick={onDelete}
         aria-label="Usuń"

@@ -18,6 +18,9 @@ export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | 
 
 export type PropertyType = "text" | "number" | "date" | "select";
 
+// „Deal Owner” — prosty ręczny przydział (bez modelu workspace z Fazy 11).
+export type Assignee = "dominik" | "kuba";
+
 // Kontakt = trwała tożsamość osoby/firmy (Faza 9.1). Etap/wartość/źródło/
 // formularz przeniesione do `Lead` — jeden kontakt może mieć wiele leadów.
 export type Contact = {
@@ -41,6 +44,7 @@ export type Lead = {
   value: number;
   source: string | null;
   form_id: string | null;
+  assignee: Assignee | null;
   opened_at: string;
   closed_at: string | null;
   created_at: string;
@@ -90,6 +94,7 @@ export type Task = {
   title: string;
   due_at: string | null;
   done: boolean;
+  assignee: Assignee | null;
   created_at: string;
   // opcjonalna złączona nazwa kontaktu (z select ... contacts(name))
   contacts?: { id: string; name: string | null } | null;
@@ -102,6 +107,21 @@ export type PropertyDef = {
   type: PropertyType;
   options: string[] | null;
   position: number;
+};
+
+// Zgłoszenie (surowa odpowiedź formularza) — widok Inbox.
+export type Submission = {
+  id: string;
+  form_id: string;
+  answers: Record<string, string | string[]>;
+  meta: Record<string, unknown> | null;
+  contact_id: string | null;
+  lead_id: string | null;
+  created_at: string;
+  // opcjonalne złączenia (z select ... forms(title), contacts(...), leads(...))
+  forms?: { id: string; title: string } | null;
+  contacts?: { id: string; name: string | null; email: string | null } | null;
+  leads?: { id: string; stage: string } | null;
 };
 
 export type Notification = {

@@ -28,6 +28,7 @@ import {
 import {
   type Activity,
   type ActivityType,
+  type Assignee,
   type Lead,
   type LeadContact,
   type Stage,
@@ -157,6 +158,14 @@ export default function LeadPage() {
     await supabase.from("leads").update({ value }).eq("id", lead.id);
   }
 
+  async function saveAssignee(raw: Assignee | "") {
+    if (!lead) return;
+    const assignee = raw || null;
+    if (lead.assignee === assignee) return;
+    setLead({ ...lead, assignee });
+    await supabase.from("leads").update({ assignee }).eq("id", lead.id);
+  }
+
   async function saveActivity() {
     if (!lead || saving) return;
 
@@ -277,8 +286,8 @@ export default function LeadPage() {
             );
           })}
         </div>
-        <div style={{ marginTop: 16, maxWidth: 240 }}>
-          <label style={{ display: "grid", gap: 5 }}>
+        <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ display: "grid", gap: 5, flex: "1 1 200px", maxWidth: 240 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>Wartość (zł)</span>
             <input
               type="number"
@@ -286,6 +295,18 @@ export default function LeadPage() {
               onBlur={(e) => saveValue(e.target.value)}
               style={inputStyle}
             />
+          </label>
+          <label style={{ display: "grid", gap: 5, flex: "1 1 200px", maxWidth: 240 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Deal Owner</span>
+            <select
+              value={lead.assignee ?? ""}
+              onChange={(e) => saveAssignee(e.target.value as Assignee | "")}
+              style={inputStyle}
+            >
+              <option value="">Nieprzypisany</option>
+              <option value="dominik">Dominik</option>
+              <option value="kuba">Kuba</option>
+            </select>
           </label>
         </div>
       </Card>
