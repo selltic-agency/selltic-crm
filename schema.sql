@@ -77,6 +77,17 @@ create table if not exists tasks (
   created_at  timestamptz not null default now()
 );
 
+-- ── POWIADOMIENIA (dzwonek w topbarze) ──────────────────────────────────
+create table if not exists notifications (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users on delete cascade,
+  contact_id  uuid references contacts on delete cascade,
+  type        text not null default 'new_lead',   -- new_lead | ...
+  body        text not null,
+  read        boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
 -- ── USTAWIENIA UŻYTKOWNIKA ──────────────────────────────────────────────
 create table if not exists app_settings (
   owner           uuid primary key references auth.users on delete cascade,
@@ -90,6 +101,7 @@ create index if not exists idx_contacts_owner_stage on contacts (owner, stage);
 create index if not exists idx_activities_contact   on activities (contact_id, created_at desc);
 create index if not exists idx_submissions_form      on submissions (form_id, created_at desc);
 create index if not exists idx_tasks_owner_due       on tasks (owner, due_at) where done = false;
+create index if not exists idx_notifications_owner    on notifications (owner, created_at desc) where read = false;
 
 -- ── updated_at auto ─────────────────────────────────────────────────────
 create or replace function touch_updated_at() returns trigger as $$
@@ -113,6 +125,7 @@ alter table activities    enable row level security;
 alter table property_defs enable row level security;
 alter table tasks         enable row level security;
 alter table app_settings  enable row level security;
+alter table notifications enable row level security;
 
 -- Właściciel: pełny dostęp do swoich danych
 create policy "own forms"        on forms         for all using (auth.uid() = owner) with check (auth.uid() = owner);
@@ -122,6 +135,7 @@ create policy "own activities"   on activities    for all using (auth.uid() = ow
 create policy "own defs"         on property_defs for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own tasks"        on tasks         for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own settings"     on app_settings  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+create policy "own notifications" on notifications for all using (auth.uid() = owner) with check (auth.uid() = owner);
 
 -- Publiczny: czytanie WYŁĄCZNIE opublikowanych formularzy (do renderu /f/[slug])
 create policy "public reads published" on forms for select using (status = 'published');

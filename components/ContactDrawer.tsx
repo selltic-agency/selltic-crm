@@ -29,6 +29,7 @@ import {
   STAGES,
   stageMeta,
 } from "@/lib/types";
+import { useToast } from "@/components/Toast";
 
 type ComposerTab = "note" | "call" | "email" | "task";
 
@@ -58,6 +59,7 @@ export default function ContactDrawer({
   onClose: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
   const [contact, setContact] = useState<Contact | null>(null);
   const [defs, setDefs] = useState<PropertyDef[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -169,6 +171,9 @@ export default function ContactDrawer({
         if (data) setActivities((list) => [data as Activity, ...list]);
         setTaskTitle("");
         setTaskDue("");
+        toast.success("Zadanie dodane.");
+      } else {
+        toast.error("Nie udało się dodać zadania.");
       }
       setSaving(false);
       return;
@@ -189,6 +194,9 @@ export default function ContactDrawer({
     if (!error && data) {
       setActivities((list) => [data as Activity, ...list]);
       setBody("");
+      toast.success("Aktywność dodana.");
+    } else if (error) {
+      toast.error("Nie udało się zapisać aktywności.");
     }
     setSaving(false);
   }
