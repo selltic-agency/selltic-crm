@@ -13,8 +13,6 @@ import {
   BarChart3,
   FileText,
   Settings,
-  Search,
-  Bell,
   LogOut,
   Menu,
   X,
@@ -22,6 +20,9 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
+import NotificationBell from "@/components/NotificationBell";
+import GlobalSearch from "@/components/GlobalSearch";
+import ContactDrawer from "@/components/ContactDrawer";
 
 const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
@@ -42,6 +43,7 @@ export default function Shell({
   const router = useRouter();
   const isMobile = useIsMobile(900);
   const [navOpen, setNavOpen] = useState(false);
+  const [drawerContact, setDrawerContact] = useState<string | null>(null);
 
   // Zamknij wysuwany panel po zmianie trasy / przejściu na desktop.
   useEffect(() => {
@@ -254,43 +256,16 @@ export default function Shell({
               >
                 S
               </span>
-              <div style={{ flex: 1 }} />
+              <GlobalSearch onOpenContact={setDrawerContact} fullWidth />
             </>
           ) : (
             <>
-              <div
-                style={{
-                  flex: 1,
-                  maxWidth: 420,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  background: tokens.bg,
-                  border: `1px solid ${tokens.border}`,
-                  borderRadius: 10,
-                  padding: "8px 12px",
-                }}
-              >
-                <Search size={16} color={tokens.muted} />
-                <input
-                  placeholder="Szukaj…"
-                  style={{
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                    width: "100%",
-                    color: tokens.text,
-                  }}
-                />
-              </div>
+              <GlobalSearch onOpenContact={setDrawerContact} />
               <div style={{ flex: 1 }} />
             </>
           )}
 
-          <button aria-label="Powiadomienia" style={iconBtn}>
-            <Bell size={18} color={tokens.muted} />
-          </button>
+          <NotificationBell onOpenContact={setDrawerContact} />
 
           <button
             onClick={logout}
@@ -324,6 +299,10 @@ export default function Shell({
           {children}
         </main>
       </div>
+
+      {drawerContact && (
+        <ContactDrawer contactId={drawerContact} onClose={() => setDrawerContact(null)} />
+      )}
     </div>
   );
 }

@@ -39,6 +39,7 @@ import {
   stepTypeLabel,
 } from "@/lib/forms";
 import FormRenderer from "@/components/FormRenderer";
+import { useToast } from "@/components/Toast";
 
 const TYPE_ICON: Record<StepType, typeof Type> = {
   welcome: Hand,
@@ -58,6 +59,7 @@ export default function FormEditorPage() {
   const id = params.id;
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
   const isMobile = useIsMobile(900);
   const [mobilePane, setMobilePane] = useState<"steps" | "editor" | "preview">(
     "editor"
@@ -167,12 +169,18 @@ export default function FormEditorPage() {
 
   async function publish() {
     if (!schema) return;
-    await supabase
+    const wasPublished = status === "published";
+    const { error } = await supabase
       .from("forms")
       .update({ published: schema, status: "published" })
       .eq("id", id);
+    if (error) {
+      toast.error("Nie udało się opublikować formularza.");
+      return;
+    }
     setPublished(JSON.parse(JSON.stringify(schema)));
     setStatus("published");
+    toast.success(wasPublished ? "Formularz zaktualizowany." : "Formularz opublikowany.");
   }
 
   if (loading) return <p style={{ color: tokens.muted }}>Wczytywanie…</p>;

@@ -53,6 +53,16 @@ export type PropertyDef = {
   position: number;
 };
 
+export type Notification = {
+  id: string;
+  owner: string;
+  contact_id: string | null;
+  type: string;
+  body: string;
+  read: boolean;
+  created_at: string;
+};
+
 export type AppSettings = {
   owner: string;
   email_new_lead: boolean;

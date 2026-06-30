@@ -60,6 +60,29 @@ Fundament gotowy. Reszta dokłada się warstwami, każda samodzielna:
 - **Faza 4 — Analityka + przypomnienia.** Wykresy (recharts) z zapytań agregujących;
   Vercel Cron → `/api/cron/reminders` dla terminów zadań.
 
-Powiedz, którą fazę wystawiam jako kolejne pliki — najsensowniej Faza 1
-(login + lista + kreator zapisujący do Supabase), bo odblokowuje całą resztę.
+## Produkcja — wdrożenie i hardening
+
+### Cron przypomnień
+- `vercel.json` uruchamia `/api/cron/reminders` raz dziennie o 3:00 (limit planu
+  Vercel Hobby). Endpoint wysyła zbiorczy mail o zadaniach z terminem w ciągu
+  najbliższych 24 h (tylko dla właścicieli z włączonym „Przypomnienia o terminach”).
+- Ustaw `CRON_SECRET` w Vercel → Settings → Environment Variables. Vercel Cron
+  dołącza go jako `Authorization: Bearer <CRON_SECRET>`. Bez sekretu w produkcji
+  endpoint zwraca 503 (świadomie zablokowany przed nieautoryzowanym wywołaniem).
+
+### Limit zgłoszeń
+- `/api/submit` ma limiter w pamięci: maks. 10 zgłoszeń na IP na minutę (ochrona
+  przed oczywistym spamem). Do dużej skali przenieś licznik do Redis/Upstash.
+
+### Custom domain (`app.selltic-agency.pl`)
+1. Vercel → projekt → **Settings → Domains → Add** → `app.selltic-agency.pl`.
+2. U rejestratora domeny dodaj rekord **CNAME**:
+   `app` → `cname.vercel-dns.com` (Vercel pokaże dokładną wartość).
+   Dla domeny głównej (apex) użyj rekordu **A** na `76.76.21.21`.
+3. Poczekaj na propagację DNS i automatyczny certyfikat SSL (Vercel, Let's Encrypt).
+4. W Supabase → **Authentication → URL Configuration** dodaj nową domenę do
+   *Site URL* / *Redirect URLs*, żeby logowanie działało na produkcji.
+5. Jeśli osadzasz formularze (`?embed=1`) na stronach klientów — działają cross-origin
+   od razu; auto-wysokość iframe idzie przez `postMessage`.
+
 # selltic-crm

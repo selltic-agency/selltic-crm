@@ -14,9 +14,11 @@ import {
 } from "@/lib/ui";
 import type { Task } from "@/lib/types";
 import ContactDrawer from "@/components/ContactDrawer";
+import { useToast } from "@/components/Toast";
 
 export default function TasksPage() {
   const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
@@ -60,6 +62,9 @@ export default function TasksPage() {
       setTasks((list) => [...list, data as Task]);
       setTitle("");
       setDue("");
+      toast.success("Zadanie dodane.");
+    } else if (error) {
+      toast.error("Nie udało się dodać zadania.");
     }
     setAdding(false);
   }
@@ -78,14 +83,20 @@ export default function TasksPage() {
       setTasks((list) =>
         list.map((t) => (t.id === task.id ? { ...t, done: !next } : t))
       );
+    } else if (next) {
+      toast.success("Zadanie wykonane ✓");
     }
   }
 
   async function removeTask(task: Task) {
+    if (!confirm(`Usunąć zadanie „${task.title}”?`)) return;
     const snapshot = tasks;
     setTasks((list) => list.filter((t) => t.id !== task.id));
     const { error } = await supabase.from("tasks").delete().eq("id", task.id);
-    if (error) setTasks(snapshot);
+    if (error) {
+      setTasks(snapshot);
+      toast.error("Nie udało się usunąć zadania.");
+    }
   }
 
   const open = tasks.filter((t) => !t.done);
