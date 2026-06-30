@@ -4,7 +4,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -17,10 +17,13 @@ import {
   LogOut,
   Menu,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
+import { useStages } from "@/lib/stages";
 import NotificationBell from "@/components/NotificationBell";
 import GlobalSearch from "@/components/GlobalSearch";
 import ContactDrawer from "@/components/ContactDrawer";
@@ -45,6 +48,19 @@ export default function Shell({
   const isMobile = useIsMobile(900);
   const [navOpen, setNavOpen] = useState(false);
   const [drawerContact, setDrawerContact] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Load sidebar state from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("selltic_sidebar_collapsed");
+    if (saved === "true") setCollapsed(true);
+  }, []);
+
+  const toggleSidebar = () => {
+    const newState = !collapsed;
+    setCollapsed(newState);
+    localStorage.setItem("selltic_sidebar_collapsed", String(newState));
+  };
 
   // Zamknij wysuwany panel po zmianie trasy / przejściu na desktop.
   useEffect(() => {
@@ -70,15 +86,19 @@ export default function Shell({
 
   // ── Sidebar (treść współdzielona przez desktop i mobilny panel) ──────────
   const sidebar = (
-    <aside
+    <motion.aside
+      initial={false}
+      animate={{
+        width: collapsed && !isMobile ? 72 : 230,
+        padding: collapsed && !isMobile ? "20px 8px" : "20px 14px",
+      }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
       style={{
-        width: 250,
         flexShrink: 0,
         background: tokens.card,
         borderRight: `1px solid ${tokens.border}`,
         display: "flex",
         flexDirection: "column",
-        padding: "20px 14px",
         boxSizing: "border-box",
         ...(isMobile
           ? {
@@ -87,12 +107,13 @@ export default function Shell({
               left: 0,
               height: "100vh",
               zIndex: 60,
+              width: 230,
+              padding: "20px 14px",
               transform: navOpen ? "translateX(0)" : "translateX(-100%)",
               transition: `transform .28s ${tokens.ease}`,
               boxShadow: navOpen ? "12px 0 40px rgba(15,18,28,0.18)" : "none",
             }
           : {
-              width: 230,
               position: "sticky",
               top: 0,
               height: "100vh",
@@ -103,7 +124,7 @@ export default function Shell({
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: collapsed && !isMobile ? "center" : "space-between",
           padding: "4px 8px 18px",
         }}
       >
@@ -128,11 +149,14 @@ export default function Shell({
               placeItems: "center",
               fontWeight: 800,
               fontSize: 16,
+              flexShrink: 0,
             }}
           >
             S
           </span>
-          <span style={{ fontWeight: 700, fontSize: 17 }}>Selltic</span>
+          {!collapsed || isMobile ? (
+            <span style={{ fontWeight: 700, fontSize: 17, whiteSpace: "nowrap", overflow: "hidden" }}>Selltic</span>
+          ) : null}
         </Link>
         {isMobile && (
           <button
@@ -143,58 +167,57 @@ export default function Shell({
             <X size={18} color={tokens.muted} />
           </button>
         )}
+        {!isMobile && (
+          <button
+            onClick={toggleSidebar}
+            aria-label={collapsed ? "Rozwiń" : "Zwiń"}
+            style={{
+              position: "absolute",
+              right: -12,
+              top: 24,
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              background: tokens.card,
+              border: `1px solid ${tokens.border}`,
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+              zIndex: 10,
+              color: tokens.muted,
+            }}
+          >
+            {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+          </button>
+        )}
       </div>
 
       <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
         {NAV.map((item) => {
           const active = isActive(item.href, item.exact);
-          const Icon = item.icon;
           return (
-            <Link
+            <NavItem
               key={item.href}
               href={item.href}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 11,
-                padding: "10px 12px",
-                borderRadius: 10,
-                textDecoration: "none",
-                fontSize: 14,
-                fontWeight: 600,
-                color: active ? tokens.accent : tokens.muted,
-                background: active ? tokens.accentSoft : "transparent",
-                transition: `background .15s ${tokens.ease}`,
-              }}
-            >
-              <Icon size={18} />
-              {item.label}
-            </Link>
+              label={item.label}
+              icon={item.icon}
+              active={active}
+              collapsed={collapsed && !isMobile}
+            />
           );
         })}
       </nav>
 
-      <Link
+      <NavItem
         href="/admin/settings"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 11,
-          padding: "10px 12px",
-          borderRadius: 10,
-          textDecoration: "none",
-          fontSize: 14,
-          fontWeight: 600,
-          color: isActive("/admin/settings") ? tokens.accent : tokens.muted,
-          background: isActive("/admin/settings")
-            ? tokens.accentSoft
-            : "transparent",
-        }}
-      >
-        <Settings size={18} />
-        Ustawienia
-      </Link>
-    </aside>
+        label="Ustawienia"
+        icon={Settings}
+        active={isActive("/admin/settings")}
+        collapsed={collapsed && !isMobile}
+      />
+
+      <SidebarStages collapsed={collapsed && !isMobile} />
+    </motion.aside>
   );
 
   return (
@@ -311,6 +334,88 @@ export default function Shell({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function SidebarStages({ collapsed }: { collapsed: boolean }) {
+  const { stages } = useStages();
+
+  if (collapsed) return null;
+
+  return (
+    <div style={{ marginTop: 24, padding: "0 12px" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: tokens.muted, marginBottom: 12, letterSpacing: "0.05em" }}>
+        ETAPY LEJKA
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {stages.map((s) => (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: s.color,
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ flex: 1, color: tokens.text, fontWeight: 500 }}>{s.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NavItem({
+  href,
+  label,
+  icon: Icon,
+  active,
+  collapsed,
+}: {
+  href: string;
+  label: string;
+  icon: any;
+  active: boolean;
+  collapsed: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <Link
+      href={href}
+      title={collapsed ? label : undefined}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: collapsed ? "center" : "flex-start",
+        gap: 11,
+        padding: "10px 12px",
+        borderRadius: 10,
+        textDecoration: "none",
+        fontSize: 14,
+        fontWeight: 600,
+        color: active ? tokens.accent : tokens.muted,
+        background: active
+          ? tokens.accentSoft
+          : hover
+          ? tokens.bg
+          : "transparent",
+        transition: `all .2s ${tokens.ease}`,
+        outline: "none",
+        position: "relative",
+      }}
+      onFocus={(e) => (e.currentTarget.style.boxShadow = `0 0 0 2px ${tokens.accentSoft}`)}
+      onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
+    >
+      <Icon size={18} style={{ flexShrink: 0 }} />
+      {!collapsed && (
+        <span style={{ whiteSpace: "nowrap", overflow: "hidden" }}>{label}</span>
+      )}
+    </Link>
   );
 }
 

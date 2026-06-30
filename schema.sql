@@ -83,6 +83,12 @@ create table if not exists pipeline_stages (
   unique (owner, key)
 );
 
+-- ── KONFIGURACJA WIDOKU TABELI ──────────────────────────────────────────
+create table if not exists table_view_config (
+  owner   uuid primary key references auth.users on delete cascade,
+  columns jsonb not null default '[]'  -- [{ key: "name", visible: true, width: 200, position: 0 }, ...]
+);
+
 -- ── ZADANIA ─────────────────────────────────────────────────────────────
 create table if not exists tasks (
   id          uuid primary key default gen_random_uuid(),
@@ -144,6 +150,7 @@ alter table tasks         enable row level security;
 alter table app_settings  enable row level security;
 alter table notifications enable row level security;
 alter table pipeline_stages enable row level security;
+alter table table_view_config enable row level security;
 
 -- Właściciel: pełny dostęp do swoich danych
 create policy "own forms"        on forms         for all using (auth.uid() = owner) with check (auth.uid() = owner);
@@ -155,6 +162,7 @@ create policy "own tasks"        on tasks         for all using (auth.uid() = ow
 create policy "own settings"     on app_settings  for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own notifications" on notifications for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own stages"        on pipeline_stages for all using (auth.uid() = owner) with check (auth.uid() = owner);
+create policy "own table config"  on table_view_config for all using (auth.uid() = owner) with check (auth.uid() = owner);
 
 -- Publiczny: czytanie WYŁĄCZNIE opublikowanych formularzy (do renderu /f/[slug])
 create policy "public reads published" on forms for select using (status = 'published');
