@@ -1,9 +1,11 @@
 // components/ContactTable.tsx — widok tabeli kontaktów (Faza 8.5).
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, Settings2, GripVertical, Check, X } from "lucide-react";
-import { tokens, formatPLN, formatDateTime, ghostButton, primaryButton } from "@/lib/ui";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Reorder } from "framer-motion";
+import { ChevronUp, ChevronDown, Settings2, GripVertical, X } from "lucide-react";
+import { tokens, formatPLN, formatDateTime, ghostButton } from "@/lib/ui";
 import { Contact, PropertyDef } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import { createClient } from "@/lib/supabase/client";
@@ -47,6 +49,8 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [page, setPage] = useState(1);
   const pageSize = 25;
+  const colBtnRef = useRef<HTMLButtonElement>(null);
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 1. Fetch prop_defs and table_view_config
   useEffect(() => {
@@ -119,16 +123,23 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
     }));
   };
 
-  // 3. Persistence
-  async function saveConfig(newConfig: TableColumn[]) {
-    setConfig(newConfig);
+  // 3. Persistence — zmiany stosujemy natychmiast (tabela reaguje od razu),
+  //    a zapis do bazy jest debounce'owany (drag/reorder strzela często).
+  async function persistConfig(newConfig: TableColumn[]) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     await supabase.from("table_view_config").upsert({
       owner: user.id,
-      columns: newConfig.map(({ key, visible, width, position }) => ({ key, visible, width, position })),
+      // position liczona z kolejności w tablicy (źródło prawdy dla układu).
+      columns: newConfig.map(({ key, visible, width }, i) => ({ key, visible, width, position: i })),
     });
+  }
+
+  function updateConfig(newConfig: TableColumn[]) {
+    setConfig(newConfig); // natychmiastowe odbicie w tabeli (bez przeładowania)
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => persistConfig(newConfig), 400);
   }
 
   const visibleColumns = useMemo(() => config.filter(c => c.visible), [config]);
@@ -144,7 +155,8 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
     <div style={{ position: "relative" }}>
       <div style={{ padding: "10px 16px", borderBottom: `1px solid ${tokens.border}`, display: "flex", justifyContent: "flex-end" }}>
         <button
-          onClick={() => setShowConfig(!showConfig)}
+          ref={colBtnRef}
+          onClick={() => setShowConfig((v) => !v)}
           style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, fontSize: 13, padding: "6px 12px" }}
         >
           <Settings2 size={16} />
@@ -249,9 +261,10 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
 
       {showConfig && (
         <ColumnConfigPanel
+          anchorRef={colBtnRef}
           config={config}
+          onChange={updateConfig}
           onClose={() => setShowConfig(false)}
-          onSave={saveConfig}
         />
       )}
     </div>
@@ -277,53 +290,102 @@ function renderCell(c: Contact, key: string, stageMeta: any) {
   return c.props?.[key] || "—";
 }
 
-function ColumnConfigPanel({ config, onClose, onSave }: {
+const PANEL_WIDTH = 300;
+
+function ColumnConfigPanel({ anchorRef, config, onChange, onClose }: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
   config: TableColumn[];
+  onChange: (config: TableColumn[]) => void;
   onClose: () => void;
-  onSave: (config: TableColumn[]) => void;
 }) {
-  const [local, setLocal] = useState([...config]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
-  const toggleVisible = (key: string) => {
-    setLocal(prev => prev.map(c => c.key === key ? { ...c, visible: !c.visible } : c));
-  };
+  // Zakotwiczenie pod przyciskiem „Kolumny" z detekcją krawędzi viewportu,
+  // przez portal do <body> — nie przycina go żaden rodzic z overflow:hidden.
+  useLayoutEffect(() => {
+    function place() {
+      const btn = anchorRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      const margin = 12;
+      // Domyślnie wyrównaj prawą krawędź panelu do prawej krawędzi przycisku.
+      let left = r.right - PANEL_WIDTH;
+      left = Math.max(margin, Math.min(left, window.innerWidth - PANEL_WIDTH - margin));
+      const top = Math.min(r.bottom + 8, window.innerHeight - margin);
+      setPos({ top, left });
+    }
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [anchorRef]);
 
-  const move = (index: number, delta: number) => {
-    const next = [...local];
-    const item = next[index];
-    next.splice(index, 1);
-    next.splice(index + delta, 0, item);
-    setLocal(next.map((c, i) => ({ ...c, position: i })));
-  };
+  // Zamknięcie po kliknięciu poza panelem lub klawiszem Escape.
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || anchorRef.current?.contains(t)) return;
+      onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose, anchorRef]);
 
-  return (
+  const toggleVisible = (key: string) =>
+    onChange(config.map((c) => (c.key === key ? { ...c, visible: !c.visible } : c)));
+
+  // Zachowujemy te same referencje obiektów podczas przeciągania (jak w
+  // Settings → etapy) — inaczej Reorder gubi śledzenie elementu w trakcie gestu.
+  const handleReorder = (next: TableColumn[]) => onChange(next);
+
+  const panel = (
     <div
+      ref={panelRef}
       style={{
-        position: "absolute",
-        top: 50,
-        right: 16,
-        width: 280,
+        position: "fixed",
+        top: pos?.top ?? -9999,
+        left: pos?.left ?? -9999,
+        width: PANEL_WIDTH,
+        maxWidth: "calc(100vw - 24px)",
+        maxHeight: "min(440px, calc(100vh - 24px))",
         background: tokens.card,
         border: `1px solid ${tokens.border}`,
         borderRadius: 12,
         boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
-        zIndex: 20,
+        zIndex: 100,
         display: "flex",
         flexDirection: "column",
-        maxHeight: "calc(100vh - 200px)",
+        visibility: pos ? "visible" : "hidden",
       }}
     >
-      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${tokens.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ padding: "14px 16px", borderBottom: `1px solid ${tokens.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <span style={{ fontWeight: 700, fontSize: 14 }}>Konfiguracja kolumn</span>
-        <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", color: tokens.muted }}>
+        <button onClick={onClose} aria-label="Zamknij" style={{ border: "none", background: "none", cursor: "pointer", color: tokens.muted, display: "grid", placeItems: "center" }}>
           <X size={18} />
         </button>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
-        {local.map((col, i) => (
-          <div
+      <Reorder.Group
+        axis="y"
+        values={config}
+        onReorder={handleReorder}
+        style={{ flex: 1, overflowY: "auto", padding: 8, listStyle: "none", margin: 0 }}
+      >
+        {config.map((col) => (
+          <Reorder.Item
             key={col.key}
+            value={col}
             style={{
               display: "flex",
               alignItems: "center",
@@ -331,51 +393,44 @@ function ColumnConfigPanel({ config, onClose, onSave }: {
               padding: "6px 8px",
               borderRadius: 8,
               fontSize: 13,
+              background: tokens.card,
             }}
           >
-            <div style={{ color: tokens.muted, display: "flex", flexDirection: "column" }}>
-              <button
-                disabled={i === 0}
-                onClick={() => move(i, -1)}
-                style={{ border: "none", background: "none", cursor: i === 0 ? "default" : "pointer", padding: 0, opacity: i === 0 ? 0.3 : 1 }}
-              >
-                <ChevronUp size={14} />
-              </button>
-              <button
-                disabled={i === local.length - 1}
-                onClick={() => move(i, 1)}
-                style={{ border: "none", background: "none", cursor: i === local.length - 1 ? "default" : "pointer", padding: 0, opacity: i === local.length - 1 ? 0.3 : 1 }}
-              >
-                <ChevronDown size={14} />
-              </button>
-            </div>
-            <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <GripVertical size={16} color={tokens.muted} style={{ cursor: "grab", flexShrink: 0 }} />
+            <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", minWidth: 0 }}>
               <input
                 type="checkbox"
                 checked={col.visible}
                 onChange={() => toggleVisible(col.key)}
-                style={{ cursor: "pointer" }}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{ cursor: "pointer", flexShrink: 0 }}
               />
-              <span style={{ fontWeight: 500, color: col.visible ? tokens.text : tokens.muted }}>{col.label}</span>
+              <span
+                style={{
+                  fontWeight: 500,
+                  color: col.visible ? tokens.text : tokens.muted,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {col.label}
+              </span>
             </label>
-            <GripVertical size={14} color={tokens.muted} style={{ cursor: "ns-resize" }} />
-          </div>
+          </Reorder.Item>
         ))}
-      </div>
+      </Reorder.Group>
 
-      <div style={{ padding: 12, borderTop: `1px solid ${tokens.border}`, display: "grid", gap: 8 }}>
-        <button
-          onClick={() => {
-            onSave(local);
-            onClose();
-          }}
-          style={{ ...primaryButton, width: "100%" }}
-        >
-          Zapisz zmiany
+      <div style={{ padding: 12, borderTop: `1px solid ${tokens.border}`, flexShrink: 0 }}>
+        <button onClick={onClose} style={{ ...ghostButton, width: "100%" }}>
+          Gotowe
         </button>
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") return null;
+  return createPortal(panel, document.body);
 }
 
 const tdStyle: React.CSSProperties = {
