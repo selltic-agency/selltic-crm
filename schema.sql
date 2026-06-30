@@ -73,6 +73,20 @@ create table if not exists activities (
   created_at  timestamptz not null default now()
 );
 
+-- ── FLAGI DUPLIKATÓW ────────────────────────────────────────────────────
+-- Faza 9.2: gdy nowe zgłoszenie ma telefon pasujący do INNEGO kontaktu niż
+-- ten dopasowany po e-mailu, odkładamy flagę do ręcznej weryfikacji (bez
+-- automatycznego scalania — scalanie to osobna, przyszła faza).
+create table if not exists duplicate_flags (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users on delete cascade,
+  contact_a   uuid not null references contacts on delete cascade,
+  contact_b   uuid not null references contacts on delete cascade,
+  reason      text not null,                 -- np. 'phone match, different email'
+  resolved    boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
 -- ── GLOBALNE DEFINICJE WŁAŚCIWOŚCI ──────────────────────────────────────
 create table if not exists property_defs (
   id          uuid primary key default gen_random_uuid(),
@@ -168,6 +182,7 @@ alter table submissions   enable row level security;
 alter table contacts      enable row level security;
 alter table leads         enable row level security;
 alter table activities    enable row level security;
+alter table duplicate_flags enable row level security;
 alter table property_defs enable row level security;
 alter table tasks         enable row level security;
 alter table app_settings  enable row level security;
@@ -180,6 +195,7 @@ create policy "own forms"        on forms         for all using (auth.uid() = ow
 create policy "own submissions"  on submissions   for select using (auth.uid() = (select owner from forms where forms.id = submissions.form_id));
 create policy "own contacts"     on contacts      for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own leads"        on leads         for all using (auth.uid() = owner) with check (auth.uid() = owner);
+create policy "own dup flags"    on duplicate_flags for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own activities"   on activities    for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own defs"         on property_defs for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own tasks"        on tasks         for all using (auth.uid() = owner) with check (auth.uid() = owner);

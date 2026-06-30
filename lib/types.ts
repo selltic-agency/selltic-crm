@@ -47,6 +47,17 @@ export type Lead = {
   updated_at: string;
 };
 
+// Flaga potencjalnego duplikatu kontaktu (Faza 9.2) — surfaced w UI w 9.3.
+export type DuplicateFlag = {
+  id: string;
+  owner: string;
+  contact_a: string;
+  contact_b: string;
+  reason: string;
+  resolved: boolean;
+  created_at: string;
+};
+
 export type Activity = {
   id: string;
   owner: string;
