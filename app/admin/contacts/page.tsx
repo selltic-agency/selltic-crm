@@ -113,6 +113,7 @@ function AddContactModal({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
+      setError("Sesja wygasła. Zaloguj się ponownie i spróbuj jeszcze raz.");
       return;
     }
     const { data, error } = await supabase
@@ -128,7 +129,7 @@ function AddContactModal({
       .single();
     setSaving(false);
     if (error) {
-      setError("Nie udało się zapisać (czy e-mail nie jest już użyty?).");
+      setError(`Nie udało się zapisać: ${error.message}`);
       return;
     }
     if (data) onCreated(data as Contact);

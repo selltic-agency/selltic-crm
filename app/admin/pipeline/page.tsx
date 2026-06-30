@@ -308,6 +308,7 @@ function AddLeadModal({
     } = await supabase.auth.getUser();
     if (!user) {
       setSaving(false);
+      setError("Sesja wygasła. Zaloguj się ponownie i spróbuj jeszcze raz.");
       return;
     }
 
@@ -340,7 +341,7 @@ function AddLeadModal({
 
     if (!contactId) {
       setSaving(false);
-      setError("Nie udało się zapisać kontaktu.");
+      setError(cErr?.message ? `Nie udało się zapisać kontaktu: ${cErr.message}` : "Nie udało się zapisać kontaktu.");
       return;
     }
 
@@ -354,7 +355,7 @@ function AddLeadModal({
 
     setSaving(false);
     if (lErr) {
-      setError("Nie udało się zapisać leada.");
+      setError(`Nie udało się zapisać leada: ${lErr.message}`);
       return;
     }
     onCreated();

@@ -39,7 +39,7 @@ export default function PublicForm({ formId, schema, embed }: Props) {
       // Wysyłka „best effort” — ekran podziękowania pokaże się niezależnie
       // (FormRenderer przełącza na krok `end` po wywołaniu onSubmit).
       try {
-        await fetch("/api/submit", {
+        const res = await fetch("/api/submit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -52,6 +52,10 @@ export default function PublicForm({ formId, schema, embed }: Props) {
             },
           }),
         });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          console.error("[public-form submit] serwer odrzucił zgłoszenie:", res.status, body);
+        }
       } catch (e) {
         // Sieć padła — i tak nie blokujemy użytkownika.
         console.error("[public-form submit]", e);
