@@ -1,14 +1,16 @@
-// app/admin/calendar/page.tsx — Kalendarz zadań (miesiąc), Faza „Calendar”.
+// app/admin/calendar/page.tsx — Kalendarz zadań (miesiąc/tydzień/dzień).
 // Prosty model bez workspace/multi-login z Fazy 11: dwie osoby (Dominik/Kuba)
 // dzielą jedno konto, rozróżniane polem `assignee` na tasks/leads.
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, X, Clock, User } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Clock, User, CalendarDays, CalendarRange, Calendar as CalendarIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, formatDateTime } from "@/lib/ui";
 import type { Assignee, Task } from "@/lib/types";
+
+type View = "month" | "week" | "day";
 
 const WEEKDAYS = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"];
 const MONTH_NAMES = [
@@ -25,10 +27,24 @@ const ASSIGNEE_LABEL: Record<Assignee, string> = {
   kuba: "Kuba",
 };
 
-const MAX_VISIBLE_PER_DAY = 3;
+const MAX_VISIBLE_MONTH = 3;
+const MAX_VISIBLE_WEEK = 6;
 
 function startOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+function startOfDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function startOfWeek(d: Date) {
+  // Poniedziałek (konwencja PL).
+  const wd = (d.getDay() + 6) % 7;
+  return startOfDay(addDays(d, -wd));
+}
+function addDays(d: Date, n: number) {
+  const nd = new Date(d);
+  nd.setDate(nd.getDate() + n);
+  return nd;
 }
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -37,37 +53,48 @@ function dayKey(d: Date) {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-// Siatka 6×7 dni obejmująca cały miesiąc + dopełnienie sąsiednich miesięcy,
-// zaczynając od poniedziałku (konwencja PL).
-function buildGrid(monthStart: Date): Date[] {
-  const firstWeekday = (monthStart.getDay() + 6) % 7; // 0 = poniedziałek
-  const gridStart = new Date(monthStart);
-  gridStart.setDate(monthStart.getDate() - firstWeekday);
-  return Array.from({ length: 42 }, (_, i) => {
-    const d = new Date(gridStart);
-    d.setDate(gridStart.getDate() + i);
-    return d;
-  });
+// Siatka 6×7 dni obejmująca cały miesiąc + dopełnienie sąsiednich miesięcy.
+function buildMonthGrid(monthStart: Date): Date[] {
+  const gridStart = startOfWeek(monthStart);
+  return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
 }
 
 export default function CalendarPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
-  const [monthStart, setMonthStart] = useState(() => startOfMonth(new Date()));
+  const [view, setView] = useState<View>("month");
+  const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [ownerFilter, setOwnerFilter] = useState<"all" | Assignee>("all");
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   const today = useMemo(() => new Date(), []);
-  const grid = useMemo(() => buildGrid(monthStart), [monthStart]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("selltic_calendar_view");
+    if (saved === "month" || saved === "week" || saved === "day") setView(saved);
+  }, []);
+
+  function changeView(v: View) {
+    setView(v);
+    localStorage.setItem("selltic_calendar_view", v);
+  }
+
+  // Dni widoczne w bieżącym widoku — siatka miesiąca, tydzień (Pon–Nd) lub jeden dzień.
+  const days = useMemo(() => {
+    if (view === "month") return buildMonthGrid(startOfMonth(anchor));
+    if (view === "week") {
+      const s = startOfWeek(anchor);
+      return Array.from({ length: 7 }, (_, i) => addDays(s, i));
+    }
+    return [startOfDay(anchor)];
+  }, [view, anchor]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    // Pobierz z marginesem, by wypełnić dopełniające dni z sąsiednich miesięcy.
-    const rangeStart = new Date(grid[0]);
-    const rangeEnd = new Date(grid[grid.length - 1]);
-    rangeEnd.setDate(rangeEnd.getDate() + 1);
+    const rangeStart = days[0];
+    const rangeEnd = addDays(days[days.length - 1], 1);
     const { data } = await supabase
       .from("tasks")
       .select("*, contacts(id, name)")
@@ -76,7 +103,7 @@ export default function CalendarPage() {
       .order("due_at", { ascending: true });
     setTasks((data as Task[]) ?? []);
     setLoading(false);
-  }, [supabase, grid]);
+  }, [supabase, days]);
 
   useEffect(() => {
     load();
@@ -101,15 +128,35 @@ export default function CalendarPage() {
 
   const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
 
-  function prevMonth() {
-    setMonthStart((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
+  function goPrev() {
+    setAnchor((a) => {
+      if (view === "month") return new Date(a.getFullYear(), a.getMonth() - 1, 1);
+      if (view === "week") return addDays(a, -7);
+      return addDays(a, -1);
+    });
   }
-  function nextMonth() {
-    setMonthStart((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
+  function goNext() {
+    setAnchor((a) => {
+      if (view === "month") return new Date(a.getFullYear(), a.getMonth() + 1, 1);
+      if (view === "week") return addDays(a, 7);
+      return addDays(a, 1);
+    });
   }
   function goToday() {
-    setMonthStart(startOfMonth(new Date()));
+    setAnchor(startOfDay(new Date()));
   }
+
+  const headerLabel = useMemo(() => {
+    if (view === "month") return `${MONTH_NAMES[anchor.getMonth()]} ${anchor.getFullYear()}`;
+    if (view === "week") {
+      const s = days[0];
+      const e = days[6];
+      const sLabel = s.toLocaleDateString("pl-PL", { day: "2-digit", month: "short" });
+      const eLabel = e.toLocaleDateString("pl-PL", { day: "2-digit", month: "short", year: "numeric" });
+      return `${sLabel} – ${eLabel}`;
+    }
+    return anchor.toLocaleDateString("pl-PL", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+  }, [view, anchor, days]);
 
   const selectedDayTasks = selectedDay ? tasksByDay.get(dayKey(selectedDay)) ?? [] : [];
 
@@ -129,15 +176,16 @@ export default function CalendarPage() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <OwnerFilter value={ownerFilter} onChange={setOwnerFilter} />
+          <ViewSwitcher value={view} onChange={changeView} />
 
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <IconButton onClick={prevMonth} label="Poprzedni miesiąc">
+            <IconButton onClick={goPrev} label="Wstecz">
               <ChevronLeft size={16} />
             </IconButton>
-            <span style={{ fontSize: 14, fontWeight: 700, minWidth: 150, textAlign: "center" }}>
-              {MONTH_NAMES[monthStart.getMonth()]} {monthStart.getFullYear()}
+            <span style={{ fontSize: 14, fontWeight: 700, minWidth: 150, textAlign: "center", textTransform: "capitalize" }}>
+              {headerLabel}
             </span>
-            <IconButton onClick={nextMonth} label="Następny miesiąc">
+            <IconButton onClick={goNext} label="Dalej">
               <ChevronRight size={16} />
             </IconButton>
           </div>
@@ -150,8 +198,16 @@ export default function CalendarPage() {
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      ) : view === "day" ? (
+        <DayView
+          day={days[0]}
+          tasks={tasksByDay.get(dayKey(days[0])) ?? []}
+          showOwnerDot={ownerFilter === "all"}
+          onOpenContact={openContact}
+        />
       ) : (
         <div
+          className="selltic-scroll-x"
           style={{
             background: tokens.card,
             border: `1px solid ${tokens.border}`,
@@ -159,92 +215,97 @@ export default function CalendarPage() {
             overflow: "hidden",
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: `1px solid ${tokens.border}` }}>
-            {WEEKDAYS.map((w) => (
-              <div
-                key={w}
-                style={{
-                  padding: "10px 8px",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: tokens.muted,
-                  textAlign: "center",
-                }}
-              >
-                {w}
-              </div>
-            ))}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
-            {grid.map((d, i) => {
-              const inMonth = d.getMonth() === monthStart.getMonth();
-              const isToday = isSameDay(d, today);
-              const dayTasks = tasksByDay.get(dayKey(d)) ?? [];
-              const visible = dayTasks.slice(0, MAX_VISIBLE_PER_DAY);
-              const overflow = dayTasks.length - visible.length;
-
-              return (
-                <button
-                  key={i}
-                  onClick={() => setSelectedDay(d)}
+          <div style={{ minWidth: view === "week" ? 700 : undefined }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: `1px solid ${tokens.border}` }}>
+              {(view === "month" ? WEEKDAYS : days).map((w, i) => (
+                <div
+                  key={view === "month" ? (w as string) : (w as Date).toISOString()}
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "stretch",
-                    gap: 4,
-                    minHeight: 104,
-                    padding: "8px 6px",
-                    border: "none",
-                    borderRight: (i + 1) % 7 !== 0 ? `1px solid ${tokens.border}` : "none",
-                    borderTop: i >= 7 ? `1px solid ${tokens.border}` : "none",
-                    background: isToday ? tokens.accentSoft : "transparent",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    font: "inherit",
+                    padding: "10px 8px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: view === "week" && isSameDay(w as Date, today) ? tokens.accent : tokens.muted,
+                    textAlign: "center",
                   }}
                 >
-                  <span
+                  {view === "month" ? (w as string) : `${WEEKDAYS[i]} ${(w as Date).getDate()}`}
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
+              {days.map((d, i) => {
+                const inMonth = view === "month" ? d.getMonth() === anchor.getMonth() : true;
+                const isToday = isSameDay(d, today);
+                const dayTasks = tasksByDay.get(dayKey(d)) ?? [];
+                const maxVisible = view === "month" ? MAX_VISIBLE_MONTH : MAX_VISIBLE_WEEK;
+                const visible = dayTasks.slice(0, maxVisible);
+                const overflow = dayTasks.length - visible.length;
+
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedDay(d)}
                     style={{
-                      fontSize: 12.5,
-                      fontWeight: isToday ? 800 : 600,
-                      color: isToday ? tokens.accent : inMonth ? tokens.text : tokens.muted,
-                      opacity: inMonth ? 1 : 0.55,
-                      width: 22,
-                      height: 22,
-                      display: "grid",
-                      placeItems: "center",
-                      borderRadius: "50%",
-                      background: isToday ? tokens.accent : "transparent",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "stretch",
+                      gap: 4,
+                      minHeight: view === "week" ? 280 : 104,
+                      padding: "8px 6px",
+                      border: "none",
+                      borderRight: (i + 1) % 7 !== 0 ? `1px solid ${tokens.border}` : "none",
+                      borderTop: view === "month" && i >= 7 ? `1px solid ${tokens.border}` : "none",
+                      background: isToday ? tokens.accentSoft : "transparent",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      font: "inherit",
                     }}
                   >
-                    <span style={{ color: isToday ? "#fff" : "inherit" }}>{d.getDate()}</span>
-                  </span>
-
-                  <div style={{ display: "grid", gap: 3 }}>
-                    {visible.map((t) => (
-                      <TaskChip key={t.id} task={t} showOwnerDot={ownerFilter === "all"} />
-                    ))}
-                    {overflow > 0 && (
+                    {view === "month" && (
                       <span
                         style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: tokens.accent,
-                          padding: "1px 4px",
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDay(d);
+                          fontSize: 12.5,
+                          fontWeight: isToday ? 800 : 600,
+                          color: isToday ? tokens.accent : inMonth ? tokens.text : tokens.muted,
+                          opacity: inMonth ? 1 : 0.55,
+                          width: 22,
+                          height: 22,
+                          display: "grid",
+                          placeItems: "center",
+                          borderRadius: "50%",
+                          background: isToday ? tokens.accent : "transparent",
                         }}
                       >
-                        +{overflow} więcej
+                        <span style={{ color: isToday ? "#fff" : "inherit" }}>{d.getDate()}</span>
                       </span>
                     )}
-                  </div>
-                </button>
-              );
-            })}
+
+                    <div style={{ display: "grid", gap: 3 }}>
+                      {visible.map((t) => (
+                        <TaskChip key={t.id} task={t} showOwnerDot={ownerFilter === "all"} />
+                      ))}
+                      {overflow > 0 && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: tokens.accent,
+                            padding: "1px 4px",
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedDay(d);
+                          }}
+                        >
+                          +{overflow} więcej
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -258,6 +319,109 @@ export default function CalendarPage() {
           onOpenContact={openContact}
         />
       )}
+    </div>
+  );
+}
+
+// Widok dnia: pełna lista zadań tego dnia, bez obcinania/popovera (jest już
+// na to dość miejsca) — ten sam wiersz zadania co w DayPanel.
+function DayView({
+  day,
+  tasks,
+  showOwnerDot,
+  onOpenContact,
+}: {
+  day: Date;
+  tasks: Task[];
+  showOwnerDot: boolean;
+  onOpenContact: (id: string) => void;
+}) {
+  const sorted = [...tasks].sort((a, b) => (a.due_at ?? "").localeCompare(b.due_at ?? ""));
+  return (
+    <div
+      style={{
+        background: tokens.card,
+        border: `1px solid ${tokens.border}`,
+        borderRadius: tokens.radius,
+        padding: 20,
+      }}
+    >
+      {sorted.length === 0 ? (
+        <p style={{ fontSize: 14, color: tokens.muted, margin: 0 }}>Brak zadań tego dnia.</p>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {sorted.map((t) => (
+            <TaskRow key={t.id} task={t} showOwnerDot={showOwnerDot} onOpenContact={onOpenContact} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskRow({
+  task,
+  showOwnerDot,
+  onOpenContact,
+}: {
+  task: Task;
+  showOwnerDot: boolean;
+  onOpenContact: (id: string) => void;
+}) {
+  const overdue = isOverdue(task);
+  return (
+    <div
+      onClick={() => task.contact_id && onOpenContact(task.contact_id)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: `1px solid ${overdue && !task.done ? tokens.danger : tokens.border}`,
+        background: overdue && !task.done ? `${tokens.danger}0D` : "#fff",
+        cursor: task.contact_id ? "pointer" : "default",
+        opacity: task.done ? 0.6 : 1,
+      }}
+    >
+      {showOwnerDot && task.assignee && (
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: ASSIGNEE_COLOR[task.assignee],
+            flexShrink: 0,
+          }}
+          title={ASSIGNEE_LABEL[task.assignee]}
+        />
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            textDecoration: task.done ? "line-through" : "none",
+            color: overdue && !task.done ? tokens.danger : tokens.text,
+          }}
+        >
+          {task.title}
+        </div>
+        <div style={{ display: "flex", gap: 12, marginTop: 3, flexWrap: "wrap" }}>
+          {task.due_at && (
+            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.muted }}>
+              <Clock size={12} />
+              {formatDateTime(task.due_at)}
+            </span>
+          )}
+          {task.contacts && (
+            <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.accent, fontWeight: 600 }}>
+              <User size={12} />
+              {task.contacts.name || "Kontakt"}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -355,69 +519,49 @@ function DayPanel({
           <p style={{ fontSize: 14, color: tokens.muted, margin: 0 }}>Brak zadań tego dnia.</p>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {sorted.map((t) => {
-              const overdue = isOverdue(t);
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => t.contact_id && onOpenContact(t.contact_id)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: `1px solid ${overdue && !t.done ? tokens.danger : tokens.border}`,
-                    background: overdue && !t.done ? `${tokens.danger}0D` : "#fff",
-                    cursor: t.contact_id ? "pointer" : "default",
-                    opacity: t.done ? 0.6 : 1,
-                  }}
-                >
-                  {showOwnerDot && t.assignee && (
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: ASSIGNEE_COLOR[t.assignee],
-                        flexShrink: 0,
-                      }}
-                      title={ASSIGNEE_LABEL[t.assignee]}
-                    />
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 600,
-                        textDecoration: t.done ? "line-through" : "none",
-                        color: overdue && !t.done ? tokens.danger : tokens.text,
-                      }}
-                    >
-                      {t.title}
-                    </div>
-                    <div style={{ display: "flex", gap: 12, marginTop: 3, flexWrap: "wrap" }}>
-                      {t.due_at && (
-                        <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.muted }}>
-                          <Clock size={12} />
-                          {formatDateTime(t.due_at)}
-                        </span>
-                      )}
-                      {t.contacts && (
-                        <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.accent, fontWeight: 600 }}>
-                          <User size={12} />
-                          {t.contacts.name || "Kontakt"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {sorted.map((t) => (
+              <TaskRow key={t.id} task={t} showOwnerDot={showOwnerDot} onOpenContact={onOpenContact} />
+            ))}
           </div>
         )}
       </div>
     </>
+  );
+}
+
+function ViewSwitcher({ value, onChange }: { value: View; onChange: (v: View) => void }) {
+  const options: [View, string, typeof CalendarIcon][] = [
+    ["month", "Miesiąc", CalendarIcon],
+    ["week", "Tydzień", CalendarRange],
+    ["day", "Dzień", CalendarDays],
+  ];
+  return (
+    <div style={{ display: "flex", background: tokens.border, padding: 2, borderRadius: 10, gap: 2 }}>
+      {options.map(([key, label, Icon]) => (
+        <button
+          key={key}
+          onClick={() => onChange(key)}
+          title={label}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 12px",
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            border: "none",
+            cursor: "pointer",
+            background: value === key ? tokens.card : "transparent",
+            color: value === key ? tokens.accent : tokens.muted,
+            boxShadow: value === key ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
+          }}
+        >
+          <Icon size={14} />
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }
 
