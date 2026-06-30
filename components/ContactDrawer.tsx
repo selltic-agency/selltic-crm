@@ -26,9 +26,7 @@ import {
   type ActivityType,
   type Contact,
   type PropertyDef,
-  type Stage,
 } from "@/lib/types";
-import { useStages } from "@/lib/stages";
 import { useToast } from "@/components/Toast";
 
 type ComposerTab = "note" | "call" | "email" | "task";
@@ -61,7 +59,6 @@ export default function ContactDrawer({
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const reduce = useReducedMotion();
-  const { stages, stageMeta } = useStages();
   const [contact, setContact] = useState<Contact | null>(null);
   const [defs, setDefs] = useState<PropertyDef[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -102,32 +99,6 @@ export default function ContactDrawer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  async function changeStage(stage: Stage) {
-    if (!contact || contact.stage === stage) return;
-    const prev = contact.stage;
-    setContact({ ...contact, stage }); // optymistycznie
-    const { error } = await supabase
-      .from("contacts")
-      .update({ stage })
-      .eq("id", contact.id);
-    if (error) {
-      setContact({ ...contact, stage: prev });
-      return;
-    }
-    // automatyczna aktywność „etap”
-    const { data } = await supabase
-      .from("activities")
-      .insert({
-        owner: contact.owner,
-        contact_id: contact.id,
-        type: "stage",
-        body: `Etap zmieniony na: ${stageMeta(stage).label}`,
-      })
-      .select()
-      .single();
-    if (data) setActivities((list) => [data as Activity, ...list]);
-  }
 
   // Zapis pojedynczej właściwości dynamicznej (props JSON).
   async function saveProp(key: string, value: string) {
@@ -288,50 +259,6 @@ export default function ContactDrawer({
             </p>
           ) : (
             <>
-              {/* Etapy */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 22 }}>
-                {stages.map((s) => {
-                  const active = contact.stage === s.key;
-                  return (
-                    <button
-                      key={s.key}
-                      onClick={() => changeStage(s.key)}
-                      style={{
-                        position: "relative",
-                        padding: "6px 12px",
-                        borderRadius: 999,
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        border: `1px solid ${active ? s.color : tokens.border}`,
-                        background: active ? "transparent" : "#fff",
-                        color: active ? "#fff" : tokens.muted,
-                        transition: `color .15s ${tokens.ease}, border-color .15s ${tokens.ease}`,
-                      }}
-                    >
-                      {active && (
-                        <motion.span
-                          layoutId="selltic-stage-pill"
-                          transition={
-                            reduce
-                              ? { duration: 0 }
-                              : { type: "spring", stiffness: 400, damping: 32 }
-                          }
-                          style={{
-                            position: "absolute",
-                            inset: 0,
-                            borderRadius: 999,
-                            background: s.color,
-                            zIndex: 0,
-                          }}
-                        />
-                      )}
-                      <span style={{ position: "relative", zIndex: 1 }}>{s.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
               {/* Właściwości */}
               <SectionTitle>Właściwości</SectionTitle>
               <div style={{ display: "grid", gap: 12, marginBottom: 8 }}>
@@ -349,17 +276,6 @@ export default function ContactDrawer({
                     onBlur={(e) => saveField("phone", e.target.value)}
                     style={inputStyle}
                   />
-                </Field>
-                <Field label="Źródło">
-                  <div
-                    style={{
-                      ...inputStyle,
-                      background: tokens.bg,
-                      color: tokens.muted,
-                    }}
-                  >
-                    {contact.source || "—"}
-                  </div>
                 </Field>
 
                 {defs.map((def) => (

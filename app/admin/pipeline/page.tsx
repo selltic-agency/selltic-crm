@@ -11,10 +11,8 @@ import {
   inputStyle,
   primaryButton,
   ghostButton,
-  formatPLN,
 } from "@/lib/ui";
-import { type Contact, type Stage } from "@/lib/types";
-import { useStages } from "@/lib/stages";
+import { type Contact } from "@/lib/types";
 import ContactDrawer from "@/components/ContactDrawer";
 import ContactTable from "@/components/ContactTable";
 import FilterBar from "@/components/FilterBar";
@@ -23,7 +21,6 @@ import { Filter, buildFilterQuery } from "@/lib/filters";
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
-  const { stages } = useStages();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawerContact, setDrawerContact] = useState<string | null>(null);
@@ -62,17 +59,7 @@ export default function PipelinePage() {
     load(filters);
   }, [load, filters]);
 
-  const byStage = useMemo(() => {
-    const map: Record<Stage, Contact[]> = {};
-    for (const s of stages) map[s.key] = [];
-    for (const c of contacts) {
-      if (!map[c.stage]) map[c.stage] = [];
-      map[c.stage].push(c);
-    }
-    return map;
-  }, [contacts, stages]);
-
-  // Po zamknięciu panelu odśwież (etap mógł się zmienić w drawerze).
+  // Po zamknięciu panelu odśwież.
   function closeDrawer() {
     setDrawerContact(null);
     load(filters);
@@ -139,138 +126,57 @@ export default function PipelinePage() {
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : viewMode === "kanban" ? (
-        <div
-          className="selltic-scroll-x"
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${stages.length}, minmax(200px, 1fr))`,
-            gap: 14,
-            overflowX: "auto",
-            paddingBottom: 8,
-          }}
-        >
-          {stages.map((s) => {
-            const list = byStage[s.key] ?? [];
-            const total = list.reduce((sum, c) => sum + Number(c.value || 0), 0);
-            return (
-              <div key={s.key} style={{ minWidth: 220 }}>
-                <div
+        // Faza 9.1: etap/wartość/źródło przeniesione na leady. Lejek leadów
+        // (kanban po etapach) wraca w Fazie 9.4 z osobnym widokiem leadów.
+        // Tu pokazujemy kontakty jako tożsamości — siatka kart.
+        contacts.length === 0 ? (
+          <p style={{ fontSize: 13, color: tokens.muted }}>Brak kontaktów.</p>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <AnimatePresence initial={false}>
+              {contacts.map((c) => (
+                <motion.button
+                  key={c.id}
+                  layout={!reduce}
+                  onClick={() => setDrawerContact(c.id)}
+                  initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+                  whileHover={reduce ? undefined : { scale: 1.02, y: -2 }}
+                  transition={
+                    reduce ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 32 }
+                  }
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                    marginBottom: 10,
-                    padding: "0 2px",
-                  }}
-                >
-                  {/* Wiersz 1: kropka + nazwa etapu (zawija się przy długich nazwach z 8.3). */}
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                    <span
-                      style={{
-                        width: 9,
-                        height: 9,
-                        borderRadius: "50%",
-                        background: s.color,
-                        flexShrink: 0,
-                        marginTop: 5,
-                      }}
-                    />
-                    <span
-                      title={s.label}
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 700,
-                        lineHeight: 1.3,
-                        wordBreak: "break-word",
-                      }}
-                    >
-                      {s.label}
-                    </span>
-                  </div>
-                  {/* Wiersz 2: licznik kontaktów + suma wartości (PLN). */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 17 }}>
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: tokens.muted,
-                        background: tokens.card,
-                        border: `1px solid ${tokens.border}`,
-                        borderRadius: 999,
-                        padding: "1px 8px",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {list.length}
-                    </span>
-                    <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 600, color: tokens.muted }}>
-                      {formatPLN(total)}
-                    </span>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 8,
-                    background: tokens.bg,
+                    textAlign: "left",
+                    background: tokens.card,
+                    border: `1px solid ${tokens.border}`,
                     borderRadius: 12,
-                    minHeight: 60,
-                    padding: 4,
+                    padding: "12px 13px",
+                    cursor: "pointer",
+                    display: "grid",
+                    gap: 6,
                   }}
                 >
-                  {list.length === 0 ? (
-                    <p style={{ fontSize: 12.5, color: tokens.muted, padding: "12px 8px", margin: 0 }}>
-                      Brak kontaktów
-                    </p>
-                  ) : (
-                    <AnimatePresence initial={false}>
-                      {list.map((c) => (
-                        <motion.button
-                          key={c.id}
-                          layout={!reduce}
-                          onClick={() => setDrawerContact(c.id)}
-                          initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
-                          whileHover={reduce ? undefined : { scale: 1.02, y: -2 }}
-                          transition={
-                            reduce ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 32 }
-                          }
-                          style={{
-                            textAlign: "left",
-                            background: tokens.card,
-                            border: `1px solid ${tokens.border}`,
-                            borderRadius: 12,
-                            padding: "12px 13px",
-                            cursor: "pointer",
-                            display: "grid",
-                            gap: 6,
-                          }}
-                        >
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>
-                            {c.name || "Bez nazwy"}
-                          </div>
-                          {c.company && (
-                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{c.company}</div>
-                          )}
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                            <span style={{ fontSize: 11.5, color: tokens.muted }}>
-                              {c.source ? `📋 ${c.source}` : "ręcznie"}
-                            </span>
-                            {Number(c.value) > 0 && (
-                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(c.value)}</span>
-                            )}
-                          </div>
-                        </motion.button>
-                      ))}
-                    </AnimatePresence>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>
+                    {c.name || "Bez nazwy"}
+                  </div>
+                  {c.company && (
+                    <div style={{ fontSize: 12.5, color: tokens.muted }}>{c.company}</div>
                   )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                  {c.email && (
+                    <div style={{ fontSize: 11.5, color: tokens.muted }}>{c.email}</div>
+                  )}
+                </motion.button>
+              ))}
+            </AnimatePresence>
+          </div>
+        )
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
           <ContactTable contacts={contacts} onRowClick={setDrawerContact} />
@@ -304,13 +210,10 @@ function AddContactModal({
   onCreated: (c: Contact) => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
-  const { stages } = useStages();
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [value, setValue] = useState("");
-  const [stage, setStage] = useState<Stage>(stages[0]?.key ?? "new");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -326,6 +229,8 @@ function AddContactModal({
       setSaving(false);
       return;
     }
+    // Faza 9.1: kontakt to sama tożsamość. Tworzenie leada (etap/wartość/
+    // źródło) dochodzi z widokiem leadów w kolejnych fazach.
     const { data, error } = await supabase
       .from("contacts")
       .insert({
@@ -334,9 +239,6 @@ function AddContactModal({
         company: company.trim() || null,
         email: email.trim() || null,
         phone: phone.trim() || null,
-        value: value ? Number(value) : 0,
-        stage,
-        source: "ręcznie",
       })
       .select()
       .single();
@@ -404,20 +306,6 @@ function AddContactModal({
             </Field>
             <Field label="Telefon">
               <input value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
-            </Field>
-          </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <Field label="Wartość (zł)">
-              <input type="number" value={value} onChange={(e) => setValue(e.target.value)} style={inputStyle} />
-            </Field>
-            <Field label="Etap">
-              <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} style={inputStyle}>
-                {stages.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
             </Field>
           </div>
 

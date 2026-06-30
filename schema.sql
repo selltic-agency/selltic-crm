@@ -26,7 +26,9 @@ create table if not exists submissions (
   created_at  timestamptz not null default now()
 );
 
--- ── KONTAKTY (CRM) ──────────────────────────────────────────────────────
+-- ── KONTAKTY (CRM) — tożsamość osoby/firmy ──────────────────────────────
+-- Faza 9.1: kontakt to TRWAŁA tożsamość. Etap/wartość/źródło/formularz
+-- przeniesione do tabeli `leads` (jeden kontakt może mieć wiele leadów).
 create table if not exists contacts (
   id          uuid primary key default gen_random_uuid(),
   owner       uuid not null references auth.users on delete cascade,
@@ -34,21 +36,37 @@ create table if not exists contacts (
   email       text,
   phone       text,
   company     text,
-  stage       text not null default 'new',     -- new|contact|offer|won|lost
-  value       numeric not null default 0,
-  source      text,                            -- 'form:wycena' | 'cold-call' ...
-  form_id     uuid references forms on delete set null,
   props       jsonb not null default '{}',     -- wartości właściwości globalnych
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   unique (owner, email)                         -- pozwala na upsert po emailu
 );
 
+-- ── LEADY (CRM) — pojedyncza szansa sprzedaży, przypięta do kontaktu ─────
+-- Faza 9.1: to tu żyje etap lejka, wartość, źródło i powiązany formularz.
+-- Kontakt może mieć wiele leadów w czasie (osobne szanse sprzedaży).
+create table if not exists leads (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users on delete cascade,
+  contact_id  uuid not null references contacts on delete cascade,
+  stage       text not null default 'new',     -- references pipeline_stages.key
+  value       numeric not null default 0,
+  source      text,                            -- 'form:wycena' | 'cold-call' ...
+  form_id     uuid references forms on delete set null,
+  opened_at   timestamptz not null default now(),
+  closed_at   timestamptz,                      -- ustawiane gdy etap = is_won/is_lost
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
 -- ── AKTYWNOŚCI (oś czasu) ───────────────────────────────────────────────
+-- contact_id zawsze ustawione (oś czasu kontaktu). lead_id ustawiane tylko,
+-- gdy aktywność powstała w kontekście konkretnego leada (oś czasu leada).
 create table if not exists activities (
   id          uuid primary key default gen_random_uuid(),
   owner       uuid not null references auth.users on delete cascade,
   contact_id  uuid not null references contacts on delete cascade,
+  lead_id     uuid references leads on delete set null,
   type        text not null,                   -- note|call|email|submission|stage
   body        text,
   meta        jsonb,
@@ -120,8 +138,10 @@ create table if not exists app_settings (
 );
 
 -- ── INDEKSY ─────────────────────────────────────────────────────────────
-create index if not exists idx_contacts_owner_stage on contacts (owner, stage);
+create index if not exists idx_leads_owner_stage    on leads (owner, stage);
+create index if not exists idx_leads_contact         on leads (contact_id, opened_at desc);
 create index if not exists idx_activities_contact   on activities (contact_id, created_at desc);
+create index if not exists idx_activities_lead       on activities (lead_id, created_at desc);
 create index if not exists idx_submissions_form      on submissions (form_id, created_at desc);
 create index if not exists idx_tasks_owner_due       on tasks (owner, due_at) where done = false;
 create index if not exists idx_notifications_owner    on notifications (owner, created_at desc) where read = false;
@@ -135,6 +155,8 @@ drop trigger if exists t_forms_touch on forms;
 create trigger t_forms_touch before update on forms for each row execute function touch_updated_at();
 drop trigger if exists t_contacts_touch on contacts;
 create trigger t_contacts_touch before update on contacts for each row execute function touch_updated_at();
+drop trigger if exists t_leads_touch on leads;
+create trigger t_leads_touch before update on leads for each row execute function touch_updated_at();
 
 -- ════════════════════════════════════════════════════════════════════════
 -- RLS — tylko właściciel zarządza; publiczny świat czyta opublikowane formy.
@@ -144,6 +166,7 @@ create trigger t_contacts_touch before update on contacts for each row execute f
 alter table forms         enable row level security;
 alter table submissions   enable row level security;
 alter table contacts      enable row level security;
+alter table leads         enable row level security;
 alter table activities    enable row level security;
 alter table property_defs enable row level security;
 alter table tasks         enable row level security;
@@ -156,6 +179,7 @@ alter table table_view_config enable row level security;
 create policy "own forms"        on forms         for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own submissions"  on submissions   for select using (auth.uid() = (select owner from forms where forms.id = submissions.form_id));
 create policy "own contacts"     on contacts      for all using (auth.uid() = owner) with check (auth.uid() = owner);
+create policy "own leads"        on leads         for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own activities"   on activities    for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own defs"         on property_defs for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own tasks"        on tasks         for all using (auth.uid() = owner) with check (auth.uid() = owner);

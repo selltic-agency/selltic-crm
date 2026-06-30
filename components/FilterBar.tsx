@@ -17,10 +17,10 @@ type FieldDef = {
   options?: string[];
 };
 
+// Faza 9.1: etap/źródło/wartość przeniesione do leadów — w filtrach kontaktów
+// zostaje data utworzenia oraz pola własne (props). Filtry leadowe wrócą wraz
+// z widokiem leadów w kolejnych fazach.
 const BUILT_IN_FIELDS: FieldDef[] = [
-  { key: "stage", label: "Etap", type: "stage" },
-  { key: "source", label: "Źródło", type: "source" },
-  { key: "value", label: "Wartość", type: "value" },
   { key: "created_at", label: "Data utworzenia", type: "date" },
 ];
 

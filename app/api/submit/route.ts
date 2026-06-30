@@ -88,9 +88,10 @@ export async function POST(req: Request) {
       contactId = existing.id;
       await db.from("contacts").update({ name: name || undefined, phone: phone || undefined }).eq("id", contactId);
     } else {
+      // Faza 9.1: kontakt to sama tożsamość. Tworzenie leada (etap/źródło/
+      // formularz) dochodzi w Fazie 9.2 — tu zapisujemy wyłącznie kontakt.
       const { data: inserted, error: cErr } = await db.from("contacts").insert({
         owner: form.owner, name, email, phone,
-        stage: "new", source: form.slug ? `form:${form.slug}` : "form", form_id: form.id,
       }).select("id").single();
       if (cErr) throw cErr;
       contactId = inserted.id;

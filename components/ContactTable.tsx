@@ -5,9 +5,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Reorder } from "framer-motion";
 import { ChevronUp, ChevronDown, Settings2, GripVertical, X } from "lucide-react";
-import { tokens, formatPLN, formatDateTime, ghostButton } from "@/lib/ui";
+import { tokens, formatDateTime, ghostButton } from "@/lib/ui";
 import { Contact, PropertyDef } from "@/lib/types";
-import { useStages } from "@/lib/stages";
 import { createClient } from "@/lib/supabase/client";
 
 type SortConfig = {
@@ -28,20 +27,18 @@ type ContactTableProps = {
   onRowClick: (id: string) => void;
 };
 
+// Faza 9.1: etap/wartość/źródło przeniesione na leady — kolumny kontaktów to
+// teraz sama tożsamość + pola własne. Kolumny leadowe wrócą z widokiem leadów.
 const BUILT_IN_COLUMNS = [
   { key: "name", label: "Nazwa", width: 180 },
   { key: "company", label: "Firma", width: 150 },
   { key: "email", label: "E-mail", width: 200 },
   { key: "phone", label: "Telefon", width: 130 },
-  { key: "stage", label: "Etap", width: 130 },
-  { key: "value", label: "Wartość", width: 120 },
-  { key: "source", label: "Źródło", width: 120 },
   { key: "created_at", label: "Utworzono", width: 160 },
 ];
 
 export default function ContactTable({ contacts, onRowClick }: ContactTableProps) {
   const supabase = useMemo(() => createClient(), []);
-  const { stageMeta } = useStages();
   const [sort, setSort] = useState<SortConfig>({ key: "created_at", direction: "desc" });
   const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
   const [config, setConfig] = useState<TableColumn[]>([]);
@@ -110,7 +107,6 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
   }, [contacts, sort]);
 
   function getVal(c: Contact, key: string): any {
-    if (key === "value") return Number(c.value || 0);
     if (key === "created_at") return new Date(c.created_at).getTime();
     if (key in c) return (c as any)[key] || "";
     return c.props?.[key] || "";
@@ -209,7 +205,7 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
               >
                 {visibleColumns.map(col => (
                   <td key={col.key} style={{ ...tdStyle, width: col.width, maxWidth: col.width }}>
-                    {renderCell(c, col.key, stageMeta)}
+                    {renderCell(c, col.key)}
                   </td>
                 ))}
               </tr>
@@ -271,20 +267,9 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
   );
 }
 
-function renderCell(c: Contact, key: string, stageMeta: any) {
-  if (key === "stage") {
-    const meta = stageMeta(c.stage);
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
-        {meta.label}
-      </div>
-    );
-  }
-  if (key === "value") return formatPLN(c.value);
+function renderCell(c: Contact, key: string) {
   if (key === "created_at") return formatDateTime(c.created_at);
   if (key === "name") return <span style={{ fontWeight: 600 }}>{c.name || "—"}</span>;
-  if (key === "source") return c.source || "ręcznie";
 
   if (key in c) return (c as any)[key] || "—";
   return c.props?.[key] || "—";

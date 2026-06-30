@@ -18,6 +18,8 @@ export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | 
 
 export type PropertyType = "text" | "number" | "date" | "select";
 
+// Kontakt = trwała tożsamość osoby/firmy (Faza 9.1). Etap/wartość/źródło/
+// formularz przeniesione do `Lead` — jeden kontakt może mieć wiele leadów.
 export type Contact = {
   id: string;
   owner: string;
@@ -25,11 +27,22 @@ export type Contact = {
   email: string | null;
   phone: string | null;
   company: string | null;
+  props: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+// Lead = pojedyncza szansa sprzedaży przypięta do kontaktu (Faza 9.1).
+export type Lead = {
+  id: string;
+  owner: string;
+  contact_id: string;
   stage: Stage;
   value: number;
   source: string | null;
   form_id: string | null;
-  props: Record<string, string>;
+  opened_at: string;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -38,6 +51,7 @@ export type Activity = {
   id: string;
   owner: string;
   contact_id: string;
+  lead_id: string | null;
   type: ActivityType;
   body: string | null;
   meta: Record<string, unknown> | null;

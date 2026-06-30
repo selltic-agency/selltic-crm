@@ -28,7 +28,6 @@ import {
 } from "recharts";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, formatPLN } from "@/lib/ui";
-import { type Contact } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 
 type Kpis = {
@@ -66,26 +65,25 @@ export default function AnalyticsPage() {
     since.setDate(since.getDate() - 6);
 
     const [contactsRes, subsRes] = await Promise.all([
-      supabase.from("contacts").select("stage, value, source"),
+      supabase.from("contacts").select("id", { count: "exact", head: true }),
       supabase
         .from("submissions")
         .select("created_at")
         .gte("created_at", since.toISOString()),
     ]);
 
-    const contacts = (contactsRes.data as Pick<Contact, "stage" | "value" | "source">[]) ?? [];
     const subs = (subsRes.data as { created_at: string }[]) ?? [];
 
     // ── KPI ──────────────────────────────────────────────────────────────
-    const total = contacts.length;
-    const wonKeys = stages.filter((s) => s.is_won).map((s) => s.key);
-    const won = contacts.filter((c) => wonKeys.includes(c.stage));
-    const wonValue = won.reduce((sum, c) => sum + Number(c.value || 0), 0);
+    // Faza 9.1: etap/wartość przeniesione na leady. Konwersja, wygrane i
+    // wartość wygranych liczą się z leadów — wracają w Fazie 9.5. Tu pokazujemy
+    // jedynie liczbę kontaktów (tożsamości).
+    const total = contactsRes.count ?? 0;
     setKpis({
       contacts: total,
-      conversion: total ? Math.round((won.length / total) * 100) : 0,
-      won: won.length,
-      wonValue,
+      conversion: 0,
+      won: 0,
+      wonValue: 0,
     });
 
     // ── Zgłoszenia / dzień (7 dni) ───────────────────────────────────────
@@ -107,26 +105,11 @@ export default function AnalyticsPage() {
     }
     setPerDay(days);
 
-    // ── Kontakty wg etapu ────────────────────────────────────────────────
-    setPerStage(
-      stages.map((s) => ({
-        label: s.label,
-        value: contacts.filter((c) => c.stage === s.key).length,
-        color: s.color,
-      }))
-    );
-
-    // ── Kontakty wg źródła ───────────────────────────────────────────────
-    const bySource = new Map<string, number>();
-    for (const c of contacts) {
-      const key = c.source || "Bezpośrednio";
-      bySource.set(key, (bySource.get(key) ?? 0) + 1);
-    }
-    setPerSource(
-      [...bySource.entries()]
-        .map(([label, value]) => ({ label, value }))
-        .sort((a, b) => b.value - a.value)
-    );
+    // ── Leady wg etapu / źródła ──────────────────────────────────────────
+    // Faza 9.1: etap i źródło są teraz polami leadów, nie kontaktów. Pełne
+    // wykresy wrócą w Fazie 9.5 (liczone z `leads`); na razie pusto.
+    setPerStage(stages.map((s) => ({ label: s.label, value: 0, color: s.color })));
+    setPerSource([]);
 
     setLoading(false);
   }, [supabase, stages]);

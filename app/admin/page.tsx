@@ -18,13 +18,12 @@ import {
   CircleDot,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, formatDateTime, formatPLN } from "@/lib/ui";
+import { tokens, formatDateTime } from "@/lib/ui";
 import {
   type Activity,
   type Contact,
   type Task,
 } from "@/lib/types";
-import { useStages } from "@/lib/stages";
 import ContactDrawer from "@/components/ContactDrawer";
 
 const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
@@ -46,7 +45,6 @@ const QUICK = [
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
-  const { stageMeta } = useStages();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<
@@ -65,7 +63,6 @@ export default function DashboardPage() {
       supabase
         .from("contacts")
         .select("*")
-        .not("stage", "in", "(won,lost)")
         .order("updated_at", { ascending: false }),
       supabase
         .from("tasks")
@@ -173,51 +170,33 @@ export default function DashboardPage() {
             <Muted>Brak leadów w toku.</Muted>
           ) : (
             <div style={{ display: "grid", gap: 2 }}>
-              {contacts.slice(0, 8).map((c) => {
-                const sm = stageMeta(c.stage);
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => setDrawerContact(c.id)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "10px 6px",
-                      borderTop: `1px solid ${tokens.border}`,
-                      background: "none",
-                      border: "none",
-                      width: "100%",
-                      textAlign: "left",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>
-                        {c.name || "Bez nazwy"}
-                      </div>
-                      <div style={{ fontSize: 12, color: tokens.muted }}>
-                        {c.company || "—"}
-                      </div>
+              {contacts.slice(0, 8).map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setDrawerContact(c.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 6px",
+                    borderTop: `1px solid ${tokens.border}`,
+                    background: "none",
+                    border: "none",
+                    width: "100%",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>
+                      {c.name || "Bez nazwy"}
                     </div>
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        padding: "3px 10px",
-                        borderRadius: 999,
-                        background: `${sm.color}1A`,
-                        color: sm.color,
-                      }}
-                    >
-                      {sm.label}
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, minWidth: 70, textAlign: "right" }}>
-                      {formatPLN(c.value)}
-                    </span>
-                  </button>
-                );
-              })}
+                    <div style={{ fontSize: 12, color: tokens.muted }}>
+                      {c.company || "—"}
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
           )}
         </Card>

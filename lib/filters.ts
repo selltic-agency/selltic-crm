@@ -19,11 +19,9 @@ export type Filter = {
   value: any;
 };
 
-// Pola wbudowane w tabelę 'contacts'.
+// Pola wbudowane w tabelę 'contacts' (Faza 9.1: stage/source/value przeniesione
+// do leadów — filtry po nich wrócą wraz z widokiem leadów w kolejnych fazach).
 const BUILT_IN_FIELDS = [
-  "stage",
-  "source",
-  "value",
   "created_at",
   "name",
   "email",
