@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Trophy,
   Wallet,
+  Target,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -28,11 +29,11 @@ import {
 } from "recharts";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, formatPLN } from "@/lib/ui";
-import { type Contact } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 
 type Kpis = {
   contacts: number;
+  leads: number;
   conversion: number; // %
   won: number;
   wonValue: number;
@@ -52,7 +53,13 @@ export default function AnalyticsPage() {
   const supabase = useMemo(() => createClient(), []);
   const { stages } = useStages();
   const [loading, setLoading] = useState(true);
-  const [kpis, setKpis] = useState<Kpis>({ contacts: 0, conversion: 0, won: 0, wonValue: 0 });
+  const [kpis, setKpis] = useState<Kpis>({
+    contacts: 0,
+    leads: 0,
+    conversion: 0,
+    won: 0,
+    wonValue: 0,
+  });
   const [perDay, setPerDay] = useState<{ label: string; value: number }[]>([]);
   const [perStage, setPerStage] = useState<{ label: string; value: number; color: string }[]>([]);
   const [perSource, setPerSource] = useState<{ label: string; value: number }[]>([]);
@@ -65,25 +72,29 @@ export default function AnalyticsPage() {
     since.setHours(0, 0, 0, 0);
     since.setDate(since.getDate() - 6);
 
-    const [contactsRes, subsRes] = await Promise.all([
-      supabase.from("contacts").select("stage, value, source"),
+    const [contactsRes, leadsRes, subsRes] = await Promise.all([
+      supabase.from("contacts").select("id", { count: "exact", head: true }),
+      supabase.from("leads").select("stage, value, source"),
       supabase
         .from("submissions")
         .select("created_at")
         .gte("created_at", since.toISOString()),
     ]);
 
-    const contacts = (contactsRes.data as Pick<Contact, "stage" | "value" | "source">[]) ?? [];
+    const leads = (leadsRes.data as { stage: string; value: number; source: string | null }[]) ?? [];
     const subs = (subsRes.data as { created_at: string }[]) ?? [];
 
     // ── KPI ──────────────────────────────────────────────────────────────
-    const total = contacts.length;
+    const totalContacts = contactsRes.count ?? 0;
+    const totalLeads = leads.length;
     const wonKeys = stages.filter((s) => s.is_won).map((s) => s.key);
-    const won = contacts.filter((c) => wonKeys.includes(c.stage));
-    const wonValue = won.reduce((sum, c) => sum + Number(c.value || 0), 0);
+    const won = leads.filter((l) => wonKeys.includes(l.stage));
+    const wonValue = won.reduce((sum, l) => sum + Number(l.value || 0), 0);
+
     setKpis({
-      contacts: total,
-      conversion: total ? Math.round((won.length / total) * 100) : 0,
+      contacts: totalContacts,
+      leads: totalLeads,
+      conversion: totalLeads ? Math.round((won.length / totalLeads) * 100) : 0,
       won: won.length,
       wonValue,
     });
@@ -107,19 +118,19 @@ export default function AnalyticsPage() {
     }
     setPerDay(days);
 
-    // ── Kontakty wg etapu ────────────────────────────────────────────────
+    // ── Leady wg etapu ───────────────────────────────────────────────────
     setPerStage(
       stages.map((s) => ({
         label: s.label,
-        value: contacts.filter((c) => c.stage === s.key).length,
+        value: leads.filter((l) => l.stage === s.key).length,
         color: s.color,
       }))
     );
 
-    // ── Kontakty wg źródła ───────────────────────────────────────────────
+    // ── Leady wg źródła ──────────────────────────────────────────────────
     const bySource = new Map<string, number>();
-    for (const c of contacts) {
-      const key = c.source || "Bezpośrednio";
+    for (const l of leads) {
+      const key = l.source || "Bezpośrednio";
       bySource.set(key, (bySource.get(key) ?? 0) + 1);
     }
     setPerSource(
@@ -143,12 +154,13 @@ export default function AnalyticsPage() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
           gap: 14,
           marginBottom: 18,
         }}
       >
         <Kpi icon={Users} label="Kontakty" value={loading ? null : String(kpis.contacts)} />
+        <Kpi icon={Target} label="Leady" value={loading ? null : String(kpis.leads)} />
         <Kpi icon={TrendingUp} label="Konwersja" value={loading ? null : `${kpis.conversion}%`} />
         <Kpi icon={Trophy} label="Wygrane" value={loading ? null : String(kpis.won)} />
         <Kpi icon={Wallet} label="Wartość wygranych" value={loading ? null : formatPLN(kpis.wonValue)} />
@@ -192,8 +204,8 @@ export default function AnalyticsPage() {
           marginTop: 18,
         }}
       >
-        {/* Kontakty wg etapu */}
-        <ChartCard title="Kontakty wg etapu">
+        {/* Leady wg etapu */}
+        <ChartCard title="Leady wg etapu">
           {loading ? (
             <ChartSkeleton />
           ) : (
@@ -203,7 +215,7 @@ export default function AnalyticsPage() {
                 <XAxis dataKey="label" tick={axisTick} axisLine={false} tickLine={false} />
                 <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} width={32} />
                 <Tooltip {...tooltipProps} cursor={{ fill: tokens.accentSoft }} />
-                <Bar dataKey="value" name="Kontakty" radius={[8, 8, 0, 0]}>
+                <Bar dataKey="value" name="Leady" radius={[8, 8, 0, 0]}>
                   {perStage.map((s) => (
                     <Cell key={s.label} fill={s.color} />
                   ))}
@@ -213,8 +225,8 @@ export default function AnalyticsPage() {
           )}
         </ChartCard>
 
-        {/* Kontakty wg źródła */}
-        <ChartCard title="Kontakty wg źródła">
+        {/* Leady wg źródła */}
+        <ChartCard title="Leady wg źródła">
           {loading ? (
             <ChartSkeleton />
           ) : perSource.length === 0 ? (

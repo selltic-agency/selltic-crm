@@ -1,9 +1,11 @@
-// app/admin/pipeline/page.tsx — lejek sprzedaży (kanban).
-// 5 kolumn etapów; karty kontaktów; klik karty otwiera ContactDrawer.
+// app/admin/pipeline/page.tsx — lejek sprzedaży (kanban / tabela) na LEADACH.
+// Faza 9.4: karty/wiersze to leady, złączone z danymi kontaktu. Klik prowadzi
+// na stronę leada (/admin/leads/[id]).
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Plus, X, KanbanSquare, Table } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -13,30 +15,28 @@ import {
   ghostButton,
   formatPLN,
 } from "@/lib/ui";
-import { type Contact, type Stage } from "@/lib/types";
+import { type LeadWithContact, type Stage } from "@/lib/types";
 import { useStages } from "@/lib/stages";
-import ContactDrawer from "@/components/ContactDrawer";
-import ContactTable from "@/components/ContactTable";
+import LeadTable from "@/components/LeadTable";
 import FilterBar from "@/components/FilterBar";
 import { Filter, buildFilterQuery } from "@/lib/filters";
+
+const LEAD_SELECT = "*, contacts!inner(id, name, company, email, phone, props)";
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
+  const router = useRouter();
   const { stages } = useStages();
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [leads, setLeads] = useState<LeadWithContact[]>([]);
   const [loading, setLoading] = useState(true);
-  const [drawerContact, setDrawerContact] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
 
-  // Load viewMode from localStorage
   useEffect(() => {
     const saved = localStorage.getItem("selltic_pipeline_view");
-    if (saved === "kanban" || saved === "table") {
-      setViewMode(saved);
-    }
+    if (saved === "kanban" || saved === "table") setViewMode(saved);
   }, []);
 
   const toggleView = (mode: "kanban" | "table") => {
@@ -47,14 +47,14 @@ export default function PipelinePage() {
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
     let query = supabase
-      .from("contacts")
-      .select("*")
-      .order("updated_at", { ascending: false });
+      .from("leads")
+      .select(LEAD_SELECT)
+      .order("opened_at", { ascending: false });
 
     query = buildFilterQuery(query, activeFilters);
 
     const { data } = await query;
-    setContacts((data as Contact[]) ?? []);
+    setLeads((data as LeadWithContact[]) ?? []);
     setLoading(false);
   }, [supabase]);
 
@@ -62,21 +62,17 @@ export default function PipelinePage() {
     load(filters);
   }, [load, filters]);
 
+  const openLead = (id: string) => router.push(`/admin/leads/${id}`);
+
   const byStage = useMemo(() => {
-    const map: Record<Stage, Contact[]> = {};
+    const map: Record<Stage, LeadWithContact[]> = {};
     for (const s of stages) map[s.key] = [];
-    for (const c of contacts) {
-      if (!map[c.stage]) map[c.stage] = [];
-      map[c.stage].push(c);
+    for (const l of leads) {
+      if (!map[l.stage]) map[l.stage] = [];
+      map[l.stage].push(l);
     }
     return map;
-  }, [contacts, stages]);
-
-  // Po zamknięciu panelu odśwież (etap mógł się zmienić w drawerze).
-  function closeDrawer() {
-    setDrawerContact(null);
-    load(filters);
-  }
+  }, [leads, stages]);
 
   return (
     <div>
@@ -130,11 +126,11 @@ export default function PipelinePage() {
           style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}
         >
           <Plus size={16} />
-          Dodaj kontakt
+          Dodaj lead
         </button>
       </div>
 
-      <FilterBar onFilterChange={setFilters} />
+      <FilterBar onFilterChange={setFilters} scope="lead" />
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
@@ -151,7 +147,7 @@ export default function PipelinePage() {
         >
           {stages.map((s) => {
             const list = byStage[s.key] ?? [];
-            const total = list.reduce((sum, c) => sum + Number(c.value || 0), 0);
+            const total = list.reduce((sum, l) => sum + Number(l.value || 0), 0);
             return (
               <div key={s.key} style={{ minWidth: 220 }}>
                 <div
@@ -163,7 +159,6 @@ export default function PipelinePage() {
                     padding: "0 2px",
                   }}
                 >
-                  {/* Wiersz 1: kropka + nazwa etapu (zawija się przy długich nazwach z 8.3). */}
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                     <span
                       style={{
@@ -177,17 +172,11 @@ export default function PipelinePage() {
                     />
                     <span
                       title={s.label}
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 700,
-                        lineHeight: 1.3,
-                        wordBreak: "break-word",
-                      }}
+                      style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.3, wordBreak: "break-word" }}
                     >
                       {s.label}
                     </span>
                   </div>
-                  {/* Wiersz 2: licznik kontaktów + suma wartości (PLN). */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 17 }}>
                     <span
                       style={{
@@ -221,15 +210,15 @@ export default function PipelinePage() {
                 >
                   {list.length === 0 ? (
                     <p style={{ fontSize: 12.5, color: tokens.muted, padding: "12px 8px", margin: 0 }}>
-                      Brak kontaktów
+                      Brak leadów
                     </p>
                   ) : (
                     <AnimatePresence initial={false}>
-                      {list.map((c) => (
+                      {list.map((l) => (
                         <motion.button
-                          key={c.id}
+                          key={l.id}
                           layout={!reduce}
-                          onClick={() => setDrawerContact(c.id)}
+                          onClick={() => openLead(l.id)}
                           initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
@@ -249,17 +238,17 @@ export default function PipelinePage() {
                           }}
                         >
                           <div style={{ fontSize: 14, fontWeight: 600 }}>
-                            {c.name || "Bez nazwy"}
+                            {l.contacts?.name || "Bez nazwy"}
                           </div>
-                          {c.company && (
-                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{c.company}</div>
+                          {l.contacts?.company && (
+                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{l.contacts.company}</div>
                           )}
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                             <span style={{ fontSize: 11.5, color: tokens.muted }}>
-                              {c.source ? `📋 ${c.source}` : "ręcznie"}
+                              {l.source ? `📋 ${l.source}` : "ręcznie"}
                             </span>
-                            {Number(c.value) > 0 && (
-                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(c.value)}</span>
+                            {Number(l.value) > 0 && (
+                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(l.value)}</span>
                             )}
                           </div>
                         </motion.button>
@@ -273,35 +262,30 @@ export default function PipelinePage() {
         </div>
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <ContactTable contacts={contacts} onRowClick={setDrawerContact} />
+          <LeadTable leads={leads} onRowClick={openLead} />
         </div>
       )}
 
       {showAdd && (
-        <AddContactModal
+        <AddLeadModal
           onClose={() => setShowAdd(false)}
-          onCreated={(c) => {
-            setContacts((list) => [c, ...list]);
+          onCreated={() => {
             setShowAdd(false);
+            load(filters);
           }}
         />
       )}
-
-      <AnimatePresence>
-        {drawerContact && (
-          <ContactDrawer key="drawer" contactId={drawerContact} onClose={closeDrawer} />
-        )}
-      </AnimatePresence>
     </div>
   );
 }
 
-function AddContactModal({
+// Ręczne dodanie leada: tworzy (lub reużywa po e-mailu) kontakt, a potem lead.
+function AddLeadModal({
   onClose,
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: (c: Contact) => void;
+  onCreated: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const { stages } = useStages();
@@ -326,26 +310,54 @@ function AddContactModal({
       setSaving(false);
       return;
     }
-    const { data, error } = await supabase
+
+    // Kontakt: utwórz, a przy kolizji e-maila (unique owner,email) reużyj.
+    const cleanEmail = email.trim() || null;
+    let contactId: string | null = null;
+    const { data: created, error: cErr } = await supabase
       .from("contacts")
       .insert({
         owner: user.id,
         name: name.trim(),
         company: company.trim() || null,
-        email: email.trim() || null,
+        email: cleanEmail,
         phone: phone.trim() || null,
-        value: value ? Number(value) : 0,
-        stage,
-        source: "ręcznie",
       })
-      .select()
+      .select("id")
       .single();
-    setSaving(false);
-    if (error) {
-      setError("Nie udało się zapisać (czy e-mail nie jest już użyty?).");
+
+    if (created) {
+      contactId = created.id;
+    } else if (cErr && cleanEmail) {
+      const { data: existing } = await supabase
+        .from("contacts")
+        .select("id")
+        .eq("owner", user.id)
+        .eq("email", cleanEmail)
+        .maybeSingle();
+      contactId = existing?.id ?? null;
+    }
+
+    if (!contactId) {
+      setSaving(false);
+      setError("Nie udało się zapisać kontaktu.");
       return;
     }
-    if (data) onCreated(data as Contact);
+
+    const { error: lErr } = await supabase.from("leads").insert({
+      owner: user.id,
+      contact_id: contactId,
+      stage,
+      value: value ? Number(value) : 0,
+      source: "ręcznie",
+    });
+
+    setSaving(false);
+    if (lErr) {
+      setError("Nie udało się zapisać leada.");
+      return;
+    }
+    onCreated();
   }
 
   return (
@@ -372,7 +384,7 @@ function AddContactModal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Nowy kontakt</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Nowy lead</h2>
           <button
             onClick={onClose}
             aria-label="Zamknij"

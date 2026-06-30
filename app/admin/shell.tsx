@@ -4,12 +4,13 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   KanbanSquare,
+  Users,
   CheckSquare,
   BarChart3,
   FileText,
@@ -25,10 +26,10 @@ import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
 import NotificationBell from "@/components/NotificationBell";
 import GlobalSearch from "@/components/GlobalSearch";
-import ContactDrawer from "@/components/ContactDrawer";
 
 const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
+  { href: "/admin/contacts", label: "Kontakty", icon: Users },
   { href: "/admin/pipeline", label: "Lejek", icon: KanbanSquare },
   { href: "/admin/tasks", label: "Zadania", icon: CheckSquare },
   { href: "/admin/analytics", label: "Analityka", icon: BarChart3 },
@@ -46,8 +47,11 @@ export default function Shell({
   const router = useRouter();
   const isMobile = useIsMobile(900);
   const [navOpen, setNavOpen] = useState(false);
-  const [drawerContact, setDrawerContact] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+
+  // Faza 9.3: klik w kontakt (wyszukiwarka, dzwonek) prowadzi na stronę
+  // kontaktu zamiast otwierać dawny wszystko-w-jednym panel.
+  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
 
   // Load sidebar state from localStorage
   useEffect(() => {
@@ -113,8 +117,12 @@ export default function Shell({
               boxShadow: navOpen ? "12px 0 40px rgba(15,18,28,0.18)" : "none",
             }
           : {
-              position: "sticky",
+              // Stałe przypięcie do lewej krawędzi — zostaje na miejscu przy
+              // przewijaniu. (position: sticky nie działa, bo body ma
+              // overflow-x: hidden, co czyni go kontenerem przewijania.)
+              position: "fixed",
               top: 0,
+              left: 0,
               height: "100vh",
               // Wyżej niż topbar (z-index 5), żeby wystający przycisk zwijania
               // (right: -12) nie był przykryty paskiem górnym i pozostał klikalny.
@@ -239,7 +247,14 @@ export default function Shell({
       )}
 
       {/* ── Główny obszar ───────────────────────────────────── */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+      {/* Sidebar jest poza układem (fixed) na desktopie, więc odsuwamy treść
+          o jego szerokość — animowaną tym samym springiem co sidebar. */}
+      <motion.div
+        initial={false}
+        animate={{ marginLeft: isMobile ? 0 : collapsed ? 72 : 230 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}
+      >
         {/* Topbar */}
         <header
           style={{
@@ -280,16 +295,16 @@ export default function Shell({
               >
                 S
               </span>
-              <GlobalSearch onOpenContact={setDrawerContact} fullWidth />
+              <GlobalSearch onOpenContact={openContact} fullWidth />
             </>
           ) : (
             <>
-              <GlobalSearch onOpenContact={setDrawerContact} />
+              <GlobalSearch onOpenContact={openContact} />
               <div style={{ flex: 1 }} />
             </>
           )}
 
-          <NotificationBell onOpenContact={setDrawerContact} />
+          <NotificationBell onOpenContact={openContact} />
 
           <button
             onClick={logout}
@@ -322,17 +337,7 @@ export default function Shell({
         <main className="selltic-main" style={{ flex: 1, minWidth: 0 }}>
           {children}
         </main>
-      </div>
-
-      <AnimatePresence>
-        {drawerContact && (
-          <ContactDrawer
-            key="drawer"
-            contactId={drawerContact}
-            onClose={() => setDrawerContact(null)}
-          />
-        )}
-      </AnimatePresence>
+      </motion.div>
     </div>
   );
 }

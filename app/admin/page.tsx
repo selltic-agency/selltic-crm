@@ -3,8 +3,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   FilePlus2,
   UserPlus,
@@ -21,11 +22,10 @@ import { createClient } from "@/lib/supabase/client";
 import { tokens, formatDateTime, formatPLN } from "@/lib/ui";
 import {
   type Activity,
-  type Contact,
+  type LeadWithContact,
   type Task,
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
-import ContactDrawer from "@/components/ContactDrawer";
 
 const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
   note: StickyNote,
@@ -46,26 +46,30 @@ const QUICK = [
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
-  const { stageMeta } = useStages();
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const router = useRouter();
+  const { stages, stageMeta } = useStages();
+  const [leads, setLeads] = useState<LeadWithContact[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<
     (Activity & { contacts?: { name: string | null } | null })[]
   >([]);
   const [loading, setLoading] = useState(true);
-  const [drawerContact, setDrawerContact] = useState<string | null>(null);
+  const openLead = (id: string) => router.push(`/admin/leads/${id}`);
 
   const load = useCallback(async () => {
+    if (stages.length === 0) return;
     setLoading(true);
     // koniec dnia (lokalnie) jako granica „na dziś”
     const end = new Date();
     end.setHours(23, 59, 59, 999);
 
-    const [c, t, a] = await Promise.all([
+    const wonLost = stages.filter((s) => s.is_won || s.is_lost).map((s) => s.key);
+
+    const [l, t, a] = await Promise.all([
       supabase
-        .from("contacts")
-        .select("*")
-        .not("stage", "in", "(won,lost)")
+        .from("leads")
+        .select("*, contacts!inner(id, name, company, email, phone, props)")
+        .not("stage", "in", `(${wonLost.join(",")})`)
         .order("updated_at", { ascending: false }),
       supabase
         .from("tasks")
@@ -80,11 +84,11 @@ export default function DashboardPage() {
         .order("created_at", { ascending: false })
         .limit(8),
     ]);
-    setContacts((c.data as Contact[]) ?? []);
+    setLeads((l.data as LeadWithContact[]) ?? []);
     setTasks((t.data as Task[]) ?? []);
     setActivities((a.data as (Activity & { contacts?: { name: string | null } | null })[]) ?? []);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, stages]);
 
   useEffect(() => {
     load();
@@ -169,16 +173,16 @@ export default function DashboardPage() {
         <Card title="Leady w toku">
           {loading ? (
             <Muted>Wczytywanie…</Muted>
-          ) : contacts.length === 0 ? (
+          ) : leads.length === 0 ? (
             <Muted>Brak leadów w toku.</Muted>
           ) : (
             <div style={{ display: "grid", gap: 2 }}>
-              {contacts.slice(0, 8).map((c) => {
-                const sm = stageMeta(c.stage);
+              {leads.slice(0, 8).map((l) => {
+                const sm = stageMeta(l.stage);
                 return (
                   <button
-                    key={c.id}
-                    onClick={() => setDrawerContact(c.id)}
+                    key={l.id}
+                    onClick={() => openLead(l.id)}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -194,10 +198,10 @@ export default function DashboardPage() {
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600 }}>
-                        {c.name || "Bez nazwy"}
+                        {l.contacts?.name || "Bez nazwy"}
                       </div>
                       <div style={{ fontSize: 12, color: tokens.muted }}>
-                        {c.company || "—"}
+                        {l.contacts?.company || "—"}
                       </div>
                     </div>
                     <span
@@ -213,7 +217,7 @@ export default function DashboardPage() {
                       {sm.label}
                     </span>
                     <span style={{ fontSize: 13, fontWeight: 600, minWidth: 70, textAlign: "right" }}>
-                      {formatPLN(c.value)}
+                      {formatPLN(l.value)}
                     </span>
                   </button>
                 );
@@ -306,16 +310,6 @@ export default function DashboardPage() {
           )}
         </Card>
       </div>
-
-      <AnimatePresence>
-        {drawerContact && (
-          <ContactDrawer
-            key="drawer"
-            contactId={drawerContact}
-            onClose={() => setDrawerContact(null)}
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

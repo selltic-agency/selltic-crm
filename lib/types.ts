@@ -18,6 +18,8 @@ export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | 
 
 export type PropertyType = "text" | "number" | "date" | "select";
 
+// Kontakt = trwała tożsamość osoby/firmy (Faza 9.1). Etap/wartość/źródło/
+// formularz przeniesione do `Lead` — jeden kontakt może mieć wiele leadów.
 export type Contact = {
   id: string;
   owner: string;
@@ -25,19 +27,56 @@ export type Contact = {
   email: string | null;
   phone: string | null;
   company: string | null;
+  props: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+// Lead = pojedyncza szansa sprzedaży przypięta do kontaktu (Faza 9.1).
+export type Lead = {
+  id: string;
+  owner: string;
+  contact_id: string;
   stage: Stage;
   value: number;
   source: string | null;
   form_id: string | null;
-  props: Record<string, string>;
+  opened_at: string;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// Lead złączony z danymi kontaktu (do lejka i tabeli — Faza 9.4).
+export type LeadContact = {
+  id: string;
+  name: string | null;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  props: Record<string, string>;
+};
+
+export type LeadWithContact = Lead & {
+  contacts: LeadContact | null;
+};
+
+// Flaga potencjalnego duplikatu kontaktu (Faza 9.2) — surfaced w UI w 9.3.
+export type DuplicateFlag = {
+  id: string;
+  owner: string;
+  contact_a: string;
+  contact_b: string;
+  reason: string;
+  resolved: boolean;
+  created_at: string;
 };
 
 export type Activity = {
   id: string;
   owner: string;
   contact_id: string;
+  lead_id: string | null;
   type: ActivityType;
   body: string | null;
   meta: Record<string, unknown> | null;
