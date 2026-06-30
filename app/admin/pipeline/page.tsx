@@ -157,30 +157,56 @@ export default function PipelinePage() {
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    gap: 8,
+                    flexDirection: "column",
+                    gap: 6,
                     marginBottom: 10,
                     padding: "0 2px",
                   }}
                 >
-                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: s.color }} />
-                  <span style={{ fontSize: 14, fontWeight: 700 }}>{s.label}</span>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: tokens.muted,
-                      background: tokens.card,
-                      border: `1px solid ${tokens.border}`,
-                      borderRadius: 999,
-                      padding: "1px 8px",
-                    }}
-                  >
-                    {list.length}
-                  </span>
-                  <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 600, color: tokens.muted }}>
-                    {formatPLN(total)}
-                  </span>
+                  {/* Wiersz 1: kropka + nazwa etapu (zawija się przy długich nazwach z 8.3). */}
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: "50%",
+                        background: s.color,
+                        flexShrink: 0,
+                        marginTop: 5,
+                      }}
+                    />
+                    <span
+                      title={s.label}
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        lineHeight: 1.3,
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {s.label}
+                    </span>
+                  </div>
+                  {/* Wiersz 2: licznik kontaktów + suma wartości (PLN). */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 17 }}>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: tokens.muted,
+                        background: tokens.card,
+                        border: `1px solid ${tokens.border}`,
+                        borderRadius: 999,
+                        padding: "1px 8px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {list.length}
+                    </span>
+                    <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 600, color: tokens.muted }}>
+                      {formatPLN(total)}
+                    </span>
+                  </div>
                 </div>
 
                 <div

@@ -23,7 +23,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
-import { useStages } from "@/lib/stages";
 import NotificationBell from "@/components/NotificationBell";
 import GlobalSearch from "@/components/GlobalSearch";
 import ContactDrawer from "@/components/ContactDrawer";
@@ -117,6 +116,9 @@ export default function Shell({
               position: "sticky",
               top: 0,
               height: "100vh",
+              // Wyżej niż topbar (z-index 5), żeby wystający przycisk zwijania
+              // (right: -12) nie był przykryty paskiem górnym i pozostał klikalny.
+              zIndex: 20,
             }),
       }}
     >
@@ -215,8 +217,6 @@ export default function Shell({
         active={isActive("/admin/settings")}
         collapsed={collapsed && !isMobile}
       />
-
-      <SidebarStages collapsed={collapsed && !isMobile} />
     </motion.aside>
   );
 
@@ -333,36 +333,6 @@ export default function Shell({
           />
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-function SidebarStages({ collapsed }: { collapsed: boolean }) {
-  const { stages } = useStages();
-
-  if (collapsed) return null;
-
-  return (
-    <div style={{ marginTop: 24, padding: "0 12px" }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: tokens.muted, marginBottom: 12, letterSpacing: "0.05em" }}>
-        ETAPY LEJKA
-      </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        {stages.map((s) => (
-          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: s.color,
-                flexShrink: 0,
-              }}
-            />
-            <span style={{ flex: 1, color: tokens.text, fontWeight: 500 }}>{s.label}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
