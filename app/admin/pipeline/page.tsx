@@ -2,7 +2,8 @@
 // 5 kolumn etapów; karty kontaktów; klik karty otwiera ContactDrawer.
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Plus, X, KanbanSquare, Table } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -13,23 +14,32 @@ import {
   ghostButton,
   formatPLN,
 } from "@/lib/ui";
-import { type Contact, type Stage } from "@/lib/types";
+import { type Contact, type Stage, type SortConfig } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import ContactDrawer from "@/components/ContactDrawer";
 import ContactTable from "@/components/ContactTable";
 import FilterBar from "@/components/FilterBar";
+import SavedViewTabs from "@/components/SavedViewTabs";
 import { Filter, buildFilterQuery } from "@/lib/filters";
+
+const DEFAULT_SORT: SortConfig = { key: "created_at", direction: "desc" };
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
   const { stages } = useStages();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawerContact, setDrawerContact] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [filters, setFilters] = useState<Filter[]>([]);
+  const [filters, setFiltersState] = useState<Filter[]>([]);
+  const [sort, setSort] = useState<SortConfig>(DEFAULT_SORT);
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
+  const [urlParsed, setUrlParsed] = useState(false);
+  const urlHadFilters = useRef(false);
 
   // Load viewMode from localStorage
   useEffect(() => {
@@ -39,10 +49,62 @@ export default function PipelinePage() {
     }
   }, []);
 
+  // Filtry współdzielone w URL (8.4) — czytamy raz przy montowaniu.
+  useEffect(() => {
+    const fParam = searchParams.get("f");
+    if (fParam) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(atob(fParam)));
+        if (Array.isArray(decoded)) {
+          urlHadFilters.current = true;
+          setFiltersState(decoded);
+        }
+      } catch (e) {
+        console.error("Błąd dekodowania filtrów z URL", e);
+      }
+    }
+    setUrlParsed(true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const syncUrl = useCallback(
+    (next: Filter[]) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next.length > 0) {
+        // btoa() nie radzi sobie z Unicode (polskie znaki) → encodeURIComponent.
+        params.set("f", btoa(encodeURIComponent(JSON.stringify(next))));
+      } else {
+        params.delete("f");
+      }
+      router.replace(`${pathname}?${params.toString()}`);
+    },
+    [router, pathname, searchParams]
+  );
+
+  // Zmiana filtrów z FilterBar — aktualizuj stan i URL.
+  const setFilters = useCallback(
+    (next: Filter[]) => {
+      setFiltersState(next);
+      syncUrl(next);
+    },
+    [syncUrl]
+  );
+
   const toggleView = (mode: "kanban" | "table") => {
     setViewMode(mode);
     localStorage.setItem("selltic_pipeline_view", mode);
   };
+
+  // Wczytanie zapisanego widoku (8.6) — ustawia filtry, sortowanie i tryb.
+  const applyView = useCallback(
+    (v: { filters: Filter[]; sort: SortConfig | null; view_mode: "kanban" | "table" }) => {
+      setFiltersState(v.filters);
+      syncUrl(v.filters);
+      setSort(v.sort ?? DEFAULT_SORT);
+      setViewMode(v.view_mode);
+      localStorage.setItem("selltic_pipeline_view", v.view_mode);
+    },
+    [syncUrl]
+  );
 
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
@@ -80,6 +142,16 @@ export default function PipelinePage() {
 
   return (
     <div>
+      {urlParsed && (
+        <SavedViewTabs
+          filters={filters}
+          sort={sort}
+          viewMode={viewMode}
+          suppressInitialApply={urlHadFilters.current}
+          onApply={applyView}
+        />
+      )}
+
       <div
         style={{
           display: "flex",
@@ -134,7 +206,7 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      <FilterBar onFilterChange={setFilters} />
+      <FilterBar filters={filters} onChange={setFilters} />
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
@@ -273,7 +345,12 @@ export default function PipelinePage() {
         </div>
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <ContactTable contacts={contacts} onRowClick={setDrawerContact} />
+          <ContactTable
+            contacts={contacts}
+            onRowClick={setDrawerContact}
+            sort={sort}
+            onSortChange={setSort}
+          />
         </div>
       )}
 

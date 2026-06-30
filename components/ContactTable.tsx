@@ -6,14 +6,9 @@ import { createPortal } from "react-dom";
 import { Reorder } from "framer-motion";
 import { ChevronUp, ChevronDown, Settings2, GripVertical, X } from "lucide-react";
 import { tokens, formatPLN, formatDateTime, ghostButton } from "@/lib/ui";
-import { Contact, PropertyDef } from "@/lib/types";
+import { Contact, PropertyDef, SortConfig } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import { createClient } from "@/lib/supabase/client";
-
-type SortConfig = {
-  key: string;
-  direction: "asc" | "desc";
-};
 
 type TableColumn = {
   key: string;
@@ -26,6 +21,9 @@ type TableColumn = {
 type ContactTableProps = {
   contacts: Contact[];
   onRowClick: (id: string) => void;
+  // Sortowanie kontrolowane przez rodzica (8.6 — zapisane widoki).
+  sort: SortConfig;
+  onSortChange: (sort: SortConfig) => void;
 };
 
 const BUILT_IN_COLUMNS = [
@@ -39,10 +37,9 @@ const BUILT_IN_COLUMNS = [
   { key: "created_at", label: "Utworzono", width: 160 },
 ];
 
-export default function ContactTable({ contacts, onRowClick }: ContactTableProps) {
+export default function ContactTable({ contacts, onRowClick, sort, onSortChange }: ContactTableProps) {
   const supabase = useMemo(() => createClient(), []);
   const { stageMeta } = useStages();
-  const [sort, setSort] = useState<SortConfig>({ key: "created_at", direction: "desc" });
   const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
   const [config, setConfig] = useState<TableColumn[]>([]);
   const [showConfig, setShowConfig] = useState(false);
@@ -117,10 +114,10 @@ export default function ContactTable({ contacts, onRowClick }: ContactTableProps
   }
 
   const handleSort = (key: string) => {
-    setSort((prev) => ({
+    onSortChange({
       key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }));
+      direction: sort.key === key && sort.direction === "asc" ? "desc" : "asc",
+    });
   };
 
   // 3. Persistence — zmiany stosujemy natychmiast (tabela reaguje od razu),

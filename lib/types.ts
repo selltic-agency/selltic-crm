@@ -1,5 +1,7 @@
 // lib/types.ts — współdzielone typy domeny (CRM + formularze).
 
+import type { Filter } from "@/lib/filters";
+
 // Etap to teraz dowolny klucz zdefiniowany w pipeline_stages (konfigurowalny).
 export type Stage = string;
 
@@ -17,6 +19,24 @@ export type PipelineStage = {
 export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | "task";
 
 export type PropertyType = "text" | "number" | "date" | "select";
+
+// Konfiguracja sortowania tabeli (8.5) — współdzielona z zapisanymi widokami.
+export type SortConfig = {
+  key: string;
+  direction: "asc" | "desc";
+};
+
+// Zapisany widok (8.6) — kombinacja trybu widoku + filtrów + sortowania.
+export type SavedView = {
+  id: string;
+  owner: string;
+  name: string;
+  view_mode: "kanban" | "table";
+  filters: Filter[];
+  sort: SortConfig | null;
+  position: number;
+  is_default: boolean;
+};
 
 export type Contact = {
   id: string;

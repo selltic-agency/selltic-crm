@@ -2,8 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Plus, X, Filter as FilterIcon, Calendar, ChevronDown } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, ghostButton, primaryButton } from "@/lib/ui";
 import { useStages } from "@/lib/stages";
@@ -24,19 +23,20 @@ const BUILT_IN_FIELDS: FieldDef[] = [
   { key: "created_at", label: "Data utworzenia", type: "date" },
 ];
 
+// Komponent kontrolowany: stan filtrów żyje w rodzicu (strona lejka),
+// dzięki czemu zapisane widoki (8.6) mogą go nadpisywać, a synchronizacja
+// z URL odbywa się na poziomie strony.
 export default function FilterBar({
-  onFilterChange,
+  filters,
+  onChange,
 }: {
-  onFilterChange: (filters: Filter[]) => void;
+  filters: Filter[];
+  onChange: (filters: Filter[]) => void;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const { stages } = useStages();
 
   const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
-  const [filters, setFilters] = useState<Filter[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingFilter, setEditingFilter] = useState<Partial<Filter> | null>(null);
 
@@ -51,37 +51,8 @@ export default function FilterBar({
     })();
   }, [supabase]);
 
-  // Synchronizacja z URL przy montowaniu.
-  useEffect(() => {
-    const fParam = searchParams.get("f");
-    if (fParam) {
-      try {
-        const decoded = JSON.parse(decodeURIComponent(atob(fParam)));
-        if (Array.isArray(decoded)) {
-          setFilters(decoded);
-          onFilterChange(decoded);
-        }
-      } catch (e) {
-        console.error("Błąd dekodowania filtrów z URL", e);
-      }
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Aktualizuj URL i powiadom rodzica o zmianach.
   const updateFilters = (newFilters: Filter[]) => {
-    setFilters(newFilters);
-    onFilterChange(newFilters);
-
-    const params = new URLSearchParams(searchParams.toString());
-    if (newFilters.length > 0) {
-      // btoa() fails on Unicode (Polish characters). Use encodeURIComponent + btoa.
-      const json = JSON.stringify(newFilters);
-      const encoded = btoa(encodeURIComponent(json));
-      params.set("f", encoded);
-    } else {
-      params.delete("f");
-    }
-    router.replace(`${pathname}?${params.toString()}`);
+    onChange(newFilters);
   };
 
   const allFields = useMemo(() => {
