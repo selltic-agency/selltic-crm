@@ -3,6 +3,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import {
   FilePlus2,
@@ -44,6 +45,7 @@ const QUICK = [
 
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
+  const reduce = useReducedMotion();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<
@@ -105,41 +107,52 @@ export default function DashboardPage() {
           marginBottom: 28,
         }}
       >
-        {QUICK.map((q) => {
+        {QUICK.map((q, i) => {
           const Icon = q.icon;
           return (
-            <Link
+            <motion.div
               key={q.href}
-              href={q.href}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                background: tokens.card,
-                border: `1px solid ${tokens.border}`,
-                borderRadius: tokens.radius,
-                padding: "16px 18px",
-                textDecoration: "none",
-                color: tokens.text,
-                fontWeight: 600,
-                fontSize: 14,
-              }}
+              initial={{ opacity: 0, y: reduce ? 0 : 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={
+                reduce
+                  ? { duration: 0 }
+                  : { type: "spring", stiffness: 320, damping: 28, delay: i * 0.07 }
+              }
+              whileHover={reduce ? undefined : { y: -3 }}
             >
-              <span
+              <Link
+                href={q.href}
                 style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  background: tokens.accentSoft,
-                  color: tokens.accent,
-                  display: "grid",
-                  placeItems: "center",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  background: tokens.card,
+                  border: `1px solid ${tokens.border}`,
+                  borderRadius: tokens.radius,
+                  padding: "16px 18px",
+                  textDecoration: "none",
+                  color: tokens.text,
+                  fontWeight: 600,
+                  fontSize: 14,
                 }}
               >
-                <Icon size={19} />
-              </span>
-              {q.label}
-            </Link>
+                <span
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: tokens.accentSoft,
+                    color: tokens.accent,
+                    display: "grid",
+                    placeItems: "center",
+                  }}
+                >
+                  <Icon size={19} />
+                </span>
+                {q.label}
+              </Link>
+            </motion.div>
           );
         })}
       </div>
@@ -293,9 +306,15 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {drawerContact && (
-        <ContactDrawer contactId={drawerContact} onClose={() => setDrawerContact(null)} />
-      )}
+      <AnimatePresence>
+        {drawerContact && (
+          <ContactDrawer
+            key="drawer"
+            contactId={drawerContact}
+            onClose={() => setDrawerContact(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

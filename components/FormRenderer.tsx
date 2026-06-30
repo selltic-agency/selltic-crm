@@ -5,6 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import {
   type FormSchema,
@@ -33,6 +34,12 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   const steps = form.steps ?? [];
   const theme = form.theme;
   const isMobile = useIsMobile(680);
+  const reduce = useReducedMotion();
+
+  // Sprężyste przejście (lub natychmiastowe przy prefers-reduced-motion).
+  const spring = reduce
+    ? { duration: 0 }
+    : ({ type: "spring", stiffness: 300, damping: 30 } as const);
 
   const [currentId, setCurrentId] = useState<string>(steps[0]?.id ?? "");
   const [history, setHistory] = useState<string[]>([]);
@@ -237,20 +244,14 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
         overflow: "hidden",
       }}
     >
-      <style>{`
-        @keyframes selltic-up { from { opacity:0; transform: translateY(28px);} to { opacity:1; transform:none;} }
-        @keyframes selltic-down { from { opacity:0; transform: translateY(-28px);} to { opacity:1; transform:none;} }
-        @media (prefers-reduced-motion: reduce){ .selltic-step{ animation: none !important; } }
-      `}</style>
-
       {/* Pasek postępu */}
       <div style={{ height: 4, background: "rgba(0,0,0,0.06)", flexShrink: 0 }}>
-        <div
+        <motion.div
+          animate={{ width: `${progress}%` }}
+          transition={spring}
           style={{
             height: "100%",
-            width: `${progress}%`,
             background: accent,
-            transition: "width .35s cubic-bezier(.22,1,.36,1)",
           }}
         />
       </div>
@@ -299,16 +300,31 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
           />
         )}
 
-        <div
-          key={current.id + dir}
-          className="selltic-step"
+        <AnimatePresence mode="wait" custom={dir}>
+        <motion.div
+          key={current.id}
+          custom={dir}
+          variants={{
+            enter: (d: "fwd" | "back") => ({
+              opacity: 0,
+              y: reduce ? 0 : d === "fwd" ? 28 : -28,
+            }),
+            center: { opacity: 1, y: 0 },
+            exit: (d: "fwd" | "back") => ({
+              opacity: 0,
+              y: reduce ? 0 : d === "fwd" ? -28 : 28,
+            }),
+          }}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          transition={spring}
           style={{
             width: "100%",
             maxWidth: 520,
             margin: isSplit ? 0 : "0 auto",
             padding: isMobile ? "32px 18px" : "48px 32px",
             textAlign: align as React.CSSProperties["textAlign"],
-            animation: `${dir === "fwd" ? "selltic-up" : "selltic-down"} .34s cubic-bezier(.22,1,.36,1)`,
           }}
         >
           {!isSplit && current.image && (
@@ -369,14 +385,17 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
           {current.type === "single_choice" && (
             <div style={{ display: "grid", gap: 10, marginBottom: 8 }}>
               {(current.options ?? []).map((o, i) => (
-                <button
+                <motion.button
                   key={o.id}
                   onClick={() => chooseSingle(o.label, o.next)}
+                  initial={{ opacity: 0, y: reduce ? 0 : 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={reduce ? { duration: 0 } : { ...spring, delay: 0.08 + i * 0.06 }}
                   style={optionStyle(accent, text, (answers[current.id] as string) === o.label)}
                 >
                   <span style={keyBadge(accent)}>{String.fromCharCode(65 + i)}</span>
                   {o.label}
-                </button>
+                </motion.button>
               ))}
             </div>
           )}
@@ -418,7 +437,8 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
               Możesz zamknąć to okno.
             </p>
           )}
-        </div>
+        </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );
