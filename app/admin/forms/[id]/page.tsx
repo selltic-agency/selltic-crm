@@ -79,6 +79,7 @@ export default function FormEditorPage() {
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [addOpen, setAddOpen] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const loadedRef = useRef(false);
 
@@ -305,6 +306,7 @@ export default function FormEditorPage() {
             ...pane,
             position: "relative",
             overflowY: "auto",
+            overflowX: "hidden",
             ...(isMobile
               ? { display: mobilePane === "steps" ? "block" : "none", flex: 1, minHeight: 0 }
               : {}),
@@ -365,10 +367,13 @@ export default function FormEditorPage() {
             {schema.steps.map((st, i) => {
               const Icon = TYPE_ICON[st.type];
               const on = st.id === active.id;
+              const hovered = hoveredId === st.id;
               return (
                 <div
                   key={st.id}
                   onClick={() => setActiveId(st.id)}
+                  onMouseEnter={() => setHoveredId(st.id)}
+                  onMouseLeave={() => setHoveredId(null)}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -378,6 +383,7 @@ export default function FormEditorPage() {
                     cursor: "pointer",
                     border: `1px solid ${on ? tokens.accent : tokens.border}`,
                     background: on ? tokens.accentSoft : "#fff",
+                    position: "relative",
                   }}
                 >
                   <Icon size={15} color={on ? tokens.accent : tokens.muted} style={{ flexShrink: 0 }} />
@@ -391,11 +397,25 @@ export default function FormEditorPage() {
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
+                      marginRight: (on || hovered) && !isMobile ? 70 : 0,
+                      transition: "margin-right 0.2s ease",
                     }}
                   >
                     {st.question || stepTypeLabel(st.type)}
                   </span>
-                  <div style={{ display: "flex", gap: 2 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 2,
+                      position: "absolute",
+                      right: 8,
+                      opacity: on || hovered || isMobile ? 1 : 0,
+                      pointerEvents: on || hovered || isMobile ? "auto" : "none",
+                      transition: "opacity 0.2s ease",
+                      background: on ? tokens.accentSoft : "#fff",
+                      paddingLeft: 4,
+                    }}
+                  >
                     <button onClick={(e) => { e.stopPropagation(); moveStep(st.id, -1); }} disabled={i === 0} style={miniBtn} aria-label="W górę">
                       <ChevronUp size={13} />
                     </button>

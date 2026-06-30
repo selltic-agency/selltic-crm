@@ -16,6 +16,8 @@ import {
 import { type Contact, type Stage } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import ContactDrawer from "@/components/ContactDrawer";
+import FilterBar from "@/components/FilterBar";
+import { Filter, buildFilterQuery } from "@/lib/filters";
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
@@ -25,20 +27,25 @@ export default function PipelinePage() {
   const [loading, setLoading] = useState(true);
   const [drawerContact, setDrawerContact] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [filters, setFilters] = useState<Filter[]>([]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from("contacts")
       .select("*")
       .order("updated_at", { ascending: false });
+
+    query = buildFilterQuery(query, activeFilters);
+
+    const { data } = await query;
     setContacts((data as Contact[]) ?? []);
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    load(filters);
+  }, [load, filters]);
 
   const byStage = useMemo(() => {
     const map: Record<Stage, Contact[]> = {};
@@ -53,7 +60,7 @@ export default function PipelinePage() {
   // Po zamknięciu panelu odśwież (etap mógł się zmienić w drawerze).
   function closeDrawer() {
     setDrawerContact(null);
-    load();
+    load(filters);
   }
 
   return (
@@ -75,6 +82,8 @@ export default function PipelinePage() {
           Dodaj kontakt
         </button>
       </div>
+
+      <FilterBar onFilterChange={setFilters} />
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
