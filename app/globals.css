@@ -66,3 +66,72 @@ select {
   background: #d5d9e2;
   border-radius: 999px;
 }
+
+/* Nieokreślony pasek postępu (scraper „w trakcie”) — nie znamy z góry ile
+   będzie wyników, więc zamiast fałszywego procentu pokazujemy przesuwający
+   się fragment paska. */
+.selltic-indeterminate {
+  position: relative;
+  overflow: hidden;
+  background: #ECEEF3;
+  border-radius: 999px;
+}
+.selltic-indeterminate::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(108, 92, 231, 0.25), #6C5CE7, rgba(108, 92, 231, 0.25));
+  animation: selltic-indeterminate 1.15s ease-in-out infinite;
+}
+@keyframes selltic-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+/* Delikatny „puls” — sygnalizuje przybycie nowego leada na żywo. */
+@keyframes selltic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(24, 169, 87, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(24, 169, 87, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(24, 169, 87, 0);
+  }
+}
+.selltic-pulse {
+  animation: selltic-pulse 0.9s ease-out;
+}
+
+/* Obracająca się ikona (przycisk „Odśwież” w trakcie). */
+@keyframes selltic-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.selltic-spin {
+  animation: selltic-spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .selltic-indeterminate::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+  .selltic-pulse {
+    animation: none;
+  }
+  .selltic-spin {
+    animation: none;
+  }
+}

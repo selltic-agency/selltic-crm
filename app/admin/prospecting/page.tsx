@@ -199,6 +199,19 @@ export default function ProspectingPage() {
 
   const callableQueue = useMemo(() => prospects.filter(isCallable), [prospects]);
 
+  // Powrót z konwersji w trybie dzwonienia (?calling=1) — automatycznie wznów
+  // sesję z pozostałą kolejką prospektów do zadzwonienia.
+  const resumedCalling = useRef(false);
+  useEffect(() => {
+    if (resumedCalling.current) return;
+    if (searchParams.get("calling") !== "1") return;
+    if (loading || callableQueue.length === 0) return;
+    resumedCalling.current = true;
+    setCallingMode(true);
+    // Usuń parametr, żeby odświeżenie strony nie otwierało trybu ponownie.
+    window.history.replaceState(null, "", "/admin/prospecting");
+  }, [searchParams, loading, callableQueue.length]);
+
   const selected = selectedId ? prospects.find((p) => p.id === selectedId) ?? null : null;
 
   async function setStatus(p: Prospect, status: WritableDisplayStatus): Promise<boolean> {
@@ -218,19 +231,19 @@ export default function ProspectingPage() {
     return true;
   }
 
-  async function convertToLead(p: Prospect): Promise<boolean> {
+  async function convertToLead(p: Prospect): Promise<string | null> {
     const res = await fetch(`/api/prospecting/${p.id}/convert-to-lead`, { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       toast.error(body?.error ?? "Nie udało się utworzyć deala.");
-      return false;
+      return null;
     }
     const { deal_id } = await res.json();
     setProspects((list) =>
       list.map((x) => (x.id === p.id ? { ...x, prospecting_status: "converted", converted_deal_id: deal_id } : x))
     );
     toast.success("Deal utworzony.");
-    return true;
+    return deal_id as string;
   }
 
   async function addNote(p: Prospect, body: string): Promise<boolean> {
