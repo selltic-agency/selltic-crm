@@ -10,10 +10,10 @@ import { X, MapPin, SkipForward, PhoneOff, Ban, CheckCircle2, Globe, Star, Exter
 import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
 import type { Prospect } from "@/lib/types";
+import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
 import {
   scoreColor,
   scoreLabel,
-  scoreReasons,
   googleMapsUrl,
   notesFromProps,
   type WritableDisplayStatus,
@@ -58,7 +58,6 @@ export default function CallingMode({
   const current = index < total ? queue[index] : null;
   const done = index >= total;
 
-  const reasons = useMemo(() => (current ? scoreReasons(current.props) : []), [current]);
   const notes = useMemo(() => (current ? notesFromProps(current.props) : []), [current]);
 
   function pushHistory(p: Prospect, action: HistoryAction) {
@@ -225,13 +224,14 @@ export default function CallingMode({
                     <div style={{ marginTop: 8, fontSize: 14, fontWeight: 700, color: scoreColor(current.lead_score) }}>
                       Score: {current.lead_score} · {scoreLabel(current.lead_score)}
                     </div>
-                    {reasons.length > 0 && (
-                      <ul style={{ textAlign: "left", margin: "10px 0 0", paddingLeft: 18, fontSize: 13, color: tokens.muted }}>
-                        {reasons.map((r, i) => (
-                          <li key={i}>{r}</li>
-                        ))}
-                      </ul>
-                    )}
+                    <div style={{ textAlign: "left", marginTop: 12 }}>
+                      <ScoreBreakdownList
+                        score={current.lead_score}
+                        breakdown={current.lead_score_breakdown}
+                        fallbackReasons={current.props?.score_reasons}
+                        compact
+                      />
+                    </div>
                   </div>
                 )}
 

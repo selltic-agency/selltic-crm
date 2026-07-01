@@ -9,6 +9,8 @@ import { X, MapPin, Phone, Globe, Star, ExternalLink, ArrowRight } from "lucide-
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, formatDateTime } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
+import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
+import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
 import {
   STATUS_LABEL,
   STATUS_COLOR,
@@ -17,7 +19,6 @@ import {
   isClosedBusiness,
   scoreColor,
   scoreLabel,
-  scoreReasons,
   notesFromProps,
   googleMapsUrl,
   type WritableDisplayStatus,
@@ -50,7 +51,6 @@ export default function ProspectDetailDrawer({
     () => [...notesFromProps(p.props)].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
     [p.props]
   );
-  const reasons = scoreReasons(p.props);
 
   useEffect(() => {
     if (!p.converted_deal_id) {
@@ -253,15 +253,13 @@ export default function ProspectDetailDrawer({
                   "—"
                 )}
               </Row>
-              {reasons.length > 0 && (
-                <Row label="Uzasadnienie">
-                  <ul style={{ margin: 0, paddingLeft: 18 }}>
-                    {reasons.map((r, i) => (
-                      <li key={i} style={{ fontSize: 13.5 }}>
-                        {r}
-                      </li>
-                    ))}
-                  </ul>
+              {parseScoreBreakdown(p.lead_score_breakdown, p.props?.score_reasons).items.length > 0 && (
+                <Row label="Wyjaśnienie">
+                  <ScoreBreakdownList
+                    score={p.lead_score}
+                    breakdown={p.lead_score_breakdown}
+                    fallbackReasons={p.props?.score_reasons}
+                  />
                 </Row>
               )}
             </div>

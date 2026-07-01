@@ -67,10 +67,23 @@ export async function POST(req: Request) {
     if (!resp.ok) {
       const text = await resp.text();
       console.error("[scraper/start] Webhook odpowiedział błędem", resp.status, text);
+      // Definitywne odrzucenie: webhook był osiągalny, ale nie zaplanował pracy
+      // (np. 401 zły sekret, 400 zła treść, 5xx). Zadania NIE ruszą same, więc
+      // oznaczamy je od razu jako "error" z czytelnym komunikatem, zamiast
+      // zostawiać w "pending" bez sygnału. (Gdyby backend jednak wystartował,
+      // nadpisze status na running/done — pisze wartości absolutne po id.)
+      await supabase
+        .from("scrape_jobs")
+        .update({
+          status: "error",
+          error_message: `Backend scrapera odrzucił zlecenie (HTTP ${resp.status}). Sprawdź konfigurację usługi webhooka (adres, sekret) i spróbuj ponownie.`,
+          completed_at: new Date().toISOString(),
+        })
+        .in("id", jobIds);
       return NextResponse.json({
         batch_id: batchId,
         job_ids: jobIds,
-        warning: `Webhook scrapera odpowiedział błędem ${resp.status}.`,
+        warning: `Webhook scrapera odpowiedział błędem ${resp.status}. Zadania oznaczono jako błąd.`,
       });
     }
   } catch (e) {

@@ -4,11 +4,11 @@
 import { Star, Phone, Globe, ArrowRight, Ban } from "lucide-react";
 import { tokens } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
+import { ScoreBadge } from "@/components/ScoreBreakdown";
 import {
   STATUS_COLOR,
   toDisplayStatus,
   isClosedBusiness,
-  scoreColor,
   scoreLabel,
   initials,
 } from "@/lib/prospectStatus";
@@ -133,18 +133,7 @@ export default function ProspectCard({
       >
         {p.lead_score != null && (
           <div style={{ textAlign: "right" }}>
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 800,
-                padding: "4px 12px",
-                borderRadius: 999,
-                background: `${scoreColor(p.lead_score)}1A`,
-                color: scoreColor(p.lead_score),
-              }}
-            >
-              {p.lead_score}
-            </span>
+            <ScoreBadge score={p.lead_score} breakdown={p.lead_score_breakdown} fallbackReasons={p.props?.score_reasons} fontSize={13} />
             <div style={{ fontSize: 11, color: tokens.muted, marginTop: 3, textTransform: "uppercase", fontWeight: 700 }}>
               {scoreLabel(p.lead_score)}
             </div>
