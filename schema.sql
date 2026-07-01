@@ -220,18 +220,33 @@ alter table pipeline_stages enable row level security;
 alter table table_view_config enable row level security;
 
 -- Właściciel: pełny dostęp do swoich danych
+-- (drop if exists przed każdym create — schema.sql musi być bezpieczny do
+-- wielokrotnego uruchomienia, a create policy nie wspiera "if not exists")
+drop policy if exists "own forms" on forms;
 create policy "own forms"        on forms         for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own submissions" on submissions;
 create policy "own submissions"  on submissions   for select using (auth.uid() = (select owner from forms where forms.id = submissions.form_id));
+drop policy if exists "own deals" on deals;
 create policy "own deals"        on deals         for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own prospects" on prospects;
 create policy "own prospects"    on prospects     for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own dup flags" on duplicate_flags;
 create policy "own dup flags"    on duplicate_flags for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own activities" on activities;
 create policy "own activities"   on activities    for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own defs" on property_defs;
 create policy "own defs"         on property_defs for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own tasks" on tasks;
 create policy "own tasks"        on tasks         for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own settings" on app_settings;
 create policy "own settings"     on app_settings  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own notifications" on notifications;
 create policy "own notifications" on notifications for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own stages" on pipeline_stages;
 create policy "own stages"        on pipeline_stages for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own table config" on table_view_config;
 create policy "own table config"  on table_view_config for all using (auth.uid() = owner) with check (auth.uid() = owner);
 
 -- Publiczny: czytanie WYŁĄCZNIE opublikowanych formularzy (do renderu /f/[slug])
+drop policy if exists "public reads published" on forms;
 create policy "public reads published" on forms for select using (status = 'published');
