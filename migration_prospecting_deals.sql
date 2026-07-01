@@ -51,15 +51,19 @@ drop index if exists idx_activities_contact;
 drop index if exists idx_activities_lead;
 create index if not exists idx_activities_deal on activities (deal_id, created_at desc);
 
--- 3. tasks: contact_id → deal_id (nullable).
+-- 3. tasks: contact_id → deal_id (nullable). Wiele kontaktów sprzed refaktoru
+-- nigdy nie doczekało się leada/deala — ich taski tracą powiązanie (null)
+-- zamiast łamać FK do deals.
 alter table tasks rename column contact_id to deal_id;
+update tasks set deal_id = null where deal_id is not null and deal_id not in (select id from deals);
 alter table tasks drop constraint if exists tasks_contact_id_fkey;
 alter table tasks drop constraint if exists tasks_deal_id_fkey;
 alter table tasks add constraint tasks_deal_id_fkey
   foreign key (deal_id) references deals (id) on delete set null;
 
--- 4. notifications: contact_id → deal_id (nullable).
+-- 4. notifications: contact_id → deal_id (nullable). Ta sama sytuacja co tasks.
 alter table notifications rename column contact_id to deal_id;
+update notifications set deal_id = null where deal_id is not null and deal_id not in (select id from deals);
 alter table notifications drop constraint if exists notifications_contact_id_fkey;
 alter table notifications drop constraint if exists notifications_deal_id_fkey;
 alter table notifications add constraint notifications_deal_id_fkey
