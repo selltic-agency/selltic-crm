@@ -1,71 +1,71 @@
 // app/admin/prospecting/page.tsx — Prospecting: zimne leady z Google Maps.
-// Faza 10. Minimalna wersja: tabela + filtry + akcje wiersza. Kolumny
-// scoringu (website_status/lead_score) puste, dopóki scraper ich nie wypełni.
+// Karty zamiast tabeli, cztery statusy (new/no_answer/not_interested/converted)
+// i „Tryb dzwonienia” (Tinder-style) do szybkiego przechodzenia przez kolejkę
+// telefonów. Baza danych nadal zapisuje starą wartość `contact_attempted`
+// (patrz lib/prospectStatus.ts) — to wyłącznie kosmetyka UI.
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Phone, X, CheckCircle2, ExternalLink, MapPin } from "lucide-react";
+import { Phone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, inputStyle, ghostButton, formatDateTime } from "@/lib/ui";
+import { tokens, inputStyle } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
-import type { Prospect, ProspectingStatus } from "@/lib/types";
+import type { Prospect } from "@/lib/types";
+import {
+  DISPLAY_STATUSES,
+  STATUS_LABEL,
+  STATUS_COLOR,
+  toDisplayStatus,
+  isCallable,
+  dbStatusForWrite,
+  notesFromProps,
+  type DisplayStatus,
+  type WritableDisplayStatus,
+} from "@/lib/prospectStatus";
+import ProspectCard from "@/components/prospecting/ProspectCard";
+import ProspectDetailDrawer from "@/components/prospecting/ProspectDetailDrawer";
+import CallingMode from "@/components/prospecting/CallingMode";
 
-const STATUS_LABEL: Record<ProspectingStatus, string> = {
-  new: "Nowy",
-  contact_attempted: "Próba kontaktu",
-  not_interested: "Niezainteresowany",
-  converted: "Skonwertowany",
-};
-
-const STATUS_COLOR: Record<ProspectingStatus, string> = {
-  new: tokens.accent,
-  contact_attempted: tokens.warning,
-  not_interested: tokens.muted,
-  converted: tokens.success,
-};
-
-function googleMapsUrl(p: Prospect): string {
-  const fromProps = p.props?.google_maps_url as string | undefined;
-  if (fromProps) return fromProps;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.city ?? ""}`.trim())}`;
-}
+const TABS: { key: DisplayStatus | ""; label: string }[] = [
+  { key: "", label: "Wszystkie" },
+  { key: "new", label: "Nowe" },
+  { key: "no_answer", label: "Nie odbiera" },
+  { key: "converted", label: "Skonwertowane" },
+  { key: "not_interested", label: "Niezainteresowane" },
+];
 
 export default function ProspectingPage() {
   const supabase = useMemo(() => createClient(), []);
-  const router = useRouter();
   const toast = useToast();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
-  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [counts, setCounts] = useState<Record<DisplayStatus, number>>({
+    new: 0,
+    no_answer: 0,
+    not_interested: 0,
+    converted: 0,
+  });
   const [industries, setIndustries] = useState<string[]>([]);
   const [cities, setCities] = useState<string[]>([]);
 
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<DisplayStatus | "">("");
   const [industryFilter, setIndustryFilter] = useState("");
   const [cityFilter, setCityFilter] = useState("");
-  const [noWebsiteOnly, setNoWebsiteOnly] = useState(false);
 
-  const [noteModal, setNoteModal] = useState<Prospect | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [callingMode, setCallingMode] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    let query = supabase
-      .from("prospects")
-      .select("*")
-      .order("lead_score", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false });
-
-    if (statusFilter) query = query.eq("prospecting_status", statusFilter);
+    let query = supabase.from("prospects").select("*").order("lead_score", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
     if (industryFilter) query = query.eq("industry", industryFilter);
     if (cityFilter) query = query.eq("city", cityFilter);
-    if (noWebsiteOnly) query = query.is("website", null);
 
     const { data } = await query;
     setProspects((data as Prospect[]) ?? []);
     setLoading(false);
-  }, [supabase, statusFilter, industryFilter, cityFilter, noWebsiteOnly]);
+  }, [supabase, industryFilter, cityFilter]);
 
   useEffect(() => {
     load();
@@ -76,88 +76,110 @@ export default function ProspectingPage() {
     (async () => {
       const { data } = await supabase.from("prospects").select("prospecting_status, industry, city");
       const rows = (data as { prospecting_status: string; industry: string | null; city: string | null }[]) ?? [];
-      const c: Record<string, number> = { new: 0, contact_attempted: 0, not_interested: 0, converted: 0 };
-      for (const r of rows) c[r.prospecting_status] = (c[r.prospecting_status] ?? 0) + 1;
+      const c: Record<DisplayStatus, number> = { new: 0, no_answer: 0, not_interested: 0, converted: 0 };
+      for (const r of rows) c[toDisplayStatus(r.prospecting_status)]++;
       setCounts(c);
       setIndustries([...new Set(rows.map((r) => r.industry).filter(Boolean))] as string[]);
       setCities([...new Set(rows.map((r) => r.city).filter(Boolean))] as string[]);
     })();
   }, [supabase, prospects.length]);
 
-  async function setStatus(p: Prospect, status: "contact_attempted" | "not_interested", note?: string | null) {
+  const visible = useMemo(
+    () => (statusFilter ? prospects.filter((p) => toDisplayStatus(p.prospecting_status) === statusFilter) : prospects),
+    [prospects, statusFilter]
+  );
+
+  const callableQueue = useMemo(() => prospects.filter(isCallable), [prospects]);
+
+  const selected = selectedId ? prospects.find((p) => p.id === selectedId) ?? null : null;
+
+  async function setStatus(p: Prospect, status: WritableDisplayStatus): Promise<boolean> {
+    const dbStatus = dbStatusForWrite(status);
     const res = await fetch(`/api/prospecting/${p.id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, note: note ?? null }),
+      body: JSON.stringify({ status: dbStatus }),
     });
     if (!res.ok) {
       toast.error("Nie udało się zaktualizować prospektu.");
-      return;
+      return false;
     }
     const updated = await res.json();
     setProspects((list) => list.map((x) => (x.id === p.id ? (updated as Prospect) : x)));
     toast.success("Zaktualizowano.");
+    return true;
   }
 
-  async function convertToLead(p: Prospect) {
+  async function convertToLead(p: Prospect): Promise<boolean> {
     const res = await fetch(`/api/prospecting/${p.id}/convert-to-lead`, { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       toast.error(body?.error ?? "Nie udało się utworzyć deala.");
-      return;
+      return false;
     }
     const { deal_id } = await res.json();
     setProspects((list) =>
       list.map((x) => (x.id === p.id ? { ...x, prospecting_status: "converted", converted_deal_id: deal_id } : x))
     );
     toast.success("Deal utworzony.");
-    router.push(`/admin/leads/${deal_id}`);
+    return true;
+  }
+
+  async function addNote(p: Prospect, body: string): Promise<boolean> {
+    const existing = notesFromProps(p.props);
+    const note = { id: crypto.randomUUID(), body, created_at: new Date().toISOString() };
+    const props = { ...p.props, notes: [...existing, note] };
+    const { error } = await supabase.from("prospects").update({ props }).eq("id", p.id);
+    if (error) {
+      toast.error("Nie udało się zapisać notatki.");
+      return false;
+    }
+    setProspects((list) => list.map((x) => (x.id === p.id ? { ...x, props } : x)));
+    toast.success("Notatka zapisana.");
+    return true;
   }
 
   return (
     <div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 20px" }}>Prospecting</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Prospecting</h1>
+        <button
+          onClick={() => setCallingMode(true)}
+          disabled={callableQueue.length === 0}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "11px 18px",
+            borderRadius: 12,
+            border: "none",
+            background: tokens.accent,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: callableQueue.length === 0 ? "default" : "pointer",
+            opacity: callableQueue.length === 0 ? 0.5 : 1,
+          }}
+        >
+          <Phone size={16} /> Tryb dzwonienia {callableQueue.length > 0 ? `(${callableQueue.length})` : ""}
+        </button>
+      </div>
 
       {/* Dashboard liczników */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-          gap: 12,
-          marginBottom: 20,
-        }}
-      >
-        {(Object.keys(STATUS_LABEL) as ProspectingStatus[]).map((s) => (
-          <div
-            key={s}
-            style={{
-              background: tokens.card,
-              border: `1px solid ${tokens.border}`,
-              borderRadius: tokens.radius,
-              padding: "14px 16px",
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase" }}>
-              {STATUS_LABEL[s]}
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: STATUS_COLOR[s] }}>
-              {counts[s] ?? 0}
-            </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 20 }}>
+        {DISPLAY_STATUSES.map((s) => (
+          <div key={s} style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: "14px 16px" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase" }}>{STATUS_LABEL[s]}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: STATUS_COLOR[s] }}>{counts[s] ?? 0}</div>
           </div>
         ))}
       </div>
 
       {/* Zakładki statusu */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        {([
-          { key: "", label: "Wszystkie" },
-          { key: "new", label: "Nowe" },
-          { key: "contact_attempted", label: "W kontakcie" },
-          { key: "converted", label: "Przekonwertowane" },
-          { key: "not_interested", label: "Niezainteresowane" },
-        ] as const).map((tab) => (
+        {TABS.map((tab) => (
           <button
-            key={tab.key}
+            key={tab.key || "all"}
             onClick={() => setStatusFilter(tab.key)}
             style={{
               padding: "8px 16px",
@@ -179,236 +201,61 @@ export default function ProspectingPage() {
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         <select value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)} style={{ ...inputStyle, width: 180 }}>
           <option value="">Wszystkie branże</option>
-          {industries.map((i) => <option key={i} value={i}>{i}</option>)}
+          {industries.map((i) => (
+            <option key={i} value={i}>
+              {i}
+            </option>
+          ))}
         </select>
         <select value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} style={{ ...inputStyle, width: 180 }}>
           <option value="">Wszystkie miasta</option>
-          {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+          {cities.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
         </select>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600 }}>
-          <input type="checkbox" checked={noWebsiteOnly} onChange={(e) => setNoWebsiteOnly(e.target.checked)} />
-          Tylko bez strony
-        </label>
       </div>
 
+      {/* Lista kart */}
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      ) : visible.length === 0 ? (
+        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 40, textAlign: "center", color: tokens.muted }}>
+          Brak prospektów spełniających kryteria.
+        </div>
       ) : (
-        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100 }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
-                  {["NAZWA", "TELEFON", "STRONA", "MAPA", "ADRES", "OCENA", "OPINIE", "BRANŻA", "MIASTO", "SCORE", "STATUS", "DODANO", ""].map((h) => (
-                    <th key={h} style={thStyle}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {prospects.map((p) => (
-                  <tr key={p.id} style={{ borderBottom: `1px solid ${tokens.border}` }}>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{p.name}</td>
-                    <td style={tdStyle}>{p.phone || "—"}</td>
-                    <td style={tdStyle}>
-                      {p.website ? (
-                        <a href={p.website} target="_blank" rel="noreferrer" style={{ color: tokens.accent, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          Link <ExternalLink size={12} />
-                        </a>
-                      ) : (
-                        <span style={{ color: tokens.danger }}>Brak</span>
-                      )}
-                    </td>
-                    <td style={tdStyle}>
-                      <a
-                        href={googleMapsUrl(p)}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: tokens.accent, display: "inline-flex", alignItems: "center", gap: 4 }}
-                      >
-                        <MapPin size={12} /> Mapa
-                      </a>
-                    </td>
-                    <td style={tdStyle}>{p.address || "—"}</td>
-                    <td style={tdStyle}>{p.rating ?? "—"}</td>
-                    <td style={tdStyle}>{p.review_count ?? "—"}</td>
-                    <td style={tdStyle}>{p.industry || "—"}</td>
-                    <td style={tdStyle}>{p.city || "—"}</td>
-                    <td style={tdStyle}>
-                      {p.lead_score == null ? (
-                        <span style={{ color: tokens.muted }}>—</span>
-                      ) : (
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            padding: "3px 10px",
-                            borderRadius: 999,
-                            background: `${scoreColor(p.lead_score)}1A`,
-                            color: scoreColor(p.lead_score),
-                          }}
-                        >
-                          {p.lead_score}
-                        </span>
-                      )}
-                    </td>
-                    <td style={tdStyle}>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          padding: "3px 10px",
-                          borderRadius: 999,
-                          background: `${STATUS_COLOR[p.prospecting_status]}1A`,
-                          color: STATUS_COLOR[p.prospecting_status],
-                        }}
-                      >
-                        {STATUS_LABEL[p.prospecting_status]}
-                      </span>
-                    </td>
-                    <td style={tdStyle}>{formatDateTime(p.created_at)}</td>
-                    <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
-                      {p.prospecting_status === "converted" ? (
-                        p.converted_deal_id ? (
-                          <a
-                            href={`/admin/leads/${p.converted_deal_id}`}
-                            style={{ color: tokens.success, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
-                          >
-                            ✅ Przekonwertowany → Zobacz deal
-                          </a>
-                        ) : (
-                          <span style={{ color: tokens.success, fontWeight: 600 }}>✅ Przekonwertowany</span>
-                        )
-                      ) : (
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button title="Próba kontaktu" onClick={() => setStatus(p, "contact_attempted")} style={rowBtn}>
-                            <Phone size={14} />
-                          </button>
-                          <button title="Niezainteresowany" onClick={() => setNoteModal(p)} style={rowBtn}>
-                            <X size={14} />
-                          </button>
-                          <button
-                            title="Konwertuj na deal"
-                            onClick={() => convertToLead(p)}
-                            disabled={p.prospecting_status === "not_interested"}
-                            style={{ ...rowBtn, opacity: p.prospecting_status === "not_interested" ? 0.4 : 1 }}
-                          >
-                            <CheckCircle2 size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {prospects.length === 0 && (
-                  <tr>
-                    <td colSpan={12} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
-                      Brak prospektów spełniających kryteria.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+        <div style={{ display: "grid", gap: 10 }}>
+          {visible.map((p) => (
+            <ProspectCard key={p.id} prospect={p} onOpen={() => setSelectedId(p.id)} onConvert={() => convertToLead(p)} />
+          ))}
         </div>
       )}
 
-      {noteModal && (
-        <NotInterestedModal
-          prospect={noteModal}
-          onClose={() => setNoteModal(null)}
-          onConfirm={(note) => {
-            setStatus(noteModal, "not_interested", note);
-            setNoteModal(null);
+      {selected && (
+        <ProspectDetailDrawer
+          prospect={selected}
+          onClose={() => setSelectedId(null)}
+          onConvert={async (p) => {
+            await convertToLead(p);
           }}
+          onSetStatus={async (p, status) => {
+            await setStatus(p, status);
+          }}
+          onAddNote={async (p, body) => {
+            await addNote(p, body);
+          }}
+        />
+      )}
+
+      {callingMode && (
+        <CallingMode
+          prospects={callableQueue}
+          onClose={() => setCallingMode(false)}
+          onConvert={convertToLead}
+          onSetStatus={setStatus}
         />
       )}
     </div>
   );
 }
-
-function NotInterestedModal({
-  prospect,
-  onClose,
-  onConfirm,
-}: {
-  prospect: Prospect;
-  onClose: () => void;
-  onConfirm: (note: string | null) => void;
-}) {
-  const [note, setNote] = useState("");
-  return (
-    <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,18,28,0.40)", zIndex: 40 }} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: "min(420px, calc(100vw - 32px))",
-          background: tokens.card,
-          borderRadius: tokens.radius,
-          border: `1px solid ${tokens.border}`,
-          boxShadow: "0 24px 60px rgba(15,18,28,0.18)",
-          zIndex: 41,
-          padding: 22,
-        }}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 12px" }}>Oznacz jako niezainteresowany</h2>
-        <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 12px" }}>{prospect.name}</p>
-        <textarea
-          placeholder="Notatka (opcjonalnie)…"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          rows={3}
-          style={{ ...inputStyle, resize: "vertical", width: "100%", boxSizing: "border-box" }}
-        />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
-          <button onClick={onClose} style={ghostButton}>Anuluj</button>
-          <button
-            onClick={() => onConfirm(note.trim() || null)}
-            style={{ ...ghostButton, background: tokens.danger, color: "#fff", border: "none" }}
-          >
-            Potwierdź
-          </button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function scoreColor(score: number): string {
-  if (score >= 70) return tokens.success;
-  if (score >= 40) return tokens.warning;
-  return tokens.danger;
-}
-
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "12px 16px",
-  fontSize: 12,
-  fontWeight: 700,
-  color: tokens.muted,
-  whiteSpace: "nowrap",
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: "14px 16px",
-  fontSize: 14,
-  color: tokens.text,
-  whiteSpace: "nowrap",
-};
-
-const rowBtn: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 8,
-  border: `1px solid ${tokens.border}`,
-  background: "#fff",
-  display: "grid",
-  placeItems: "center",
-  cursor: "pointer",
-  color: tokens.text,
-};
