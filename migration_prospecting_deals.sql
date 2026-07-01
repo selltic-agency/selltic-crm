@@ -94,6 +94,11 @@ begin
   end if;
 end $$;
 
+-- Trigger sprzed refaktoru odwołuje się do updated_at, którą zaraz usuwamy —
+-- zdejmujemy go PRZED tym, żeby kolejne update/alter na prospects nie
+-- wywalały się na "record new has no field updated_at".
+drop trigger if exists t_contacts_touch on prospects;
+
 alter table prospects drop constraint if exists contacts_owner_email_key;
 alter table prospects drop column if exists email;
 alter table prospects drop column if exists company;
@@ -139,7 +144,6 @@ create index if not exists idx_prospects_city       on prospects (city);
 create index if not exists idx_prospects_lead_score on prospects (lead_score);
 
 -- 8. Triggery updated_at.
-drop trigger if exists t_contacts_touch on prospects;
 drop trigger if exists t_leads_touch on deals;
 drop trigger if exists t_deals_touch on deals;
 create trigger t_deals_touch before update on deals for each row execute function touch_updated_at();
