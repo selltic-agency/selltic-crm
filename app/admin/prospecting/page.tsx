@@ -4,7 +4,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Phone, X, CheckCircle2, ExternalLink } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Phone, X, CheckCircle2, ExternalLink, MapPin } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
@@ -14,8 +15,14 @@ const STATUS_LABEL: Record<ProspectingStatus, string> = {
   new: "Nowy",
   contact_attempted: "Próba kontaktu",
   not_interested: "Niezainteresowany",
-  converted: "Skonwertowany",
+  converted: "Zakwalifikowany",
 };
+
+// Standardowy format linku Google Maps do konkretnego miejsca (Places API).
+function googleMapsUrl(p: Prospect): string {
+  const query = encodeURIComponent(`${p.name} ${p.address ?? ""}`.trim());
+  return `https://www.google.com/maps/search/?api=1&query=${query}&query_place_id=${encodeURIComponent(p.place_id)}`;
+}
 
 const STATUS_COLOR: Record<ProspectingStatus, string> = {
   new: tokens.accent,
@@ -27,6 +34,7 @@ const STATUS_COLOR: Record<ProspectingStatus, string> = {
 export default function ProspectingPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
+  const router = useRouter();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,13 +102,18 @@ export default function ProspectingPage() {
   async function convertToLead(p: Prospect) {
     const res = await fetch(`/api/prospecting/${p.id}/convert-to-lead`, { method: "POST" });
     if (!res.ok) {
-      toast.error("Nie udało się utworzyć leada.");
+      toast.error("Nie udało się zakwalifikować prospektu.");
       return;
     }
+    const { deal_id, contact_id } = await res.json();
     setProspects((list) =>
-      list.map((x) => (x.id === p.id ? { ...x, prospecting_status: "converted" } : x))
+      list.map((x) =>
+        x.id === p.id
+          ? { ...x, prospecting_status: "converted", converted_deal_id: deal_id, converted_contact_id: contact_id }
+          : x
+      )
     );
-    toast.success("Lead utworzony.");
+    toast.success("Prospekt zakwalifikowany — deal utworzony.");
   }
 
   return (
@@ -166,7 +179,7 @@ export default function ProspectingPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
-                  {["NAZWA", "TELEFON", "STRONA", "ADRES", "OCENA", "OPINIE", "BRANŻA", "MIASTO", "SCORE", "STATUS", "DODANO", ""].map((h) => (
+                  {["NAZWA", "TELEFON", "STRONA", "ADRES", "OCENA", "OPINIE", "BRANŻA", "MIASTO", "SCORE", "STATUS", "POWIĄZANE", "DODANO", ""].map((h) => (
                     <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
@@ -174,7 +187,20 @@ export default function ProspectingPage() {
               <tbody>
                 {prospects.map((p) => (
                   <tr key={p.id} style={{ borderBottom: `1px solid ${tokens.border}` }}>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{p.name}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {p.name}
+                        <a
+                          href={googleMapsUrl(p)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Zobacz na Google Maps"
+                          style={{ color: tokens.muted, display: "inline-flex" }}
+                        >
+                          <MapPin size={13} />
+                        </a>
+                      </div>
+                    </td>
                     <td style={tdStyle}>{p.phone || "—"}</td>
                     <td style={tdStyle}>
                       {p.website ? (
@@ -222,6 +248,30 @@ export default function ProspectingPage() {
                         {STATUS_LABEL[p.prospecting_status]}
                       </span>
                     </td>
+                    <td style={tdStyle}>
+                      {p.prospecting_status === "converted" && (p.converted_deal_id || p.converted_contact_id) ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+                          {p.converted_contact_id && (
+                            <a
+                              onClick={() => router.push(`/admin/contacts/${p.converted_contact_id}`)}
+                              style={{ color: tokens.accent, cursor: "pointer" }}
+                            >
+                              Kontakt →
+                            </a>
+                          )}
+                          {p.converted_deal_id && (
+                            <a
+                              onClick={() => router.push(`/admin/leads/${p.converted_deal_id}`)}
+                              style={{ color: tokens.accent, cursor: "pointer" }}
+                            >
+                              Deal →
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: tokens.muted }}>—</span>
+                      )}
+                    </td>
                     <td style={tdStyle}>{formatDateTime(p.created_at)}</td>
                     <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                       <div style={{ display: "flex", gap: 6 }}>
@@ -232,7 +282,7 @@ export default function ProspectingPage() {
                           <X size={14} />
                         </button>
                         <button
-                          title="Utwórz leada"
+                          title="Zakwalifikuj"
                           onClick={() => convertToLead(p)}
                           disabled={p.prospecting_status === "converted"}
                           style={{ ...rowBtn, opacity: p.prospecting_status === "converted" ? 0.4 : 1 }}
@@ -245,7 +295,7 @@ export default function ProspectingPage() {
                 ))}
                 {prospects.length === 0 && (
                   <tr>
-                    <td colSpan={11} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
+                    <td colSpan={12} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
                       Brak prospektów spełniających kryteria.
                     </td>
                   </tr>

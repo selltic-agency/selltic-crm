@@ -36,6 +36,7 @@ export type Deal = {
   value: number;
   source: string | null;
   form_id: string | null;
+  contact_id: string | null;
   assignee: Assignee | null;
   opened_at: string;
   closed_at: string | null;
@@ -70,7 +71,24 @@ export type Prospect = {
   website_last_checked_at: string | null;
   lead_score: number | null;
   lead_score_breakdown: Record<string, unknown> | null;
+  priority_label: string | null;
+  score_reasons: string[] | null;
   converted_deal_id: string | null;
+  converted_contact_id: string | null;
+};
+
+// Kontakt = lekka tożsamość powstająca przy kwalifikacji prospektu (dedup po
+// telefonie). Grupuje deale tego samego telefonu — opcjonalne powiązanie
+// (deals.contact_id), nie zamiennik modelu deali z Fazy 10.
+export type Contact = {
+  id: string;
+  owner: string;
+  name: string | null;
+  phone: string | null;
+  company: string | null;
+  props: Record<string, string>;
+  created_at: string;
+  updated_at: string;
 };
 
 // Flaga potencjalnego duplikatu deala (Faza 9.2) — surfaced w UI w 9.3.

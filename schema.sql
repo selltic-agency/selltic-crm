@@ -26,6 +26,22 @@ create table if not exists submissions (
   created_at  timestamptz not null default now()
 );
 
+-- ── KONTAKTY (lekka tożsamość) — powstają przy kwalifikacji prospektu ──────
+-- Grupują deale tego samego telefonu (dedup), niezależnie od modelu deali
+-- z Fazy 10 — to opcjonalne powiązanie (deals.contact_id), nie zamiennik.
+create table if not exists contacts (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users on delete cascade,
+  name        text,
+  phone       text,
+  company     text,
+  props       jsonb not null default '{}',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create unique index if not exists idx_contacts_owner_phone
+  on contacts (owner, phone) where phone is not null;
+
 -- ── DEALE (CRM) — osoba/firma, która już okazała zainteresowanie ───────
 -- Faza 10: kontakt i szansa sprzedaży połączone w jeden, samodzielny
 -- rekord — każde zgłoszenie formularza tworzy NOWY deal (z własną kopią
@@ -42,6 +58,7 @@ create table if not exists deals (
   value       numeric not null default 0,
   source      text,                            -- 'form:wycena' | 'cold-call' | 'prospecting' ...
   form_id     uuid references forms on delete set null,
+  contact_id  uuid references contacts on delete set null,  -- opcjonalne: dealu powstałe z kwalifikacji prospektu
   assignee    text check (assignee is null or assignee in ('dominik', 'kuba')),  -- „Deal Owner”, ręczny
   opened_at   timestamptz not null default now(),
   closed_at   timestamptz,                      -- ustawiane gdy etap = is_won/is_lost
@@ -71,11 +88,14 @@ create table if not exists prospects (
   created_at               timestamptz not null default now(),
   last_contact_attempt_at  timestamptz,
   note                     text,
-  website_status           text check (website_status is null or website_status in ('none', 'active', 'broken', 'slow')),
+  website_status           text,                            -- wolny tekst — scraper może dodawać nowe etykiety
   website_last_checked_at  timestamptz,
   lead_score               int check (lead_score is null or (lead_score >= 0 and lead_score <= 100)),
   lead_score_breakdown     jsonb,
+  priority_label           text,                            -- np. 'wysoki' / 'średni' / 'niski'
+  score_reasons            jsonb,                            -- lista tekstowych powodów wyniku
   converted_deal_id        uuid references deals on delete set null,
+  converted_contact_id     uuid references contacts on delete set null,
   unique (place_id)
 );
 
@@ -177,6 +197,7 @@ create table if not exists app_settings (
 -- ── INDEKSY ─────────────────────────────────────────────────────────────
 create index if not exists idx_deals_owner_stage    on deals (owner, stage);
 create index if not exists idx_deals_email          on deals (owner, email);
+create index if not exists idx_deals_contact        on deals (contact_id);
 create unique index if not exists idx_prospects_place_id        on prospects (place_id);
 create index if not exists idx_prospects_status     on prospects (prospecting_status);
 create index if not exists idx_prospects_industry   on prospects (industry);
@@ -197,6 +218,8 @@ drop trigger if exists t_forms_touch on forms;
 create trigger t_forms_touch before update on forms for each row execute function touch_updated_at();
 drop trigger if exists t_deals_touch on deals;
 create trigger t_deals_touch before update on deals for each row execute function touch_updated_at();
+drop trigger if exists t_contacts_touch on contacts;
+create trigger t_contacts_touch before update on contacts for each row execute function touch_updated_at();
 
 -- ════════════════════════════════════════════════════════════════════════
 -- RLS — tylko właściciel zarządza; publiczny świat czyta opublikowane formy.
@@ -208,6 +231,7 @@ create trigger t_deals_touch before update on deals for each row execute functio
 alter table forms         enable row level security;
 alter table submissions   enable row level security;
 alter table deals         enable row level security;
+alter table contacts      enable row level security;
 alter table prospects     enable row level security;
 alter table activities    enable row level security;
 alter table duplicate_flags enable row level security;
@@ -222,6 +246,7 @@ alter table table_view_config enable row level security;
 create policy "own forms"        on forms         for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own submissions"  on submissions   for select using (auth.uid() = (select owner from forms where forms.id = submissions.form_id));
 create policy "own deals"        on deals         for all using (auth.uid() = owner) with check (auth.uid() = owner);
+create policy "own contacts"     on contacts      for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own prospects"    on prospects     for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own dup flags"    on duplicate_flags for all using (auth.uid() = owner) with check (auth.uid() = owner);
 create policy "own activities"   on activities    for all using (auth.uid() = owner) with check (auth.uid() = owner);

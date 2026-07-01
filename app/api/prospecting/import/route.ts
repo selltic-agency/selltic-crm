@@ -17,8 +17,15 @@ type ImportRow = {
   business_status?: string | null;
   industry?: string | null;
   city?: string | null;
+  // Aliasy nowszej wersji scrapera (Google Maps lead-scoring) — równoważne
+  // industry/city, przyjmowane opcjonalnie obok starych nazw pól.
+  category?: string | null;
+  location?: string | null;
   lead_score?: number | null;
+  priority_score?: number | null;
   lead_score_breakdown?: Record<string, unknown> | null;
+  priority_label?: string | null;
+  score_reasons?: string[] | null;
   website_status?: string | null;
 };
 
@@ -69,10 +76,12 @@ export async function POST(req: Request) {
     rating: r.rating ?? null,
     review_count: r.review_count ?? null,
     business_status: r.business_status ?? null,
-    industry: r.industry ?? null,
-    city: r.city ?? null,
-    lead_score: r.lead_score ?? null,
+    industry: r.industry ?? r.category ?? null,
+    city: r.city ?? r.location ?? null,
+    lead_score: r.lead_score ?? r.priority_score ?? null,
     lead_score_breakdown: r.lead_score_breakdown ?? null,
+    priority_label: r.priority_label ?? null,
+    score_reasons: r.score_reasons ?? null,
     website_status: r.website_status ?? null,
     website_last_checked_at: r.website_status !== undefined ? new Date().toISOString() : undefined,
   }));
