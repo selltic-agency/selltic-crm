@@ -71,6 +71,7 @@ export type Prospect = {
   lead_score: number | null;
   lead_score_breakdown: Record<string, unknown> | null;
   converted_deal_id: string | null;
+  props: Record<string, unknown>;
 };
 
 // Flaga potencjalnego duplikatu deala (Faza 9.2) — surfaced w UI w 9.3.
