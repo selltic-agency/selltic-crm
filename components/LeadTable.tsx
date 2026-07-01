@@ -12,7 +12,7 @@ import { Deal, PropertyDef } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import { createClient } from "@/lib/supabase/client";
 
-type SortConfig = {
+export type SortConfig = {
   key: string;
   direction: "asc" | "desc";
 };
@@ -28,6 +28,9 @@ type TableColumn = {
 type LeadTableProps = {
   leads: Deal[];
   onRowClick: (id: string) => void;
+  /** Kontrolowane sortowanie (Zapisane Widoki) — jeśli pominięte, komponent trzyma stan sam. */
+  sort?: SortConfig;
+  onSortChange?: (sort: SortConfig) => void;
 };
 
 const BUILT_IN_COLUMNS = [
@@ -41,10 +44,11 @@ const BUILT_IN_COLUMNS = [
   { key: "opened_at", label: "Otwarto", width: 160 },
 ];
 
-export default function LeadTable({ leads, onRowClick }: LeadTableProps) {
+export default function LeadTable({ leads, onRowClick, sort: sortProp, onSortChange }: LeadTableProps) {
   const supabase = useMemo(() => createClient(), []);
   const { stageMeta } = useStages();
-  const [sort, setSort] = useState<SortConfig>({ key: "opened_at", direction: "desc" });
+  const [internalSort, setInternalSort] = useState<SortConfig>({ key: "opened_at", direction: "desc" });
+  const sort = sortProp ?? internalSort;
   const [config, setConfig] = useState<TableColumn[]>([]);
   const [showConfig, setShowConfig] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(true);
@@ -107,10 +111,12 @@ export default function LeadTable({ leads, onRowClick }: LeadTableProps) {
   }
 
   const handleSort = (key: string) => {
-    setSort((prev) => ({
+    const next: SortConfig = {
       key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }));
+      direction: sort.key === key && sort.direction === "asc" ? "desc" : "asc",
+    };
+    if (onSortChange) onSortChange(next);
+    else setInternalSort(next);
   };
 
   async function persistConfig(newConfig: TableColumn[]) {

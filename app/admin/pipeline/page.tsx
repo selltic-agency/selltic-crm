@@ -3,9 +3,9 @@
 // sprzedaży razem). Klik prowadzi na stronę deala (/admin/leads/[id]).
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, X, KanbanSquare, Table } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -17,20 +17,47 @@ import {
 } from "@/lib/ui";
 import { type Deal, type Stage } from "@/lib/types";
 import { useStages } from "@/lib/stages";
-import LeadTable from "@/components/LeadTable";
-import FilterBar from "@/components/FilterBar";
-import { Filter, buildFilterQuery } from "@/lib/filters";
+import LeadTable, { type SortConfig } from "@/components/LeadTable";
+import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/FilterBar";
+import SavedViewTabs from "@/components/SavedViewTabs";
+import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
+import { useSavedViews, type SeedView } from "@/lib/savedViews";
+
+const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
+  { key: "stage", label: "Etap", type: "stage" },
+  { key: "value", label: "Wartość", type: "value" },
+  { key: "source", label: "Źródło", type: "source" },
+  { key: "opened_at", label: "Data utworzenia", type: "date" },
+  { key: "name", label: "Nazwa", type: "text" },
+  { key: "email", label: "E-mail", type: "text" },
+  { key: "phone", label: "Telefon", type: "text" },
+  { key: "company", label: "Firma", type: "text" },
+  {
+    key: "assignee",
+    label: "Deal Owner",
+    type: "select",
+    options: [
+      { key: "dominik", label: "Dominik" },
+      { key: "kuba", label: "Kuba" },
+    ],
+  },
+];
+
+const DEFAULT_TABLE_SORT: SortConfig = { key: "opened_at", direction: "desc" };
 
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { stages } = useStages();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
+  const [tableSort, setTableSort] = useState<SortConfig>(DEFAULT_TABLE_SORT);
+  const filterBarRef = useRef<FilterBarHandle>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("selltic_pipeline_view");
@@ -41,6 +68,78 @@ export default function PipelinePage() {
     setViewMode(mode);
     localStorage.setItem("selltic_pipeline_view", mode);
   };
+
+  const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
+    const wonKey = stages.find((s) => s.is_won)?.key;
+    const lostKey = stages.find((s) => s.is_lost)?.key;
+    return [
+      { name: "Wszystkie leady", view_mode: "kanban", filters: [], sort: null },
+      {
+        name: "Wygrane",
+        view_mode: "kanban",
+        filters: wonKey ? [{ field: "stage", operator: "in", value: [wonKey] }] : [],
+        sort: null,
+      },
+      {
+        name: "Przegrane",
+        view_mode: "kanban",
+        filters: lostKey ? [{ field: "stage", operator: "in", value: [lostKey] }] : [],
+        sort: null,
+      },
+    ];
+  }, [stages]);
+
+  const {
+    views,
+    activeId,
+    activeView,
+    loading: viewsLoading,
+    selectView,
+    createView,
+    updateView,
+    deleteView,
+  } = useSavedViews("deals", seedDefaults);
+
+  // Zastosuj widok (zakładkę) do filtrów/trybu/sortu.
+  const applyView = useCallback((filters_: Filter[], mode: "kanban" | "table", sort: Sort | null) => {
+    filterBarRef.current?.setFilters(filters_);
+    setViewMode(mode);
+    localStorage.setItem("selltic_pipeline_view", mode);
+    setTableSort(sort ? { key: sort.column, direction: sort.direction } : DEFAULT_TABLE_SORT);
+  }, []);
+
+  // Przy pierwszym wczytaniu: jeśli w URL nie ma udostępnionych filtrów,
+  // zastosuj domyślny (pierwszy) zapisany widok. Jeśli są — zostają (link
+  // do zakładki ma pierwszeństwo), a żadna zakładka nie jest podświetlona.
+  const appliedInitial = useRef(false);
+  useEffect(() => {
+    if (appliedInitial.current || viewsLoading) return;
+    appliedInitial.current = true;
+    if (searchParams.get("f")) {
+      selectView(null);
+      return;
+    }
+    if (activeView) {
+      applyView(activeView.filters, activeView.view_mode, activeView.sort);
+    }
+  }, [viewsLoading, activeView, applyView, searchParams, selectView]);
+
+  const handleSelectView = (id: string) => {
+    selectView(id);
+    const v = views.find((x) => x.id === id);
+    if (v) applyView(v.filters, v.view_mode, v.sort);
+  };
+
+  const currentSort: Sort | null = viewMode === "table" ? { column: tableSort.key, direction: tableSort.direction } : null;
+
+  const isDirty = useMemo(() => {
+    if (!activeView) return false;
+    return (
+      JSON.stringify(filters) !== JSON.stringify(activeView.filters) ||
+      viewMode !== activeView.view_mode ||
+      JSON.stringify(currentSort) !== JSON.stringify(activeView.sort ?? null)
+    );
+  }, [activeView, filters, viewMode, currentSort]);
 
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
@@ -83,7 +182,7 @@ export default function PipelinePage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Lejek</h1>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Leady</h1>
           <div
             style={{
               display: "flex",
@@ -128,7 +227,19 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      <FilterBar onFilterChange={setFilters} />
+      <SavedViewTabs
+        views={views}
+        activeId={activeId}
+        loading={viewsLoading}
+        isDirty={isDirty}
+        onSelect={handleSelectView}
+        onCreate={(name) => createView(name, { filters, sort: currentSort, view_mode: viewMode })}
+        onRename={(id, name) => updateView(id, { name })}
+        onDelete={deleteView}
+        onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort: currentSort, view_mode: viewMode })}
+      />
+
+      <FilterBar ref={filterBarRef} builtInFields={DEAL_BUILT_IN_FIELDS} withCustomProperties onFilterChange={setFilters} />
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
@@ -260,7 +371,7 @@ export default function PipelinePage() {
         </div>
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <LeadTable leads={deals} onRowClick={openDeal} />
+          <LeadTable leads={deals} onRowClick={openDeal} sort={tableSort} onSortChange={setTableSort} />
         </div>
       )}
 

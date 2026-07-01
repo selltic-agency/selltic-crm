@@ -1,4 +1,6 @@
 // lib/filters.ts — pomocnik do budowania zapytań Supabase na podstawie filtrów (8.4).
+// Współdzielony przez Leady (deals) i Prospecting (prospects) — każda strona
+// dostarcza własny resolver kolumn, bo tylko deals ma properties w `props` jsonb.
 
 export type FilterOperator =
   | "contains"
@@ -18,27 +20,41 @@ export type Filter = {
   value: any;
 };
 
+export type Sort = {
+  column: string;
+  direction: "asc" | "desc";
+};
+
 // Faza 10: deal to samodzielny rekord (tożsamość + szansa sprzedaży w
 // jednej tabeli) — pola filtrujemy bezpośrednio, bez prefiksu join'a.
-const DEAL_FIELDS = new Set(["stage", "value", "source", "opened_at", "created_at", "name", "email", "phone", "company"]);
+const DEAL_FIELDS = new Set(["stage", "value", "source", "opened_at", "created_at", "name", "email", "phone", "company", "assignee"]);
 
-function columnFor(field: string): string {
+function columnForDeal(field: string): string {
   if (DEAL_FIELDS.has(field)) return field;
   return `props->>${field}`;
+}
+
+// Prospekty nie mają definicji właściwości własnych (property_defs) — każde
+// filtrowalne pole żyje bezpośrednio jako kolumna tabeli `prospects`.
+export function columnForProspect(field: string): string {
+  return field;
 }
 
 /**
  * Aplikuje tablicę filtrów do zapytania Supabase.
  * Filtry łączone są operatorem AND (domyślne zachowanie Supabase .filter()).
+ * `resolveColumn` mapuje klucz pola filtru na nazwę kolumny/ścieżki jsonb —
+ * domyślnie zachowanie sprzed refaktoru (deale + props->>).
  */
 export function buildFilterQuery(
   query: any,
-  filters: Filter[]
+  filters: Filter[],
+  resolveColumn: (field: string) => string = columnForDeal
 ) {
   let q = query;
 
   filters.forEach((f) => {
-    const column = columnFor(f.field);
+    const column = resolveColumn(f.field);
 
     switch (f.operator) {
       case "contains":
