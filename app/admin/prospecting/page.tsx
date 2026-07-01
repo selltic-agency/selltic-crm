@@ -4,7 +4,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Phone, X, CheckCircle2, ExternalLink } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Phone, X, CheckCircle2, ExternalLink, MapPin } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
@@ -24,8 +25,15 @@ const STATUS_COLOR: Record<ProspectingStatus, string> = {
   converted: tokens.success,
 };
 
+function googleMapsUrl(p: Prospect): string {
+  const fromProps = p.props?.google_maps_url as string | undefined;
+  if (fromProps) return fromProps;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.city ?? ""}`.trim())}`;
+}
+
 export default function ProspectingPage() {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const toast = useToast();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -94,13 +102,16 @@ export default function ProspectingPage() {
   async function convertToLead(p: Prospect) {
     const res = await fetch(`/api/prospecting/${p.id}/convert-to-lead`, { method: "POST" });
     if (!res.ok) {
-      toast.error("Nie udało się utworzyć leada.");
+      const body = await res.json().catch(() => null);
+      toast.error(body?.error ?? "Nie udało się utworzyć deala.");
       return;
     }
+    const { deal_id } = await res.json();
     setProspects((list) =>
-      list.map((x) => (x.id === p.id ? { ...x, prospecting_status: "converted" } : x))
+      list.map((x) => (x.id === p.id ? { ...x, prospecting_status: "converted", converted_deal_id: deal_id } : x))
     );
-    toast.success("Lead utworzony.");
+    toast.success("Deal utworzony.");
+    router.push(`/admin/leads/${deal_id}`);
   }
 
   return (
@@ -136,14 +147,36 @@ export default function ProspectingPage() {
         ))}
       </div>
 
+      {/* Zakładki statusu */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {([
+          { key: "", label: "Wszystkie" },
+          { key: "new", label: "Nowe" },
+          { key: "contact_attempted", label: "W kontakcie" },
+          { key: "converted", label: "Przekonwertowane" },
+          { key: "not_interested", label: "Niezainteresowane" },
+        ] as const).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setStatusFilter(tab.key)}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 999,
+              border: `1px solid ${statusFilter === tab.key ? tokens.accent : tokens.border}`,
+              background: statusFilter === tab.key ? `${tokens.accent}1A` : tokens.card,
+              color: statusFilter === tab.key ? tokens.accent : tokens.text,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filtry */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...inputStyle, width: 180 }}>
-          <option value="">Wszystkie statusy</option>
-          {(Object.keys(STATUS_LABEL) as ProspectingStatus[]).map((s) => (
-            <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-          ))}
-        </select>
         <select value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)} style={{ ...inputStyle, width: 180 }}>
           <option value="">Wszystkie branże</option>
           {industries.map((i) => <option key={i} value={i}>{i}</option>)}
@@ -166,7 +199,7 @@ export default function ProspectingPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
-                  {["NAZWA", "TELEFON", "STRONA", "ADRES", "OCENA", "OPINIE", "BRANŻA", "MIASTO", "SCORE", "STATUS", "DODANO", ""].map((h) => (
+                  {["NAZWA", "TELEFON", "STRONA", "MAPA", "ADRES", "OCENA", "OPINIE", "BRANŻA", "MIASTO", "SCORE", "STATUS", "DODANO", ""].map((h) => (
                     <th key={h} style={thStyle}>{h}</th>
                   ))}
                 </tr>
@@ -184,6 +217,16 @@ export default function ProspectingPage() {
                       ) : (
                         <span style={{ color: tokens.danger }}>Brak</span>
                       )}
+                    </td>
+                    <td style={tdStyle}>
+                      <a
+                        href={googleMapsUrl(p)}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: tokens.accent, display: "inline-flex", alignItems: "center", gap: 4 }}
+                      >
+                        <MapPin size={12} /> Mapa
+                      </a>
                     </td>
                     <td style={tdStyle}>{p.address || "—"}</td>
                     <td style={tdStyle}>{p.rating ?? "—"}</td>
@@ -224,28 +267,41 @@ export default function ProspectingPage() {
                     </td>
                     <td style={tdStyle}>{formatDateTime(p.created_at)}</td>
                     <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button title="Próba kontaktu" onClick={() => setStatus(p, "contact_attempted")} style={rowBtn}>
-                          <Phone size={14} />
-                        </button>
-                        <button title="Niezainteresowany" onClick={() => setNoteModal(p)} style={rowBtn}>
-                          <X size={14} />
-                        </button>
-                        <button
-                          title="Utwórz leada"
-                          onClick={() => convertToLead(p)}
-                          disabled={p.prospecting_status === "converted"}
-                          style={{ ...rowBtn, opacity: p.prospecting_status === "converted" ? 0.4 : 1 }}
-                        >
-                          <CheckCircle2 size={14} />
-                        </button>
-                      </div>
+                      {p.prospecting_status === "converted" ? (
+                        p.converted_deal_id ? (
+                          <a
+                            href={`/admin/leads/${p.converted_deal_id}`}
+                            style={{ color: tokens.success, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}
+                          >
+                            ✅ Przekonwertowany → Zobacz deal
+                          </a>
+                        ) : (
+                          <span style={{ color: tokens.success, fontWeight: 600 }}>✅ Przekonwertowany</span>
+                        )
+                      ) : (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button title="Próba kontaktu" onClick={() => setStatus(p, "contact_attempted")} style={rowBtn}>
+                            <Phone size={14} />
+                          </button>
+                          <button title="Niezainteresowany" onClick={() => setNoteModal(p)} style={rowBtn}>
+                            <X size={14} />
+                          </button>
+                          <button
+                            title="Konwertuj na deal"
+                            onClick={() => convertToLead(p)}
+                            disabled={p.prospecting_status === "not_interested"}
+                            style={{ ...rowBtn, opacity: p.prospecting_status === "not_interested" ? 0.4 : 1 }}
+                          >
+                            <CheckCircle2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
                 {prospects.length === 0 && (
                   <tr>
-                    <td colSpan={11} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
+                    <td colSpan={12} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
                       Brak prospektów spełniających kryteria.
                     </td>
                   </tr>

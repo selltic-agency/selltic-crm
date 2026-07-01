@@ -76,6 +76,7 @@ create table if not exists prospects (
   lead_score               int check (lead_score is null or (lead_score >= 0 and lead_score <= 100)),
   lead_score_breakdown     jsonb,
   converted_deal_id        uuid references deals on delete set null,
+  props                    jsonb not null default '{}',    -- google_maps_url, priority_label, score_reasons...
   unique (place_id)
 );
 
