@@ -18,6 +18,7 @@ import {
 import { type Deal, type Stage } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import LeadTable, { type SortConfig } from "@/components/LeadTable";
+import OwnerAvatar from "@/components/OwnerAvatar";
 import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/FilterBar";
 import SavedViewTabs from "@/components/SavedViewTabs";
 import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
@@ -359,6 +360,9 @@ export default function PipelinePage() {
                             {Number(d.value) > 0 && (
                               <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(d.value)}</span>
                             )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <OwnerAvatar assignee={d.assignee} size={22} showName />
                           </div>
                         </motion.button>
                       ))}

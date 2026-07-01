@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   StickyNote,
@@ -14,6 +14,7 @@ import {
   FileText,
   CircleDot,
   CheckSquare,
+  PhoneCall,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -56,6 +57,8 @@ export default function DealPage() {
   const params = useParams<{ id: string }>();
   const dealId = params.id;
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromCalling = searchParams.get("from") === "calling";
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const { stages, stageMeta } = useStages();
@@ -237,7 +240,29 @@ export default function DealPage() {
 
   return (
     <div style={{ padding: 24, maxWidth: 880, margin: "0 auto" }}>
-      <BackLink router={router} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <BackLink router={router} />
+        {fromCalling && (
+          <button
+            onClick={() => router.push("/admin/prospecting?calling=1")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "9px 16px",
+              borderRadius: 10,
+              border: "none",
+              background: tokens.accent,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            <PhoneCall size={15} /> Wróć do dzwonienia
+          </button>
+        )}
+      </div>
 
       {/* Nagłówek deala */}
       <div style={{ margin: "14px 0 18px" }}>

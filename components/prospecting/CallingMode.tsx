@@ -4,12 +4,28 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, MapPin, SkipForward, PhoneOff, Ban, CheckCircle2 } from "lucide-react";
+import { X, MapPin, SkipForward, PhoneOff, Ban, CheckCircle2, Globe, Star, ExternalLink, StickyNote } from "lucide-react";
 import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
 import type { Prospect } from "@/lib/types";
-import { scoreColor, scoreLabel, scoreReasons, googleMapsUrl, type WritableDisplayStatus } from "@/lib/prospectStatus";
+import {
+  scoreColor,
+  scoreLabel,
+  scoreReasons,
+  googleMapsUrl,
+  notesFromProps,
+  type WritableDisplayStatus,
+} from "@/lib/prospectStatus";
+
+// Etykiety statusu strony (te same wartości co w widoku Prospecting).
+const WEBSITE_STATUS_LABEL: Record<string, string> = {
+  none: "Brak strony",
+  active: "Aktywna",
+  broken: "Zepsuta",
+  slow: "Wolna",
+};
 
 type HistoryAction = "Pominięto" | "Nie odbiera" | "Niezainteresowany" | "Skonwertowano";
 
@@ -28,9 +44,10 @@ export default function CallingMode({
 }: {
   prospects: Prospect[];
   onClose: () => void;
-  onConvert: (p: Prospect) => Promise<boolean>;
+  onConvert: (p: Prospect) => Promise<string | null>;
   onSetStatus: (p: Prospect, status: WritableDisplayStatus) => Promise<boolean>;
 }) {
+  const router = useRouter();
   const isMobile = useIsMobile(860);
   const [queue] = useState<Prospect[]>(prospects);
   const [index, setIndex] = useState(0);
@@ -42,6 +59,7 @@ export default function CallingMode({
   const done = index >= total;
 
   const reasons = useMemo(() => (current ? scoreReasons(current.props) : []), [current]);
+  const notes = useMemo(() => (current ? notesFromProps(current.props) : []), [current]);
 
   function pushHistory(p: Prospect, action: HistoryAction) {
     setHistory((h) => [{ id: p.id, name: p.name, action, at: new Date().toISOString() }, ...h]);
@@ -60,16 +78,23 @@ export default function CallingMode({
   async function handleAction(kind: "no_answer" | "not_interested" | "convert") {
     if (!current || busy) return;
     setBusy(true);
-    let ok = false;
     if (kind === "convert") {
-      ok = await onConvert(current);
-      if (ok) pushHistory(current, "Skonwertowano");
-    } else {
-      ok = await onSetStatus(current, kind);
-      if (ok) pushHistory(current, kind === "no_answer" ? "Nie odbiera" : "Niezainteresowany");
+      const dealId = await onConvert(current);
+      setBusy(false);
+      if (dealId) {
+        pushHistory(current, "Skonwertowano");
+        // Od razu na stronę nowego deala — można dodać notatkę, termin spotkania
+        // i dane, póki rozmowa jest świeża. Powrót do dzwonienia: ?from=calling.
+        router.push(`/admin/leads/${dealId}?from=calling`);
+      }
+      return;
     }
+    const ok = await onSetStatus(current, kind);
     setBusy(false);
-    if (ok) advance();
+    if (ok) {
+      pushHistory(current, kind === "no_answer" ? "Nie odbiera" : "Niezainteresowany");
+      advance();
+    }
   }
 
   const converted = history.filter((h) => h.action === "Skonwertowano").length;
@@ -210,6 +235,69 @@ export default function CallingMode({
                   </div>
                 )}
 
+                {/* Pełne dane prospektu — ten sam zakres co strona szczegółów,
+                    żeby nie trzeba było wychodzić z trybu dzwonienia. */}
+                <div
+                  style={{
+                    textAlign: "left",
+                    marginTop: 22,
+                    paddingTop: 18,
+                    borderTop: `1px solid ${tokens.border}`,
+                    display: "grid",
+                    gap: 9,
+                  }}
+                >
+                  <InfoRow label="Adres">{current.address || "—"}</InfoRow>
+                  <InfoRow label="Strona">
+                    {current.website ? (
+                      <a
+                        href={current.website}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: tokens.accent, display: "inline-flex", gap: 5, alignItems: "center", wordBreak: "break-all" }}
+                      >
+                        <Globe size={13} /> {current.website.replace(/^https?:\/\//, "")} <ExternalLink size={10} />
+                      </a>
+                    ) : (
+                      <span style={{ color: tokens.success, fontWeight: 700 }}>Brak strony</span>
+                    )}
+                  </InfoRow>
+                  {current.website_status && (
+                    <InfoRow label="Status strony">
+                      {WEBSITE_STATUS_LABEL[current.website_status] ?? current.website_status}
+                    </InfoRow>
+                  )}
+                  <InfoRow label="Ocena">
+                    {current.rating != null ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <Star size={13} fill={tokens.warning} color={tokens.warning} /> {current.rating.toFixed(1)} (
+                        {current.review_count ?? 0} opinii)
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </InfoRow>
+                  <InfoRow label="Branża">{current.industry || "—"}</InfoRow>
+                  <InfoRow label="Miasto">{current.city || "—"}</InfoRow>
+                  <InfoRow label="Status firmy">{current.business_status || "—"}</InfoRow>
+                  <InfoRow label="Źródło">{current.source || "—"}</InfoRow>
+                  {notes.length > 0 && (
+                    <InfoRow label="Notatki">
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {notes
+                          .slice()
+                          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+                          .map((n) => (
+                            <div key={n.id} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                              <StickyNote size={12} color={tokens.muted} style={{ marginTop: 3, flexShrink: 0 }} />
+                              <span style={{ whiteSpace: "pre-wrap" }}>{n.body}</span>
+                            </div>
+                          ))}
+                      </div>
+                    </InfoRow>
+                  )}
+                </div>
+
                 <a
                   href={googleMapsUrl(current)}
                   target="_blank"
@@ -225,6 +313,7 @@ export default function CallingMode({
                     fontWeight: 700,
                     fontSize: 13,
                     textDecoration: "none",
+                    marginTop: 18,
                   }}
                 >
                   <MapPin size={15} /> Google Maps
@@ -306,6 +395,15 @@ export default function CallingMode({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", fontSize: 13.5 }}>
+      <span style={{ width: 104, flexShrink: 0, color: tokens.muted, fontWeight: 600 }}>{label}</span>
+      <span style={{ minWidth: 0, color: tokens.text }}>{children}</span>
     </div>
   );
 }

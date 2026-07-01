@@ -1,0 +1,12 @@
+-- ════════════════════════════════════════════════════════════════════════
+-- SELLTIC — widoczność postępu scrapera na żywo (Scraper tab).
+-- Dodaje scrape_jobs.current_step: krótki opis aktualnego kroku zadania
+-- (np. "Pobieranie strony 1/3", "Pobieranie szczegółów: <nazwa firmy>"),
+-- aktualizowany przez headless backend (selltic-scraper/webhook_server.py)
+-- i pokazywany w CRM przez Supabase Realtime.
+--
+-- Uruchom raz na istniejącej bazie (po migration_scraper.sql). Idempotentny.
+-- results_count oraz publikacja Realtime dla scrape_jobs/scraped_leads są już
+-- utworzone w migration_scraper.sql — tu wystarczy jedna kolumna.
+-- ════════════════════════════════════════════════════════════════════════
+alter table scrape_jobs add column if not exists current_step text;

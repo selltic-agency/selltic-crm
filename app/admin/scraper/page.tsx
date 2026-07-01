@@ -4,11 +4,12 @@
 // wyniki na żywo przez Supabase Realtime.
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
+import { humanizeScrapeError, ZERO_RESULTS_MESSAGE } from "@/lib/scraperMessages";
 import type { ScrapeJob, ScrapedLead, Prospect } from "@/lib/types";
 
 type Tab = "leads" | "duplicates";
@@ -37,40 +38,160 @@ export default function ScraperPage() {
   const [jobs, setJobs] = useState<ScrapeJob[]>([]);
   const [leads, setLeads] = useState<ScrapedLead[]>([]);
   const [tab, setTab] = useState<Tab>("leads");
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Puls „nowy lead” na liczniku + zliczanie przychodzących leadów do jednego
+  // zbiorczego toasta (unikamy 60 toastów przy dużym scrapowaniu).
+  const [leadPulseKey, setLeadPulseKey] = useState(0);
+  const newLeadCount = useRef(0);
+  const newLeadLastName = useRef("");
+  const newLeadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cykl życia zadań/paczek — toasty tylko dla scrapowań uruchomionych w tej
+  // sesji (nie dla historycznych zadań wczytanych przy wejściu / odświeżeniu).
+  const sessionBatchIds = useRef<Set<string>>(new Set());
+  const announcedJobTerminal = useRef<Set<string>>(new Set());
+  const announcedBatchStart = useRef<Set<string>>(new Set());
+  const announcedBatchDone = useRef<Set<string>>(new Set());
 
   const loadJobs = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("scrape_jobs")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(200);
-    setJobs((data as ScrapeJob[]) ?? []);
+    if (!error) setJobs((data as ScrapeJob[]) ?? []);
+    return error;
   }, [supabase]);
 
   const loadLeads = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("scraped_leads")
       .select("*")
       .in("status", ["new", "duplicate"])
       .order("score", { ascending: false });
-    setLeads((data as ScrapedLead[]) ?? []);
+    if (!error) setLeads((data as ScrapedLead[]) ?? []);
+    return error;
   }, [supabase]);
 
   useEffect(() => {
     loadJobs();
     loadLeads();
 
-    // Realtime: statusy zadań i nowe/zmienione leady na żywo, bez pollingu.
+    // Realtime: statusy/kroki zadań i nowe leady pojawiają się na żywo (bez pollingu).
     const channel = supabase
       .channel("scraper_tab")
-      .on("postgres_changes", { event: "*", schema: "public", table: "scrape_jobs" }, () => loadJobs())
-      .on("postgres_changes", { event: "*", schema: "public", table: "scraped_leads" }, () => loadLeads())
+      .on("postgres_changes", { event: "*", schema: "public", table: "scrape_jobs" }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setJobs((list) => list.filter((j) => j.id !== oldId));
+          return;
+        }
+        const row = payload.new as ScrapeJob;
+        setJobs((list) => {
+          const idx = list.findIndex((j) => j.id === row.id);
+          if (idx === -1) return [row, ...list];
+          const next = [...list];
+          next[idx] = row;
+          return next;
+        });
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "scraped_leads" }, (payload) => {
+        const lead = payload.new as ScrapedLead;
+        if (lead.status === "new" || lead.status === "duplicate") {
+          setLeads((list) => (list.some((l) => l.id === lead.id) ? list : [lead, ...list]));
+        }
+        // Sukces równie widoczny jak błąd: puls + zbiorczy toast po ustaniu napływu.
+        newLeadCount.current += 1;
+        newLeadLastName.current = lead.business_name;
+        setLeadPulseKey((k) => k + 1);
+        if (newLeadTimer.current) clearTimeout(newLeadTimer.current);
+        newLeadTimer.current = setTimeout(() => {
+          const n = newLeadCount.current;
+          newLeadCount.current = 0;
+          if (n <= 0) return;
+          toast.success(n === 1 ? `➕ Nowy lead: ${newLeadLastName.current}` : `➕ Znaleziono ${n} nowych leadów`);
+        }, 1200);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "scraped_leads" }, () => loadLeads())
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "scraped_leads" }, (payload) => {
+        const oldId = (payload.old as { id?: string })?.id;
+        if (oldId) setLeads((list) => list.filter((l) => l.id !== oldId));
+      })
       .subscribe();
 
     return () => {
+      if (newLeadTimer.current) clearTimeout(newLeadTimer.current);
       supabase.removeChannel(channel);
     };
-  }, [supabase, loadJobs, loadLeads]);
+  }, [supabase, loadJobs, loadLeads, toast]);
+
+  // Toasty cyklu życia (start / sukces / błąd / częściowy wynik paczki) —
+  // liczone na podstawie stanu zadań, wyłącznie dla paczek z tej sesji.
+  useEffect(() => {
+    if (jobs.length === 0) return;
+    const batches = new Map<string, ScrapeJob[]>();
+    for (const j of jobs) {
+      const arr = batches.get(j.batch_id);
+      if (arr) arr.push(j);
+      else batches.set(j.batch_id, [j]);
+    }
+
+    for (const [bid, list] of batches) {
+      if (!sessionBatchIds.current.has(bid)) continue;
+
+      // Paczka wystartowała (pierwsze zadanie ruszyło).
+      if (
+        !announcedBatchStart.current.has(bid) &&
+        list.some((j) => j.status === "running" || j.status === "done" || j.status === "error")
+      ) {
+        announcedBatchStart.current.add(bid);
+        toast.info("▶️ Scrapowanie rozpoczęte…");
+      }
+
+      // Zakończenie pojedynczych zadań — błędy zawsze (są akcjonowalne),
+      // sukces pojedynczego zadania tylko gdy paczka to jedno zadanie.
+      for (const j of list) {
+        if ((j.status === "done" || j.status === "error") && !announcedJobTerminal.current.has(j.id)) {
+          announcedJobTerminal.current.add(j.id);
+          if (j.status === "error") {
+            toast.error(`✗ ${j.keyword} · ${j.location}: ${humanizeScrapeError(j.error_message).text}`);
+          } else if (list.length === 1) {
+            if (j.results_count > 0) toast.success(`✓ ${j.keyword} · ${j.location}: ${j.results_count} leadów`);
+            else toast.info(ZERO_RESULTS_MESSAGE);
+          }
+        }
+      }
+
+      // Podsumowanie całej paczki (dla paczek wielozadaniowych).
+      const allTerminal = list.every((j) => j.status === "done" || j.status === "error");
+      if (allTerminal && !announcedBatchDone.current.has(bid)) {
+        announcedBatchDone.current.add(bid);
+        if (list.length > 1) {
+          const done = list.filter((j) => j.status === "done").length;
+          const errored = list.filter((j) => j.status === "error").length;
+          const total = list.reduce((s, j) => s + (j.results_count || 0), 0);
+          if (errored === 0) {
+            if (total > 0) toast.success(`✓ Zakończono: ${total} leadów z ${list.length} zadań.`);
+            else toast.info(ZERO_RESULTS_MESSAGE);
+          } else {
+            toast.error(
+              `${done} z ${list.length} zadań zakończone, ${errored} ${errored === 1 ? "błąd" : "błędów"}. ` +
+                `Znaleziono ${total} leadów.`
+            );
+          }
+        }
+      }
+    }
+  }, [jobs, toast]);
+
+  async function refresh() {
+    setRefreshing(true);
+    const [jobsErr, leadsErr] = await Promise.all([loadJobs(), loadLeads()]);
+    setRefreshing(false);
+    if (jobsErr || leadsErr) toast.error("Nie udało się odświeżyć danych. Spróbuj ponownie.");
+    else toast.info("Odświeżono.");
+  }
 
   async function startScraping() {
     const keywords = keywordsText.split("\n").map((k) => k.trim()).filter(Boolean);
@@ -91,7 +212,8 @@ export default function ScraperPage() {
         toast.error(data.error ?? "Nie udało się uruchomić scrapowania.");
         return;
       }
-      toast.success(`Utworzono ${keywords.length * locations.length} zadań.`);
+      if (data.batch_id) sessionBatchIds.current.add(data.batch_id as string);
+      toast.success(`Utworzono ${keywords.length * locations.length} zadań. Scrapowanie startuje…`);
       if (data.warning) toast.error(data.warning);
       loadJobs();
     } catch {
@@ -174,13 +296,18 @@ export default function ScraperPage() {
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Zadania</h2>
-            <button onClick={loadJobs} style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px" }}>
-              <RefreshCw size={14} /> Odśwież
+            <button
+              onClick={refresh}
+              disabled={refreshing}
+              style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", opacity: refreshing ? 0.6 : 1 }}
+            >
+              <RefreshCw size={14} className={refreshing ? "selltic-spin" : undefined} />
+              {refreshing ? "Odświeżanie…" : "Odśwież"}
             </button>
           </div>
           <div style={{ display: "grid", gap: 16 }}>
             {recentBatchIds.map((batchId) => (
-              <JobsBatch key={batchId} jobs={jobs.filter((j) => j.batch_id === batchId)} />
+              <JobsBatch key={batchId} jobs={jobs.filter((j) => j.batch_id === batchId)} pulseKey={leadPulseKey} />
             ))}
           </div>
         </section>
@@ -228,46 +355,132 @@ export default function ScraperPage() {
   );
 }
 
-function JobsBatch({ jobs }: { jobs: ScrapeJob[] }) {
+function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) {
   const done = jobs.filter((j) => j.status === "done").length;
   const errored = jobs.filter((j) => j.status === "error").length;
+  const total = jobs.reduce((s, j) => s + (j.results_count || 0), 0);
+  const active = jobs.some((j) => j.status === "running" || j.status === "pending");
+  const allTerminal = done + errored === jobs.length;
+
   return (
     <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, padding: 12 }}>
-      <div style={{ fontSize: 13, color: tokens.muted, marginBottom: 8 }}>
-        {done + errored}/{jobs.length} zakończonych
-        {errored > 0 ? ` · ${errored} błędów` : ""} · utworzono {formatDateTime(jobs[0]?.created_at)}
+      {/* Nagłówek paczki: postęp + licznik leadów na żywo */}
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: active ? 8 : 10 }}>
+        <span style={{ fontSize: 13, color: tokens.muted }}>
+          {done + errored}/{jobs.length} zakończonych
+          {errored > 0 ? ` · ${errored} ${errored === 1 ? "błąd" : "błędów"}` : ""} · utworzono{" "}
+          {formatDateTime(jobs[0]?.created_at)}
+        </span>
+        <span
+          // key wymusza ponowne odtworzenie animacji „puls” przy każdym nowym leadzie
+          key={active ? pulseKey : "static"}
+          className={active ? "selltic-pulse" : undefined}
+          style={{
+            marginLeft: "auto",
+            fontSize: 12.5,
+            fontWeight: 700,
+            color: total > 0 ? tokens.success : tokens.muted,
+            background: total > 0 ? `${tokens.success}14` : tokens.bg,
+            border: `1px solid ${tokens.border}`,
+            borderRadius: 999,
+            padding: "3px 10px",
+          }}
+        >
+          Znaleziono: {total} {total === 1 ? "lead" : "leadów"}
+        </span>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+
+      {/* Nieokreślony pasek postępu — nie znamy całkowitej liczby wyników z góry */}
+      {active && <div className="selltic-indeterminate" style={{ height: 6, marginBottom: 12 }} />}
+
+      {/* Podsumowanie końcowe */}
+      {allTerminal && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 12.5,
+            fontWeight: 700,
+            color: errored > 0 ? tokens.danger : tokens.success,
+            background: errored > 0 ? `${tokens.danger}12` : `${tokens.success}12`,
+            borderRadius: 10,
+            padding: "8px 12px",
+            marginBottom: 10,
+          }}
+        >
+          {errored > 0 ? <AlertTriangle size={15} /> : <span>✓</span>}
+          {errored > 0
+            ? `${done} z ${jobs.length} zadań zakończone, ${errored} ${errored === 1 ? "błąd" : "błędów"} · ${total} leadów`
+            : total > 0
+              ? `Zakończono — znaleziono ${total} ${total === 1 ? "lead" : "leadów"}`
+              : "Zakończono — brak wyników dla tej kombinacji"}
+        </div>
+      )}
+
+      {/* Wiersze zadań ze szczegółami postępu (bieżący krok, licznik, błąd) */}
+      <div style={{ display: "grid", gap: 6 }}>
         {jobs.map((j) => (
-          <div
-            key={j.id}
-            title={j.error_message ?? undefined}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "5px 10px",
-              borderRadius: 999,
-              fontSize: 12.5,
-              fontWeight: 600,
-              border: `1px solid ${tokens.border}`,
-              color: JOB_STATUS_COLOR[j.status],
-            }}
-          >
-            <span
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: JOB_STATUS_COLOR[j.status],
-                flexShrink: 0,
-              }}
-            />
-            {j.keyword} · {j.location}
-            {j.status === "done" ? ` — ${j.results_count}` : ` — ${JOB_STATUS_LABEL[j.status]}`}
-          </div>
+          <JobRow key={j.id} job={j} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function JobRow({ job: j }: { job: ScrapeJob }) {
+  const color = JOB_STATUS_COLOR[j.status];
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "7px 10px",
+        borderRadius: 10,
+        border: `1px solid ${tokens.border}`,
+        background: tokens.card,
+      }}
+    >
+      {j.status === "running" ? (
+        <Loader2 size={13} className="selltic-spin" color={color} style={{ flexShrink: 0 }} />
+      ) : (
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      )}
+
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: tokens.text, whiteSpace: "nowrap" }}>
+        {j.keyword} · {j.location}
+      </span>
+
+      {/* Bieżący krok / status / błąd */}
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 12,
+          color: j.status === "error" ? tokens.danger : tokens.muted,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {j.status === "running"
+          ? j.current_step || "W trakcie…"
+          : j.status === "error"
+            ? humanizeScrapeError(j.error_message).text
+            : j.status === "done"
+              ? j.results_count > 0
+                ? `${j.results_count} ${j.results_count === 1 ? "lead" : "leadów"}`
+                : "Brak wyników"
+              : JOB_STATUS_LABEL[j.status]}
+      </span>
+
+      {/* Licznik leadów na żywo (running) / wynik końcowy (done) */}
+      {(j.status === "running" || j.status === "done") && j.results_count > 0 && (
+        <span style={{ fontSize: 12, fontWeight: 700, color: tokens.success, flexShrink: 0 }}>
+          {j.results_count}
+        </span>
+      )}
     </div>
   );
 }
