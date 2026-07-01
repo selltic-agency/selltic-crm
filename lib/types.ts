@@ -147,6 +147,71 @@ export type AppSettings = {
   notify_email: string | null;
 };
 
+// ── Scraper headless (zakładka "Scraper") ───────────────────────────────
+export type ScrapeJobStatus = "pending" | "running" | "done" | "error";
+
+export type ScrapeJob = {
+  id: string;
+  owner: string;
+  keyword: string;
+  location: string;
+  status: ScrapeJobStatus;
+  results_count: number;
+  error_message: string | null;
+  batch_id: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type ScrapedLeadStatus = "new" | "moved" | "duplicate";
+
+export type ScrapedLead = {
+  id: string;
+  owner: string;
+  job_id: string;
+  place_id: string;
+  business_name: string;
+  phone: string | null;
+  address: string | null;
+  website: string | null;
+  rating: number | null;
+  review_count: number | null;
+  business_status: string | null;
+  score: number | null;
+  score_breakdown: Record<string, unknown> | null;
+  website_status: WebsiteStatus2 | null;
+  source_keyword: string;
+  source_location: string;
+  status: ScrapedLeadStatus;
+  moved_to_prospect_id: string | null;
+  scraped_at: string;
+};
+
+// Nazwa WebsiteStatus już zajęta przez prospects (inny zestaw wartości: 'none'|'active'|'broken'|'slow').
+// scraped_leads.website_status pochodzi bezpośrednio z score_website() w scraperze: 'brak'|'nie_dziala'|'dziala'.
+export type WebsiteStatus2 = "brak" | "nie_dziala" | "dziala";
+
+// scraper_config: jeden wiersz per (owner, key). `value` jest jsonb więc
+// kształt zależy od klucza — poniżej kształty faktycznie używanych kluczy.
+export type ScraperConfigScoringWeights = {
+  brak_strony: number;
+  strona_nie_dziala: number;
+  strona_dziala: number;
+  niemobilna_bonus: number;
+};
+
+export type ScraperConfigRule = { min_count?: number; min_rating?: number; points: number };
+
+export type ScraperConfig = {
+  google_places_api_key: string;
+  max_results_per_query: number;
+  request_delay_ms: number;
+  scoring_weights: ScraperConfigScoringWeights;
+  scoring_rules_reviews: ScraperConfigRule[];
+  scoring_rules_rating: ScraperConfigRule[];
+};
+
 // Domyślne etapy lejka — używane jako seed (pierwsze wczytanie) oraz jako
 // fallback, gdy tabela pipeline_stages jest pusta lub niedostępna.
 export type StageSeed = {
