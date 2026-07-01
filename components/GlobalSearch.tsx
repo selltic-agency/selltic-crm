@@ -1,14 +1,14 @@
-// components/GlobalSearch.tsx — wyszukiwarka kontaktów w topbarze.
-// Szuka po nazwie / e-mailu / firmie; wynik otwiera panel kontaktu.
+// components/GlobalSearch.tsx — wyszukiwarka deali w topbarze.
+// Szuka po nazwie / e-mailu / firmie; wynik otwiera stronę deala.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
-import { type Contact } from "@/lib/types";
+import { type Deal } from "@/lib/types";
 
-type Hit = Pick<Contact, "id" | "name" | "email" | "company">;
+type Hit = Pick<Deal, "id" | "name" | "email" | "company">;
 
 export default function GlobalSearch({
   onOpenContact,
@@ -36,7 +36,7 @@ export default function GlobalSearch({
     const t = setTimeout(async () => {
       const esc = term.replace(/[%,]/g, " ");
       const { data } = await supabase
-        .from("contacts")
+        .from("deals")
         .select("id, name, email, company")
         .or(`name.ilike.%${esc}%,email.ilike.%${esc}%,company.ilike.%${esc}%`)
         .order("updated_at", { ascending: false })
@@ -83,7 +83,7 @@ export default function GlobalSearch({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="Szukaj kontaktów…"
+          placeholder="Szukaj deali…"
           style={{
             border: "none",
             outline: "none",

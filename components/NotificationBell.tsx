@@ -59,7 +59,7 @@ export default function NotificationBell({
       setItems((list) => list.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
       await supabase.from("notifications").update({ read: true }).eq("id", n.id);
     }
-    if (n.contact_id) onOpenContact(n.contact_id);
+    if (n.deal_id) onOpenContact(n.deal_id);
   }
 
   return (
@@ -163,7 +163,7 @@ export default function NotificationBell({
                     border: "none",
                     borderTop: `1px solid ${tokens.border}`,
                     background: n.read ? "transparent" : tokens.accentSoft,
-                    cursor: n.contact_id ? "pointer" : "default",
+                    cursor: n.deal_id ? "pointer" : "default",
                   }}
                 >
                   <span

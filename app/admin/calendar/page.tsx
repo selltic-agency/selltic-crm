@@ -70,7 +70,7 @@ export default function CalendarPage() {
     rangeEnd.setDate(rangeEnd.getDate() + 1);
     const { data } = await supabase
       .from("tasks")
-      .select("*, contacts(id, name)")
+      .select("*, deals(id, name)")
       .gte("due_at", rangeStart.toISOString())
       .lt("due_at", rangeEnd.toISOString())
       .order("due_at", { ascending: true });
@@ -99,7 +99,7 @@ export default function CalendarPage() {
     return map;
   }, [filteredTasks]);
 
-  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
+  const openContact = (id: string) => router.push(`/admin/leads/${id}`);
 
   function prevMonth() {
     setMonthStart((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
@@ -360,7 +360,7 @@ function DayPanel({
               return (
                 <div
                   key={t.id}
-                  onClick={() => t.contact_id && onOpenContact(t.contact_id)}
+                  onClick={() => t.deal_id && onOpenContact(t.deal_id)}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -369,7 +369,7 @@ function DayPanel({
                     borderRadius: 10,
                     border: `1px solid ${overdue && !t.done ? tokens.danger : tokens.border}`,
                     background: overdue && !t.done ? `${tokens.danger}0D` : "#fff",
-                    cursor: t.contact_id ? "pointer" : "default",
+                    cursor: t.deal_id ? "pointer" : "default",
                     opacity: t.done ? 0.6 : 1,
                   }}
                 >
@@ -403,10 +403,10 @@ function DayPanel({
                           {formatDateTime(t.due_at)}
                         </span>
                       )}
-                      {t.contacts && (
+                      {t.deals && (
                         <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.accent, fontWeight: 600 }}>
                           <User size={12} />
-                          {t.contacts.name || "Kontakt"}
+                          {t.deals.name || "Deal"}
                         </span>
                       )}
                     </div>

@@ -1,6 +1,6 @@
 // app/admin/inbox/page.tsx — Zgłoszenia (Inbox): surowe wypełnienia formularzy.
 // Minimalny widok przeglądowy (REQUIREMENTS.md §6.2) — tabela, najnowsze
-// pierwsze, z linkiem do kontaktu/leada, które dane zgłoszenie utworzyło.
+// pierwsze, z linkiem do deala, które dane zgłoszenie utworzyło.
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,7 +21,7 @@ export default function InboxPage() {
     setLoading(true);
     const { data } = await supabase
       .from("submissions")
-      .select("*, forms(id, title), contacts(id, name, email), leads(id, stage)")
+      .select("*, forms(id, title), deals(id, name, email, stage)")
       .order("created_at", { ascending: false });
     setSubmissions((data as Submission[]) ?? []);
     setLoading(false);
@@ -60,8 +60,8 @@ export default function InboxPage() {
               <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
                 <th style={thStyle}>FORMULARZ</th>
                 <th style={thStyle}>ZGŁOSZONO</th>
-                <th style={thStyle}>KONTAKT</th>
-                <th style={thStyle}>LEAD</th>
+                <th style={thStyle}>DEAL</th>
+                <th style={thStyle}>ETAP</th>
               </tr>
             </thead>
             <tbody>
@@ -70,9 +70,9 @@ export default function InboxPage() {
                   <td style={tdStyle}>{s.forms?.title || "Usunięty formularz"}</td>
                   <td style={tdStyle}>{formatDateTime(s.created_at)}</td>
                   <td style={tdStyle}>
-                    {s.contacts ? (
-                      <Link href={`/admin/contacts/${s.contacts.id}`} style={linkStyle}>
-                        {s.contacts.name || s.contacts.email || "Bez nazwy"}
+                    {s.deals ? (
+                      <Link href={`/admin/leads/${s.deals.id}`} style={linkStyle}>
+                        {s.deals.name || s.deals.email || "Bez nazwy"}
                         <ExternalLink size={12} />
                       </Link>
                     ) : (
@@ -80,18 +80,18 @@ export default function InboxPage() {
                     )}
                   </td>
                   <td style={tdStyle}>
-                    {s.leads ? (
-                      <Link href={`/admin/leads/${s.leads.id}`} style={linkStyle}>
+                    {s.deals ? (
+                      <Link href={`/admin/leads/${s.deals.id}`} style={linkStyle}>
                         <span
                           style={{
                             width: 7,
                             height: 7,
                             borderRadius: "50%",
-                            background: stageMeta(s.leads.stage).color,
+                            background: stageMeta(s.deals.stage).color,
                             flexShrink: 0,
                           }}
                         />
-                        {stageMeta(s.leads.stage).label}
+                        {stageMeta(s.deals.stage).label}
                         <ExternalLink size={12} />
                       </Link>
                     ) : (

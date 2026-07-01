@@ -1,13 +1,11 @@
-// app/admin/leads/[id]/page.tsx — strona leada (Faza 9.4).
-// Etap (pigułki) + wartość, daty otwarcia/zamknięcia, blok „należy do
-// kontaktu" oraz ZAWĘŻONA oś czasu (tylko aktywności tego leada). Aktywność
-// dodana tutaj dostaje contact_id ORAZ lead_id, więc pojawia się też na
-// głównej osi czasu kontaktu.
+// app/admin/leads/[id]/page.tsx — strona deala (Faza 10).
+// Deal to samodzielny rekord: tożsamość (nazwa/e-mail/telefon/firma) +
+// etap/wartość/daty razem na jednym wierszu. Aktywności są kluczowane
+// wyłącznie przez deal_id.
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   ArrowLeft,
   StickyNote,
@@ -16,7 +14,6 @@ import {
   FileText,
   CircleDot,
   CheckSquare,
-  User,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -29,8 +26,7 @@ import {
   type Activity,
   type ActivityType,
   type Assignee,
-  type Lead,
-  type LeadContact,
+  type Deal,
   type Stage,
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
@@ -56,18 +52,16 @@ const ACTIVITY_LABEL: Record<string, string> = {
   task: "Zadanie",
 };
 
-export default function LeadPage() {
+export default function DealPage() {
   const params = useParams<{ id: string }>();
-  const leadId = params.id;
+  const dealId = params.id;
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const { stages, stageMeta } = useStages();
 
-  const [lead, setLead] = useState<Lead | null>(null);
-  const [contact, setContact] = useState<LeadContact | null>(null);
+  const [deal, setDeal] = useState<Deal | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [otherLeads, setOtherLeads] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [tab, setTab] = useState<ComposerTab>("note");
@@ -78,64 +72,53 @@ export default function LeadPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data: l } = await supabase
-      .from("leads")
-      .select("*, contacts(id, name, company, email, phone, props)")
-      .eq("id", leadId)
+    const { data: d } = await supabase
+      .from("deals")
+      .select("*")
+      .eq("id", dealId)
       .single();
 
-    const leadRow = l as (Lead & { contacts: LeadContact | null }) | null;
-    setLead(leadRow ?? null);
-    setContact(leadRow?.contacts ?? null);
+    const dealRow = d as Deal | null;
+    setDeal(dealRow ?? null);
 
-    if (leadRow) {
-      const [{ data: a }, { count }] = await Promise.all([
-        supabase
-          .from("activities")
-          .select("*")
-          .eq("lead_id", leadId)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("leads")
-          .select("id", { count: "exact", head: true })
-          .eq("contact_id", leadRow.contact_id)
-          .neq("id", leadId),
-      ]);
+    if (dealRow) {
+      const { data: a } = await supabase
+        .from("activities")
+        .select("*")
+        .eq("deal_id", dealId)
+        .order("created_at", { ascending: false });
       setActivities((a as Activity[]) ?? []);
-      setOtherLeads(count ?? 0);
     }
     setLoading(false);
-  }, [supabase, leadId]);
+  }, [supabase, dealId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   async function changeStage(stage: Stage) {
-    if (!lead || lead.stage === stage) return;
-    const prev = lead;
+    if (!deal || deal.stage === stage) return;
+    const prev = deal;
     const meta = stageMeta(stage);
     const terminal = isTerminal(stage);
     // closed_at ustawiamy wchodząc na etap wygrany/przegrany; czyścimy wychodząc.
     const closed_at = terminal ? new Date().toISOString() : null;
-    setLead({ ...lead, stage, closed_at });
+    setDeal({ ...deal, stage, closed_at });
 
     const { error } = await supabase
-      .from("leads")
+      .from("deals")
       .update({ stage, closed_at })
-      .eq("id", lead.id);
+      .eq("id", deal.id);
     if (error) {
-      setLead(prev);
+      setDeal(prev);
       toast.error("Nie udało się zmienić etapu.");
       return;
     }
-    // Aktywność „etap" — na osi leada ORAZ kontaktu.
     const { data } = await supabase
       .from("activities")
       .insert({
-        owner: lead.owner,
-        contact_id: lead.contact_id,
-        lead_id: lead.id,
+        owner: deal.owner,
+        deal_id: deal.id,
         type: "stage",
         body: `Etap zmieniony na: ${meta.label}`,
       })
@@ -150,32 +133,40 @@ export default function LeadPage() {
     return !!(s?.is_won || s?.is_lost);
   }
 
+  async function saveField(field: "name" | "email" | "phone" | "company", value: string) {
+    if (!deal) return;
+    const clean = value.trim() || null;
+    if (deal[field] === clean) return;
+    setDeal({ ...deal, [field]: clean });
+    await supabase.from("deals").update({ [field]: clean }).eq("id", deal.id);
+  }
+
   async function saveValue(raw: string) {
-    if (!lead) return;
+    if (!deal) return;
     const value = raw ? Number(raw) : 0;
-    if (Number(lead.value) === value) return;
-    setLead({ ...lead, value });
-    await supabase.from("leads").update({ value }).eq("id", lead.id);
+    if (Number(deal.value) === value) return;
+    setDeal({ ...deal, value });
+    await supabase.from("deals").update({ value }).eq("id", deal.id);
   }
 
   async function saveAssignee(raw: Assignee | "") {
-    if (!lead) return;
+    if (!deal) return;
     const assignee = raw || null;
-    if (lead.assignee === assignee) return;
-    setLead({ ...lead, assignee });
-    await supabase.from("leads").update({ assignee }).eq("id", lead.id);
+    if (deal.assignee === assignee) return;
+    setDeal({ ...deal, assignee });
+    await supabase.from("deals").update({ assignee }).eq("id", deal.id);
   }
 
   async function saveActivity() {
-    if (!lead || saving) return;
+    if (!deal || saving) return;
 
     if (tab === "task") {
       if (!taskTitle.trim()) return;
       setSaving(true);
       const due = taskDue ? new Date(taskDue).toISOString() : null;
       const { error } = await supabase.from("tasks").insert({
-        owner: lead.owner,
-        contact_id: lead.contact_id,
+        owner: deal.owner,
+        deal_id: deal.id,
         title: taskTitle.trim(),
         due_at: due,
       });
@@ -183,9 +174,8 @@ export default function LeadPage() {
         const { data } = await supabase
           .from("activities")
           .insert({
-            owner: lead.owner,
-            contact_id: lead.contact_id,
-            lead_id: lead.id,
+            owner: deal.owner,
+            deal_id: deal.id,
             type: "task",
             body: taskTitle.trim(),
             meta: due ? { due_at: due } : null,
@@ -208,9 +198,8 @@ export default function LeadPage() {
     const { data, error } = await supabase
       .from("activities")
       .insert({
-        owner: lead.owner,
-        contact_id: lead.contact_id,
-        lead_id: lead.id,
+        owner: deal.owner,
+        deal_id: deal.id,
         type: tab as ActivityType,
         body: body.trim(),
       })
@@ -234,37 +223,60 @@ export default function LeadPage() {
     );
   }
 
-  if (!lead) {
+  if (!deal) {
     return (
       <div style={{ padding: 24 }}>
         <BackLink router={router} />
-        <p style={{ color: tokens.danger, marginTop: 16 }}>Nie znaleziono leada.</p>
+        <p style={{ color: tokens.danger, marginTop: 16 }}>Nie znaleziono deala.</p>
       </div>
     );
   }
 
-  const contactName = contact?.name || "Bez nazwy";
-  const title = lead.source ? `${contactName} — ${lead.source}` : contactName;
+  const dealName = deal.name || "Bez nazwy";
+  const title = deal.source ? `${dealName} — ${deal.source}` : dealName;
 
   return (
     <div style={{ padding: 24, maxWidth: 880, margin: "0 auto" }}>
       <BackLink router={router} />
 
-      {/* Nagłówek leada */}
+      {/* Nagłówek deala */}
       <div style={{ margin: "14px 0 18px" }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>{title}</h1>
         <div style={{ fontSize: 13, color: tokens.muted, marginTop: 4 }}>
-          Otwarty {formatDateTime(lead.opened_at)}
-          {lead.closed_at ? ` · Zamknięty ${formatDateTime(lead.closed_at)}` : ""}
+          Otwarty {formatDateTime(deal.opened_at)}
+          {deal.closed_at ? ` · Zamknięty ${formatDateTime(deal.closed_at)}` : ""}
         </div>
       </div>
+
+      {/* Tożsamość */}
+      <Card>
+        <SectionTitle>Tożsamość</SectionTitle>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ display: "grid", gap: 5, flex: "1 1 200px" }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Nazwa / osoba</span>
+            <input defaultValue={deal.name ?? ""} onBlur={(e) => saveField("name", e.target.value)} style={inputStyle} />
+          </label>
+          <label style={{ display: "grid", gap: 5, flex: "1 1 200px" }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Firma</span>
+            <input defaultValue={deal.company ?? ""} onBlur={(e) => saveField("company", e.target.value)} style={inputStyle} />
+          </label>
+          <label style={{ display: "grid", gap: 5, flex: "1 1 200px" }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>E-mail</span>
+            <input type="email" defaultValue={deal.email ?? ""} onBlur={(e) => saveField("email", e.target.value)} style={inputStyle} />
+          </label>
+          <label style={{ display: "grid", gap: 5, flex: "1 1 200px" }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Telefon</span>
+            <input defaultValue={deal.phone ?? ""} onBlur={(e) => saveField("phone", e.target.value)} style={inputStyle} />
+          </label>
+        </div>
+      </Card>
 
       {/* Etapy */}
       <Card>
         <SectionTitle>Etap</SectionTitle>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {stages.map((s) => {
-            const active = lead.stage === s.key;
+            const active = deal.stage === s.key;
             return (
               <button
                 key={s.key}
@@ -291,7 +303,7 @@ export default function LeadPage() {
             <span style={{ fontSize: 13, fontWeight: 600 }}>Wartość (zł)</span>
             <input
               type="number"
-              defaultValue={lead.value || ""}
+              defaultValue={deal.value || ""}
               onBlur={(e) => saveValue(e.target.value)}
               style={inputStyle}
             />
@@ -299,7 +311,7 @@ export default function LeadPage() {
           <label style={{ display: "grid", gap: 5, flex: "1 1 200px", maxWidth: 240 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>Deal Owner</span>
             <select
-              value={lead.assignee ?? ""}
+              value={deal.assignee ?? ""}
               onChange={(e) => saveAssignee(e.target.value as Assignee | "")}
               style={inputStyle}
             >
@@ -311,51 +323,7 @@ export default function LeadPage() {
         </div>
       </Card>
 
-      {/* Należy do kontaktu */}
-      <Card>
-        <SectionTitle>Należy do kontaktu</SectionTitle>
-        <Link
-          href={`/admin/contacts/${lead.contact_id}`}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            textDecoration: "none",
-            color: tokens.text,
-          }}
-        >
-          <span
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 10,
-              background: tokens.accentSoft,
-              color: tokens.accent,
-              display: "grid",
-              placeItems: "center",
-              flexShrink: 0,
-            }}
-          >
-            <User size={19} />
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>{contactName}</div>
-            <div style={{ fontSize: 12.5, color: tokens.muted }}>
-              {[contact?.email, contact?.phone].filter(Boolean).join(" · ") || "—"}
-            </div>
-          </div>
-        </Link>
-        {otherLeads > 0 && (
-          <Link
-            href={`/admin/contacts/${lead.contact_id}`}
-            style={{ display: "inline-block", marginTop: 10, fontSize: 13, fontWeight: 600, color: tokens.accent }}
-          >
-            Ten kontakt ma jeszcze {otherLeads} {otherLeads === 1 ? "leada" : "leadów"} →
-          </Link>
-        )}
-      </Card>
-
-      {/* Kompozytor aktywności (poziom leada) */}
+      {/* Kompozytor aktywności */}
       <Card>
         <SectionTitle>Dodaj aktywność</SectionTitle>
         <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
@@ -424,9 +392,9 @@ export default function LeadPage() {
         )}
       </Card>
 
-      {/* Zawężona oś czasu — tylko ten lead */}
+      {/* Oś czasu deala */}
       <Card>
-        <SectionTitle>Historia leada</SectionTitle>
+        <SectionTitle>Historia deala</SectionTitle>
         {activities.length === 0 ? (
           <p style={{ fontSize: 14, color: tokens.muted, margin: 0 }}>Brak aktywności</p>
         ) : (

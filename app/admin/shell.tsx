@@ -10,7 +10,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   KanbanSquare,
-  Users,
+  Radar,
   CheckSquare,
   BarChart3,
   FileText,
@@ -31,7 +31,7 @@ import GlobalSearch from "@/components/GlobalSearch";
 
 const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
-  { href: "/admin/contacts", label: "Kontakty", icon: Users },
+  { href: "/admin/prospecting", label: "Prospecting", icon: Radar },
   { href: "/admin/pipeline", label: "Lejek", icon: KanbanSquare },
   { href: "/admin/inbox", label: "Zgłoszenia", icon: Inbox },
   { href: "/admin/tasks", label: "Zadania", icon: CheckSquare },
@@ -53,9 +53,9 @@ export default function Shell({
   const [navOpen, setNavOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
-  // Faza 9.3: klik w kontakt (wyszukiwarka, dzwonek) prowadzi na stronę
-  // kontaktu zamiast otwierać dawny wszystko-w-jednym panel.
-  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
+  // Faza 9.3/10: klik w deal (wyszukiwarka, dzwonek) prowadzi na stronę
+  // deala zamiast otwierać dawny wszystko-w-jednym panel.
+  const openContact = (id: string) => router.push(`/admin/leads/${id}`);
 
   // Load sidebar state from localStorage
   useEffect(() => {

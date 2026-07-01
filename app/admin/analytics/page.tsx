@@ -1,8 +1,8 @@
 // app/admin/analytics/page.tsx — analityka na realnych danych.
-// KPI (kontakty, konwersja, wygrane, wartość) + wykresy:
+// KPI (prospekty, konwersja, wygrane, wartość) + wykresy:
 //   • obszarowy: zgłoszenia / dzień (ostatnie 7 dni)
-//   • słupkowy: liczba kontaktów wg etapu
-//   • kołowy: liczba kontaktów wg źródła
+//   • słupkowy: liczba deali wg etapu
+//   • kołowy: liczba deali wg źródła
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -32,7 +32,7 @@ import { tokens, formatPLN } from "@/lib/ui";
 import { useStages } from "@/lib/stages";
 
 type Kpis = {
-  contacts: number;
+  prospects: number;
   leads: number;
   conversion: number; // %
   won: number;
@@ -54,7 +54,7 @@ export default function AnalyticsPage() {
   const { stages } = useStages();
   const [loading, setLoading] = useState(true);
   const [kpis, setKpis] = useState<Kpis>({
-    contacts: 0,
+    prospects: 0,
     leads: 0,
     conversion: 0,
     won: 0,
@@ -72,9 +72,9 @@ export default function AnalyticsPage() {
     since.setHours(0, 0, 0, 0);
     since.setDate(since.getDate() - 6);
 
-    const [contactsRes, leadsRes, subsRes] = await Promise.all([
-      supabase.from("contacts").select("id", { count: "exact", head: true }),
-      supabase.from("leads").select("stage, value, source"),
+    const [prospectsRes, leadsRes, subsRes] = await Promise.all([
+      supabase.from("prospects").select("id", { count: "exact", head: true }),
+      supabase.from("deals").select("stage, value, source"),
       supabase
         .from("submissions")
         .select("created_at")
@@ -85,14 +85,14 @@ export default function AnalyticsPage() {
     const subs = (subsRes.data as { created_at: string }[]) ?? [];
 
     // ── KPI ──────────────────────────────────────────────────────────────
-    const totalContacts = contactsRes.count ?? 0;
+    const totalProspects = prospectsRes.count ?? 0;
     const totalLeads = leads.length;
     const wonKeys = stages.filter((s) => s.is_won).map((s) => s.key);
     const won = leads.filter((l) => wonKeys.includes(l.stage));
     const wonValue = won.reduce((sum, l) => sum + Number(l.value || 0), 0);
 
     setKpis({
-      contacts: totalContacts,
+      prospects: totalProspects,
       leads: totalLeads,
       conversion: totalLeads ? Math.round((won.length / totalLeads) * 100) : 0,
       won: won.length,
@@ -159,7 +159,7 @@ export default function AnalyticsPage() {
           marginBottom: 18,
         }}
       >
-        <Kpi icon={Users} label="Kontakty" value={loading ? null : String(kpis.contacts)} />
+        <Kpi icon={Users} label="Prospekty" value={loading ? null : String(kpis.prospects)} />
         <Kpi icon={Target} label="Leady" value={loading ? null : String(kpis.leads)} />
         <Kpi icon={TrendingUp} label="Konwersja" value={loading ? null : `${kpis.conversion}%`} />
         <Kpi icon={Trophy} label="Wygrane" value={loading ? null : String(kpis.won)} />

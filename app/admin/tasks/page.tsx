@@ -1,6 +1,6 @@
 // app/admin/tasks/page.tsx — samodzielne zarządzanie zadaniami.
 // Dodawanie, oznaczanie jako zrobione / ponowne otwarcie, usuwanie.
-// Optymistyczny UI; zadania powiązane z kontaktem prowadzą na stronę kontaktu.
+// Optymistyczny UI; zadania powiązane z dealem prowadzą na stronę deala.
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -28,13 +28,13 @@ export default function TasksPage() {
   const [due, setDue] = useState("");
   const [assignee, setAssignee] = useState<Assignee | "">("");
   const [adding, setAdding] = useState(false);
-  const openContact = (id: string) => router.push(`/admin/contacts/${id}`);
+  const openDeal = (id: string) => router.push(`/admin/leads/${id}`);
 
   const load = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase
       .from("tasks")
-      .select("*, contacts(id, name)")
+      .select("*, deals(id, name)")
       .order("due_at", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false });
     setTasks((data as Task[]) ?? []);
@@ -60,7 +60,7 @@ export default function TasksPage() {
     const { data, error } = await supabase
       .from("tasks")
       .insert({ owner: user.id, title: title.trim(), due_at, assignee: assignee || null })
-      .select("*, contacts(id, name)")
+      .select("*, deals(id, name)")
       .single();
     if (!error && data) {
       setTasks((list) => [...list, data as Task]);
@@ -179,7 +179,7 @@ export default function TasksPage() {
                   task={t}
                   onToggle={() => toggleDone(t)}
                   onDelete={() => removeTask(t)}
-                  onOpenContact={openContact}
+                  onOpenContact={openDeal}
                   onReassign={(next) => reassignTask(t, next)}
                 />
               ))}
@@ -197,7 +197,7 @@ export default function TasksPage() {
                     task={t}
                     onToggle={() => toggleDone(t)}
                     onDelete={() => removeTask(t)}
-                    onOpenContact={openContact}
+                    onOpenContact={openDeal}
                     onReassign={(next) => reassignTask(t, next)}
                   />
                 ))}
@@ -259,9 +259,9 @@ function TaskRow({
               {formatDateTime(task.due_at)}
             </span>
           )}
-          {task.contacts && task.contact_id && (
+          {task.deals && task.deal_id && (
             <button
-              onClick={() => onOpenContact(task.contact_id!)}
+              onClick={() => onOpenContact(task.deal_id!)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -276,7 +276,7 @@ function TaskRow({
               }}
             >
               <User size={13} />
-              {task.contacts.name || "Kontakt"}
+              {task.deals.name || "Deal"}
             </button>
           )}
         </div>
