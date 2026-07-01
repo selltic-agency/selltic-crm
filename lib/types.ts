@@ -41,6 +41,20 @@ export type Deal = {
   closed_at: string | null;
   created_at: string;
   updated_at: string;
+  // Dane z Google Maps przeniesione przy konwersji prospekt → deal
+  // (migration_deals_scraper_fields.sql). Wszystkie opcjonalne — dealy z
+  // formularzy ich nie mają.
+  place_id?: string | null;
+  website?: string | null;
+  address?: string | null;
+  google_rating?: number | null;
+  review_count?: number | null;
+  business_status?: string | null;
+  industry?: string | null;
+  city?: string | null;
+  website_status?: WebsiteStatus | null;
+  lead_score?: number | null;
+  lead_score_breakdown?: Record<string, unknown> | null;
 };
 
 // Prospekt = zimny lead z Google Maps (Faza 10), zanim wykaże zainteresowanie.

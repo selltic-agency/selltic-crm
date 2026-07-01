@@ -46,7 +46,20 @@ create table if not exists deals (
   opened_at   timestamptz not null default now(),
   closed_at   timestamptz,                      -- ustawiane gdy etap = is_won/is_lost
   created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
+  updated_at  timestamptz not null default now(),
+  -- Dane z Google Maps przeniesione przy konwersji prospekt → deal
+  -- (patrz migration_deals_scraper_fields.sql). Null dla dealów z formularzy.
+  place_id             text,
+  website              text,
+  address              text,
+  google_rating        numeric,
+  review_count         int,
+  business_status      text,
+  industry             text,
+  city                 text,
+  website_status       text check (website_status is null or website_status in ('none', 'active', 'broken', 'slow')),
+  lead_score           int check (lead_score is null or (lead_score >= 0 and lead_score <= 100)),
+  lead_score_breakdown jsonb
 );
 
 -- ── PROSPEKTY (CRM) — zimne leady z Google Maps, zanim wykażą zainteresowanie ──

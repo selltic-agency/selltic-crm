@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import { humanizeScrapeError, ZERO_RESULTS_MESSAGE } from "@/lib/scraperMessages";
+import { ScoreBadge } from "@/components/ScoreBreakdown";
 import type { ScrapeJob, ScrapedLead, Prospect } from "@/lib/types";
 
 type Tab = "leads" | "duplicates";
@@ -54,6 +55,19 @@ export default function ScraperPage() {
   const announcedBatchStart = useRef<Set<string>>(new Set());
   const announcedBatchDone = useRef<Set<string>>(new Set());
 
+  // Bezpiecznik utkniętych zadań: zanim wczytamy listę, poprosimy backend CRM
+  // o oznaczenie zadań wiszących zbyt długo w pending/running jako błąd. Dzięki
+  // temu zadanie, które nigdy nie ruszyło (np. webhook nie dotarł / instancja
+  // uśpiona), przestaje wisieć w nieskończoność bez sygnału. Best-effort —
+  // błąd tego wywołania nie może zablokować wczytania danych.
+  const reapStaleJobs = useCallback(async () => {
+    try {
+      await fetch("/api/scraper/reap-stale", { method: "POST" });
+    } catch {
+      /* best-effort: brak sieci nie może psuć wczytywania listy */
+    }
+  }, []);
+
   const loadJobs = useCallback(async () => {
     const { data, error } = await supabase
       .from("scrape_jobs")
@@ -75,7 +89,9 @@ export default function ScraperPage() {
   }, [supabase]);
 
   useEffect(() => {
-    loadJobs();
+    // Kolejność: najpierw reap (oznacz utknięte jako błąd), potem wczytaj listę,
+    // żeby użytkownik od razu zobaczył aktualne statusy.
+    reapStaleJobs().finally(loadJobs);
     loadLeads();
 
     // Realtime: statusy/kroki zadań i nowe leady pojawiają się na żywo (bez pollingu).
@@ -124,7 +140,7 @@ export default function ScraperPage() {
       if (newLeadTimer.current) clearTimeout(newLeadTimer.current);
       supabase.removeChannel(channel);
     };
-  }, [supabase, loadJobs, loadLeads, toast]);
+  }, [supabase, loadJobs, loadLeads, reapStaleJobs, toast]);
 
   // Toasty cyklu życia (start / sukces / błąd / częściowy wynik paczki) —
   // liczone na podstawie stanu zadań, wyłącznie dla paczek z tej sesji.
@@ -187,6 +203,7 @@ export default function ScraperPage() {
 
   async function refresh() {
     setRefreshing(true);
+    await reapStaleJobs();
     const [jobsErr, leadsErr] = await Promise.all([loadJobs(), loadLeads()]);
     setRefreshing(false);
     if (jobsErr || leadsErr) toast.error("Nie udało się odświeżyć danych. Spróbuj ponownie.");
@@ -430,69 +447,104 @@ function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) 
 
 function JobRow({ job: j }: { job: ScrapeJob }) {
   const color = JOB_STATUS_COLOR[j.status];
+  const [expanded, setExpanded] = useState(false);
+  const isError = j.status === "error";
+  // Pełny surowy komunikat błędu — bez przycinania. `title` daje natywny
+  // dymek na hover (działa nawet w kontenerach z overflow:hidden), a rozwijane
+  // szczegóły pokazują całość z zawijaniem.
+  const rawError = j.error_message ?? "";
+
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
+        display: "grid",
+        gap: 6,
         padding: "7px 10px",
         borderRadius: 10,
         border: `1px solid ${tokens.border}`,
         background: tokens.card,
       }}
     >
-      {j.status === "running" ? (
-        <Loader2 size={13} className="selltic-spin" color={color} style={{ flexShrink: 0 }} />
-      ) : (
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {j.status === "running" ? (
+          <Loader2 size={13} className="selltic-spin" color={color} style={{ flexShrink: 0 }} />
+        ) : (
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+        )}
 
-      <span style={{ fontSize: 12.5, fontWeight: 700, color: tokens.text, whiteSpace: "nowrap" }}>
-        {j.keyword} · {j.location}
-      </span>
-
-      {/* Bieżący krok / status / błąd */}
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 12,
-          color: j.status === "error" ? tokens.danger : tokens.muted,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {j.status === "running"
-          ? j.current_step || "W trakcie…"
-          : j.status === "error"
-            ? humanizeScrapeError(j.error_message).text
-            : j.status === "done"
-              ? j.results_count > 0
-                ? `${j.results_count} ${j.results_count === 1 ? "lead" : "leadów"}`
-                : "Brak wyników"
-              : JOB_STATUS_LABEL[j.status]}
-      </span>
-
-      {/* Licznik leadów na żywo (running) / wynik końcowy (done) */}
-      {(j.status === "running" || j.status === "done") && j.results_count > 0 && (
-        <span style={{ fontSize: 12, fontWeight: 700, color: tokens.success, flexShrink: 0 }}>
-          {j.results_count}
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: tokens.text, whiteSpace: "nowrap" }}>
+          {j.keyword} · {j.location}
         </span>
+
+        {/* Bieżący krok / status / błąd (skrócony w wierszu, pełny w tooltipie/rozwinięciu) */}
+        <span
+          title={isError ? rawError || undefined : undefined}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 12,
+            color: isError ? tokens.danger : tokens.muted,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {j.status === "running"
+            ? j.current_step || "W trakcie…"
+            : isError
+              ? humanizeScrapeError(j.error_message).text
+              : j.status === "done"
+                ? j.results_count > 0
+                  ? `${j.results_count} ${j.results_count === 1 ? "lead" : "leadów"}`
+                  : "Brak wyników"
+                : JOB_STATUS_LABEL[j.status]}
+        </span>
+
+        {/* Rozwiń pełny komunikat błędu (bez ucinania) */}
+        {isError && rawError && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              flexShrink: 0,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 11.5,
+              fontWeight: 700,
+              color: tokens.accent,
+              padding: "2px 4px",
+            }}
+          >
+            {expanded ? "Ukryj" : "Szczegóły"}
+          </button>
+        )}
+
+        {/* Licznik leadów na żywo (running) / wynik końcowy (done) */}
+        {(j.status === "running" || j.status === "done") && j.results_count > 0 && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: tokens.success, flexShrink: 0 }}>
+            {j.results_count}
+          </span>
+        )}
+      </div>
+
+      {isError && expanded && rawError && (
+        <div
+          style={{
+            fontSize: 11.5,
+            color: tokens.text,
+            background: tokens.bg,
+            border: `1px solid ${tokens.border}`,
+            borderRadius: 8,
+            padding: "8px 10px",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          }}
+        >
+          {rawError}
+        </div>
       )}
     </div>
-  );
-}
-
-function ScorePill({ score }: { score: number | null }) {
-  const s = score ?? 0;
-  const color = s >= 70 ? tokens.success : s >= 35 ? tokens.warning : tokens.muted;
-  const bg = s >= 70 ? "rgba(24,169,87,0.10)" : s >= 35 ? "rgba(242,153,74,0.12)" : tokens.bg;
-  return (
-    <span style={{ padding: "2px 10px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, color, background: bg }}>
-      {s}
-    </span>
   );
 }
 
@@ -601,7 +653,7 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
               )}
             </div>
             <div style={{ width: 50, flexShrink: 0, textAlign: "right" }}>
-              <ScorePill score={l.score} />
+              <ScoreBadge score={l.score} breakdown={l.score_breakdown} />
             </div>
           </div>
         ))}
@@ -656,6 +708,7 @@ function DuplicatesTab({ leads, supabase }: { leads: ScrapedLead[]; supabase: Re
                     rating={p.rating}
                     reviewCount={p.review_count}
                     score={p.lead_score}
+                    breakdown={p.lead_score_breakdown}
                     website={p.website}
                     phone={p.phone}
                     when={p.created_at}
@@ -672,6 +725,7 @@ function DuplicatesTab({ leads, supabase }: { leads: ScrapedLead[]; supabase: Re
                   rating={l.rating}
                   reviewCount={l.review_count}
                   score={l.score}
+                  breakdown={l.score_breakdown}
                   website={l.website}
                   phone={l.phone}
                   when={l.scraped_at}
@@ -689,6 +743,7 @@ function CompareFields({
   rating,
   reviewCount,
   score,
+  breakdown,
   website,
   phone,
   when,
@@ -696,6 +751,7 @@ function CompareFields({
   rating: number | null;
   reviewCount: number | null;
   score: number | null;
+  breakdown?: unknown;
   website: string | null;
   phone: string | null;
   when: string;
@@ -703,7 +759,9 @@ function CompareFields({
   return (
     <div style={{ fontSize: 13, display: "grid", gap: 4 }}>
       <div>⭐ {rating ?? "—"} ({reviewCount ?? 0} opinii)</div>
-      <div>Score: <b>{score ?? "—"}</b></div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        Score: <ScoreBadge score={score} breakdown={breakdown} fontSize={12} />
+      </div>
       <div>Strona: {website ?? "brak"}</div>
       <div>Telefon: {phone ?? "—"}</div>
       <div style={{ color: tokens.muted }}>{formatDateTime(when)}</div>

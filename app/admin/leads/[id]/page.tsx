@@ -32,6 +32,8 @@ import {
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import { useToast } from "@/components/Toast";
+import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
+import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
 
 type ComposerTab = "note" | "call" | "email" | "task";
 
@@ -296,6 +298,10 @@ export default function DealPage() {
         </div>
       </Card>
 
+      {/* Dane z Google Maps + ocena leada — tylko dla dealów ze scrapera
+          (konwersja prospekt → deal przenosi tu komplet danych). */}
+      <ProspectingDataCard deal={deal} />
+
       {/* Etapy */}
       <Card>
         <SectionTitle>Etap</SectionTitle>
@@ -471,6 +477,109 @@ export default function DealPage() {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+const WEBSITE_STATUS_LABEL: Record<string, string> = {
+  none: "Brak strony",
+  active: "Aktywna",
+  broken: "Zepsuta",
+  slow: "Wolna",
+};
+
+// Dane z Google Maps + wyjaśnienie lead score, przeniesione przy konwersji
+// prospekt → deal. Renderuje się tylko, gdy deal faktycznie pochodzi ze scrapera.
+function ProspectingDataCard({ deal }: { deal: Deal }) {
+  const hasData =
+    deal.lead_score != null ||
+    !!deal.place_id ||
+    !!deal.website ||
+    deal.google_rating != null ||
+    !!deal.address ||
+    !!deal.business_status;
+  if (!hasData) return null;
+
+  const scoreReasonsFallback = (deal.props as Record<string, unknown> | null)?.score_reasons;
+  const mapsUrl = (deal.props as Record<string, unknown> | null)?.google_maps_url as string | undefined;
+  const hasBreakdown =
+    parseScoreBreakdown(deal.lead_score_breakdown, scoreReasonsFallback).items.length > 0;
+
+  return (
+    <Card>
+      <SectionTitle>Dane z Google Maps</SectionTitle>
+      <div style={{ display: "grid", gap: 10 }}>
+        <DealRow label="Strona">
+          {deal.website ? (
+            <a href={deal.website} target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
+              {deal.website}
+            </a>
+          ) : (
+            <span style={{ color: tokens.success, fontWeight: 700 }}>Brak strony</span>
+          )}
+        </DealRow>
+        {deal.website_status && (
+          <DealRow label="Status strony">
+            {WEBSITE_STATUS_LABEL[deal.website_status] ?? deal.website_status}
+          </DealRow>
+        )}
+        <DealRow label="Adres">{deal.address || "—"}</DealRow>
+        <DealRow label="Ocena">
+          {deal.google_rating != null
+            ? `⭐ ${deal.google_rating} (${deal.review_count ?? 0} opinii)`
+            : "—"}
+        </DealRow>
+        <DealRow label="Branża">{deal.industry || "—"}</DealRow>
+        <DealRow label="Miasto">{deal.city || "—"}</DealRow>
+        <DealRow label="Status firmy">{deal.business_status || "—"}</DealRow>
+        {deal.lead_score != null && (
+          <DealRow label="Lead score">
+            <b>{deal.lead_score}/100</b>
+          </DealRow>
+        )}
+        {hasBreakdown && (
+          <DealRow label="Wyjaśnienie">
+            <ScoreBreakdownList
+              score={deal.lead_score ?? null}
+              breakdown={deal.lead_score_breakdown}
+              fallbackReasons={scoreReasonsFallback}
+            />
+          </DealRow>
+        )}
+      </div>
+      {mapsUrl && (
+        <a
+          href={mapsUrl}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            marginTop: 14,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "9px 14px",
+            borderRadius: 10,
+            background: tokens.accentSoft,
+            color: tokens.accent,
+            fontWeight: 700,
+            fontSize: 13,
+            textDecoration: "none",
+          }}
+        >
+          Zobacz w Google Maps
+        </a>
+      )}
+    </Card>
+  );
+}
+
+function DealRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+      <span style={{ width: 110, flexShrink: 0, fontSize: 13, color: tokens.muted, fontWeight: 600, paddingTop: 1 }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 14, color: tokens.text, minWidth: 0 }}>{children}</span>
     </div>
   );
 }

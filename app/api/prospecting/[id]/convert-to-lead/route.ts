@@ -52,6 +52,22 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       stage: firstStage?.key ?? "new",
       value: 0,
       source: "prospecting",
+      // Pełny transfer danych z Google Maps na dedykowane kolumny deala
+      // (migration_deals_scraper_fields.sql) — KAŻDA właściwość zebrana przy
+      // scrapowaniu ląduje na rekordzie deala, nie tylko podzbiór.
+      place_id: p.place_id,
+      website: p.website,
+      address: p.address,
+      google_rating: p.rating,
+      review_count: p.review_count,
+      business_status: p.business_status,
+      industry: p.industry,
+      city: p.city,
+      website_status: p.website_status,
+      lead_score: p.lead_score,
+      lead_score_breakdown: p.lead_score_breakdown,
+      // props zachowane dla zgodności wstecznej (google_maps_url, score_reasons)
+      // oraz komplet danych zdublowany, żeby nic nie zginęło.
       props: {
         website: p.website,
         address: p.address,
@@ -61,7 +77,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
         place_id: p.place_id,
         rating: p.rating,
         review_count: p.review_count,
+        business_status: p.business_status,
         lead_score: p.lead_score,
+        lead_score_breakdown: p.lead_score_breakdown,
         website_status: p.website_status,
         google_maps_url: googleMapsUrl,
         score_reasons: props.score_reasons ?? null,
