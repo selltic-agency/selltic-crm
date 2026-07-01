@@ -32,7 +32,7 @@ import GlobalSearch from "@/components/GlobalSearch";
 const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
   { href: "/admin/prospecting", label: "Prospecting", icon: Radar },
-  { href: "/admin/pipeline", label: "Lejek", icon: KanbanSquare },
+  { href: "/admin/pipeline", label: "Leady", icon: KanbanSquare },
   { href: "/admin/inbox", label: "Zgłoszenia", icon: Inbox },
   { href: "/admin/tasks", label: "Zadania", icon: CheckSquare },
   { href: "/admin/calendar", label: "Kalendarz", icon: Calendar },

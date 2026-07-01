@@ -5,10 +5,11 @@
 // (patrz lib/prospectStatus.ts) — to wyłącznie kosmetyka UI.
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Phone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, inputStyle } from "@/lib/ui";
+import { tokens } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import type { Prospect } from "@/lib/types";
 import {
@@ -25,6 +26,10 @@ import {
 import ProspectCard from "@/components/prospecting/ProspectCard";
 import ProspectDetailDrawer from "@/components/prospecting/ProspectDetailDrawer";
 import CallingMode from "@/components/prospecting/CallingMode";
+import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/FilterBar";
+import SavedViewTabs from "@/components/SavedViewTabs";
+import { Filter, Sort, buildFilterQuery, columnForProspect } from "@/lib/filters";
+import { useSavedViews, type SeedView } from "@/lib/savedViews";
 
 const TABS: { key: DisplayStatus | ""; label: string }[] = [
   { key: "", label: "Wszystkie" },
@@ -34,9 +39,40 @@ const TABS: { key: DisplayStatus | ""; label: string }[] = [
   { key: "not_interested", label: "Niezainteresowane" },
 ];
 
+const WEBSITE_STATUS_LABEL: Record<string, string> = {
+  none: "Brak strony",
+  active: "Aktywna",
+  broken: "Zepsuta",
+  slow: "Wolna",
+};
+
+const PROSPECT_BUILT_IN_FIELDS: FieldDef[] = [
+  {
+    key: "prospecting_status",
+    label: "Status",
+    type: "select",
+    options: [
+      { key: "new", label: STATUS_LABEL.new },
+      { key: "contact_attempted", label: STATUS_LABEL.no_answer },
+      { key: "not_interested", label: STATUS_LABEL.not_interested },
+      { key: "converted", label: STATUS_LABEL.converted },
+    ],
+  },
+  { key: "lead_score", label: "Lead score", type: "number" },
+  {
+    key: "website_status",
+    label: "Status strony",
+    type: "select",
+    options: Object.entries(WEBSITE_STATUS_LABEL).map(([key, label]) => ({ key, label })),
+  },
+];
+
+const NO_WEBSITE_QUICK_FILTER: Filter = { field: "website_status", operator: "in", value: ["none"] };
+
 export default function ProspectingPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
+  const searchParams = useSearchParams();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,22 +86,94 @@ export default function ProspectingPage() {
   const [cities, setCities] = useState<string[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<DisplayStatus | "">("");
-  const [industryFilter, setIndustryFilter] = useState("");
-  const [cityFilter, setCityFilter] = useState("");
+  const [filters, setFilters] = useState<Filter[]>([]);
+  const [sort, setSort] = useState<Sort | null>(null);
+  const filterBarRef = useRef<FilterBarHandle>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [callingMode, setCallingMode] = useState(false);
 
+  // Pola miasta/branży są dynamiczne (zależą od zaimportowanych danych).
+  const builtInFields = useMemo<FieldDef[]>(
+    () => [
+      ...PROSPECT_BUILT_IN_FIELDS,
+      { key: "city", label: "Miasto", type: "select", options: cities },
+      { key: "industry", label: "Branża", type: "select", options: industries },
+    ],
+    [cities, industries]
+  );
+
+  const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
+    return [
+      { name: "Wszystkie", view_mode: "kanban", filters: [], sort: null },
+      {
+        name: "Do zadzwonienia",
+        view_mode: "kanban",
+        filters: [{ field: "prospecting_status", operator: "in", value: ["new", "contact_attempted"] }],
+        sort: { column: "lead_score", direction: "desc" },
+      },
+      {
+        name: "Wysokie priorytety",
+        view_mode: "kanban",
+        // >= 70: brak operatora "gte" w modelu filtrów, 69 daje ten sam próg dla liczb całkowitych.
+        filters: [{ field: "lead_score", operator: "gt", value: 69 }],
+        sort: null,
+      },
+    ];
+  }, []);
+
+  const {
+    views,
+    activeId,
+    activeView,
+    loading: viewsLoading,
+    selectView,
+    createView,
+    updateView,
+    deleteView,
+  } = useSavedViews("prospecting", seedDefaults);
+
+  const applyView = useCallback((filters_: Filter[], sort_: Sort | null) => {
+    filterBarRef.current?.setFilters(filters_);
+    setSort(sort_);
+  }, []);
+
+  const appliedInitial = useRef(false);
+  useEffect(() => {
+    if (appliedInitial.current || viewsLoading) return;
+    appliedInitial.current = true;
+    if (searchParams.get("f")) {
+      selectView(null);
+      return;
+    }
+    if (activeView) applyView(activeView.filters, activeView.sort);
+  }, [viewsLoading, activeView, applyView, searchParams, selectView]);
+
+  const handleSelectView = (id: string) => {
+    selectView(id);
+    const v = views.find((x) => x.id === id);
+    if (v) applyView(v.filters, v.sort);
+  };
+
+  const isDirty = useMemo(() => {
+    if (!activeView) return false;
+    return (
+      JSON.stringify(filters) !== JSON.stringify(activeView.filters) ||
+      JSON.stringify(sort) !== JSON.stringify(activeView.sort ?? null)
+    );
+  }, [activeView, filters, sort]);
+
   const load = useCallback(async () => {
     setLoading(true);
-    let query = supabase.from("prospects").select("*").order("lead_score", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
-    if (industryFilter) query = query.eq("industry", industryFilter);
-    if (cityFilter) query = query.eq("city", cityFilter);
+    let query = supabase.from("prospects").select("*");
+    query = buildFilterQuery(query, filters, columnForProspect);
+    if (sort) query = query.order(sort.column, { ascending: sort.direction === "asc" });
+    else query = query.order("lead_score", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
 
     const { data } = await query;
     setProspects((data as Prospect[]) ?? []);
     setLoading(false);
-  }, [supabase, industryFilter, cityFilter]);
+  }, [supabase, filters, sort]);
 
   useEffect(() => {
     load();
@@ -197,25 +305,24 @@ export default function ProspectingPage() {
         ))}
       </div>
 
-      {/* Filtry */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
-        <select value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)} style={{ ...inputStyle, width: 180 }}>
-          <option value="">Wszystkie branże</option>
-          {industries.map((i) => (
-            <option key={i} value={i}>
-              {i}
-            </option>
-          ))}
-        </select>
-        <select value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} style={{ ...inputStyle, width: 180 }}>
-          <option value="">Wszystkie miasta</option>
-          {cities.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SavedViewTabs
+        views={views}
+        activeId={activeId}
+        loading={viewsLoading}
+        isDirty={isDirty}
+        onSelect={handleSelectView}
+        onCreate={(name) => createView(name, { filters, sort, view_mode: "kanban" })}
+        onRename={(id, name) => updateView(id, { name })}
+        onDelete={deleteView}
+        onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort })}
+      />
+
+      <FilterBar
+        ref={filterBarRef}
+        builtInFields={builtInFields}
+        onFilterChange={setFilters}
+        quickFilters={[{ label: "Tylko bez strony", filter: NO_WEBSITE_QUICK_FILTER }]}
+      />
 
       {/* Lista kart */}
       {loading ? (

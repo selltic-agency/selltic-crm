@@ -144,6 +144,24 @@ create table if not exists table_view_config (
   columns jsonb not null default '[]'  -- [{ key: "name", visible: true, width: 200, position: 0 }, ...]
 );
 
+-- ── ZAPISANE WIDOKI (HubSpot-style, Faza 8.6/12) ────────────────────────
+-- Kombinacja filtrów + sortowania + trybu widoku, zapisana jako zakładka.
+-- `page` rozróżnia Leady ('deals') od Prospectingu ('prospecting') — każda
+-- strona ma własny zestaw zakładek. Domyślne widoki (`is_default`) są
+-- zasiewane leniwie w aplikacji przy pierwszym wczytaniu (po owner).
+create table if not exists saved_views (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users on delete cascade,
+  page        text not null,                   -- 'deals' | 'prospecting'
+  name        text not null,
+  view_mode   text not null default 'kanban',  -- kanban | table
+  filters     jsonb not null default '[]',
+  sort        jsonb,
+  position    int not null default 0,
+  is_default  boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
 -- ── ZADANIA ─────────────────────────────────────────────────────────────
 create table if not exists tasks (
   id          uuid primary key default gen_random_uuid(),
@@ -218,6 +236,7 @@ alter table app_settings  enable row level security;
 alter table notifications enable row level security;
 alter table pipeline_stages enable row level security;
 alter table table_view_config enable row level security;
+alter table saved_views enable row level security;
 
 -- Właściciel: pełny dostęp do swoich danych
 -- (drop if exists przed każdym create — schema.sql musi być bezpieczny do
@@ -246,6 +265,8 @@ drop policy if exists "own stages" on pipeline_stages;
 create policy "own stages"        on pipeline_stages for all using (auth.uid() = owner) with check (auth.uid() = owner);
 drop policy if exists "own table config" on table_view_config;
 create policy "own table config"  on table_view_config for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own saved views" on saved_views;
+create policy "own saved views"   on saved_views for all using (auth.uid() = owner) with check (auth.uid() = owner);
 
 -- Publiczny: czytanie WYŁĄCZNIE opublikowanych formularzy (do renderu /f/[slug])
 drop policy if exists "public reads published" on forms;

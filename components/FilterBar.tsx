@@ -1,40 +1,50 @@
-// components/FilterBar.tsx — pasek filtrowania dealów (Faza 8.4 / 10).
+// components/FilterBar.tsx — pasek filtrowania (Faza 8.4 / 10), współdzielony
+// przez Leady (deals) i Prospecting. Pola wbudowane i (opcjonalnie) własności
+// niestandardowe (property_defs) dostarcza wywołujący przez `builtInFields`.
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Plus, X, Filter as FilterIcon, Calendar, ChevronDown } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, ghostButton, primaryButton } from "@/lib/ui";
 import { useStages } from "@/lib/stages";
 import { PropertyDef, PropertyType } from "@/lib/types";
 import { Filter, FilterOperator } from "@/lib/filters";
 
-type FieldDef = {
+export type FieldOption = string | { key: string; label: string };
+
+export type FieldDef = {
   key: string;
   label: string;
-  type: PropertyType | "stage" | "source" | "value" | "date";
-  options?: string[];
+  type: PropertyType | "stage" | "source" | "value" | "date" | "select";
+  options?: FieldOption[];
 };
 
-// Faza 10: deal to samodzielny rekord — pola pipeline'u i tożsamości żyją
-// razem na jednym rekordzie, więc lista pól filtrów jest płaska.
-const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
-  { key: "stage", label: "Etap", type: "stage" },
-  { key: "value", label: "Wartość", type: "value" },
-  { key: "source", label: "Źródło", type: "source" },
-  { key: "opened_at", label: "Data otwarcia", type: "date" },
-  { key: "name", label: "Nazwa", type: "text" },
-  { key: "email", label: "E-mail", type: "text" },
-  { key: "phone", label: "Telefon", type: "text" },
-  { key: "company", label: "Firma", type: "text" },
-];
+function normOption(o: FieldOption): { key: string; label: string } {
+  return typeof o === "string" ? { key: o, label: o } : o;
+}
 
-export default function FilterBar({
-  onFilterChange,
-}: {
-  onFilterChange: (filters: Filter[]) => void;
-}) {
+export type QuickFilter = {
+  label: string;
+  filter: Filter;
+};
+
+export type FilterBarHandle = {
+  setFilters: (filters: Filter[]) => void;
+};
+
+const FilterBar = forwardRef<
+  FilterBarHandle,
+  {
+    builtInFields: FieldDef[];
+    onFilterChange: (filters: Filter[]) => void;
+    /** Dociągnij i domieszaj definicje właściwości własnych (tylko Leady). */
+    withCustomProperties?: boolean;
+    /** Chipy-skróty (np. „Tylko bez strony”) — przełączają jeden zdefiniowany filtr. */
+    quickFilters?: QuickFilter[];
+  }
+>(function FilterBar({ builtInFields, onFilterChange, withCustomProperties = false, quickFilters }, ref) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -46,8 +56,9 @@ export default function FilterBar({
   const [showAdd, setShowAdd] = useState(false);
   const [editingFilter, setEditingFilter] = useState<Partial<Filter> | null>(null);
 
-  // Wczytaj definicje pól własnych.
+  // Wczytaj definicje pól własnych (tylko gdy strona ich używa — Leady).
   useEffect(() => {
+    if (!withCustomProperties) return;
     (async () => {
       const { data } = await supabase
         .from("property_defs")
@@ -55,7 +66,7 @@ export default function FilterBar({
         .order("position", { ascending: true });
       if (data) setPropDefs(data as PropertyDef[]);
     })();
-  }, [supabase]);
+  }, [supabase, withCustomProperties]);
 
   // Synchronizacja z URL przy montowaniu.
   useEffect(() => {
@@ -90,16 +101,22 @@ export default function FilterBar({
     router.replace(`${pathname}?${params.toString()}`);
   };
 
-  // Pola deala = wbudowane + właściwości własne (props).
+  // Zastosowanie filtrów z zewnątrz (ładowanie zapisanego widoku).
+  useImperativeHandle(ref, () => ({
+    setFilters: (newFilters: Filter[]) => updateFilters(newFilters),
+  }));
+
+  // Pola = wbudowane (dostarczone przez wywołującego) + właściwości własne.
   const allFields = useMemo(() => {
+    if (!withCustomProperties) return builtInFields;
     const custom: FieldDef[] = propDefs.map((p) => ({
       key: p.key,
       label: p.key,
       type: p.type,
       options: p.options || undefined,
     }));
-    return [...DEAL_BUILT_IN_FIELDS, ...custom];
-  }, [propDefs]);
+    return [...builtInFields, ...custom];
+  }, [builtInFields, propDefs, withCustomProperties]);
 
   const removeFilter = (index: number) => {
     updateFilters(filters.filter((_, i) => i !== index));
@@ -127,6 +144,17 @@ export default function FilterBar({
     if (editingFilter?.field && editingFilter?.operator) {
       updateFilters([...filters, editingFilter as Filter]);
       setEditingFilter(null);
+    }
+  };
+
+  const isQuickFilterActive = (qf: QuickFilter) =>
+    filters.some((f) => f.field === qf.filter.field && f.operator === qf.filter.operator && JSON.stringify(f.value) === JSON.stringify(qf.filter.value));
+
+  const toggleQuickFilter = (qf: QuickFilter) => {
+    if (isQuickFilterActive(qf)) {
+      updateFilters(filters.filter((f) => !(f.field === qf.filter.field && f.operator === qf.filter.operator && JSON.stringify(f.value) === JSON.stringify(qf.filter.value))));
+    } else {
+      updateFilters([...filters, qf.filter]);
     }
   };
 
@@ -167,10 +195,35 @@ export default function FilterBar({
                 padding: 6,
               }}
             >
-              <FieldGroup label="Deal" fields={allFields} onPick={addFilter} />
+              <FieldGroup fields={allFields} onPick={addFilter} />
             </div>
           )}
         </div>
+
+        {quickFilters?.map((qf) => {
+          const active = isQuickFilterActive(qf);
+          return (
+            <button
+              key={qf.label}
+              onClick={() => toggleQuickFilter(qf)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                borderRadius: 999,
+                border: `1px solid ${active ? tokens.accent : tokens.border}`,
+                background: active ? tokens.accentSoft : "#fff",
+                color: active ? tokens.accent : tokens.text,
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {qf.label}
+            </button>
+          );
+        })}
 
         {filters.map((f, i) => {
           const fieldDef = allFields.find((af) => af.key === f.field);
@@ -287,33 +340,21 @@ export default function FilterBar({
       )}
     </div>
   );
-}
+});
 
-// Grupa pól w rozwijanej liście „Dodaj filtr" (Lead / Kontakt).
+export default FilterBar;
+
+// Lista pól w rozwijanej liście „Dodaj filtr".
 function FieldGroup({
-  label,
   fields,
   onPick,
 }: {
-  label: string;
   fields: FieldDef[];
   onPick: (f: FieldDef) => void;
 }) {
   if (fields.length === 0) return null;
   return (
     <div>
-      <div
-        style={{
-          padding: "8px 10px 4px",
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-          color: tokens.muted,
-        }}
-      >
-        {label}
-      </div>
       {fields.map((f) => (
         <button
           key={f.key}
@@ -385,7 +426,7 @@ function ValueInput({
   if (field?.type === "stage" || field?.type === "select") {
     const options = field.type === "stage"
       ? stages.map(s => ({ key: s.key, label: s.label }))
-      : field.options?.map(o => ({ key: o, label: o })) || [];
+      : field.options?.map(normOption) || [];
 
     const selected = Array.isArray(value) ? value : [];
 
@@ -488,6 +529,10 @@ function formatValue(f: Filter, fieldDef?: FieldDef, stages?: any[]): string {
   if (Array.isArray(f.value)) {
     if (fieldDef?.type === "stage") {
       return f.value.map(k => stages?.find(s => s.key === k)?.label || k).join(", ");
+    }
+    if (fieldDef?.type === "select" && fieldDef.options) {
+      const opts = fieldDef.options.map(normOption);
+      return f.value.map(k => opts.find(o => o.key === k)?.label || k).join(", ");
     }
     return f.value.join(", ");
   }
