@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Inbox,
   Calendar,
+  Zap,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
@@ -32,6 +33,7 @@ import GlobalSearch from "@/components/GlobalSearch";
 const NAV = [
   { href: "/admin", label: "Pulpit", icon: LayoutDashboard, exact: true },
   { href: "/admin/prospecting", label: "Prospecting", icon: Radar },
+  { href: "/admin/scraper", label: "Scraper", icon: Zap },
   { href: "/admin/pipeline", label: "Leady", icon: KanbanSquare },
   { href: "/admin/inbox", label: "Zgłoszenia", icon: Inbox },
   { href: "/admin/tasks", label: "Zadania", icon: CheckSquare },

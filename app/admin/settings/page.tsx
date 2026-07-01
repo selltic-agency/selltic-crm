@@ -11,11 +11,35 @@ import type {
   PipelineStage,
   PropertyDef,
   PropertyType,
+  ScraperConfig,
+  ScraperConfigRule,
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import { useToast } from "@/components/Toast";
 
-type Tab = "properties" | "stages" | "notifications";
+type Tab = "properties" | "stages" | "notifications" | "scraper";
+
+const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
+  google_places_api_key: "",
+  max_results_per_query: 60,
+  request_delay_ms: 500,
+  scoring_weights: {
+    brak_strony: 40,
+    strona_nie_dziala: 30,
+    strona_dziala: 0,
+    niemobilna_bonus: 10,
+  },
+  scoring_rules_reviews: [
+    { min_count: 1, points: 5 },
+    { min_count: 15, points: 12 },
+    { min_count: 50, points: 20 },
+  ],
+  scoring_rules_rating: [
+    { min_rating: 3.0, points: 5 },
+    { min_rating: 4.0, points: 10 },
+    { min_rating: 4.5, points: 15 },
+  ],
+};
 
 const TYPE_LABEL: Record<PropertyType, string> = {
   text: "tekst",
@@ -37,6 +61,7 @@ export default function SettingsPage() {
             ["properties", "Właściwości"],
             ["stages", "Etapy lejka"],
             ["notifications", "Powiadomienia"],
+            ["scraper", "Scraper"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
           <button
@@ -62,8 +87,10 @@ export default function SettingsPage() {
         <PropertiesTab />
       ) : tab === "stages" ? (
         <StagesTab />
-      ) : (
+      ) : tab === "notifications" ? (
         <NotificationsTab />
+      ) : (
+        <ScraperTab />
       )}
     </div>
   );
@@ -719,6 +746,260 @@ function ToggleRow({
             boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
           }}
         />
+      </button>
+    </div>
+  );
+}
+
+/* ── Scraper (klucz API, konfiguracja, scoring) ──────────────────────────
+   Ustawienia trzymane per-klucz w tabeli scraper_config (owner, key, value
+   jsonb), czytane przez Cloud Run (webhook_server.py) w czasie rzeczywistym —
+   zmiana tutaj nie wymaga redeployu backendu. */
+function ScraperTab() {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const [config, setConfig] = useState<ScraperConfig>(DEFAULT_SCRAPER_CONFIG);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    const { data } = await supabase.from("scraper_config").select("key,value").eq("owner", user.id);
+    const next = { ...DEFAULT_SCRAPER_CONFIG };
+    for (const row of data ?? []) {
+      (next as unknown as Record<string, unknown>)[row.key] = row.value;
+    }
+    setConfig(next);
+    setLoading(false);
+  }, [supabase]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function saveAll(next: ScraperConfig) {
+    setSaving(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setSaving(false);
+      return;
+    }
+    const rows = (Object.keys(next) as (keyof ScraperConfig)[]).map((key) => ({
+      owner: user.id,
+      key,
+      value: next[key],
+      updated_at: new Date().toISOString(),
+    }));
+    const { error } = await supabase.from("scraper_config").upsert(rows, { onConflict: "owner,key" });
+    setSaving(false);
+    if (error) {
+      toast.error("Nie udało się zapisać konfiguracji scrapera.");
+      return;
+    }
+    toast.success("Zapisano konfigurację scrapera.");
+  }
+
+  if (loading) {
+    return (
+      <Section>
+        <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      </Section>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <Section>
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 10px" }}>Klucz Google Places API</h3>
+        <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 10px" }}>
+          Czytany przez backend scrapera na Cloud Run w czasie rzeczywistym (bez redeployu).
+        </p>
+        <input
+          type="password"
+          placeholder="AIza..."
+          value={config.google_places_api_key}
+          onChange={(e) => setConfig((c) => ({ ...c, google_places_api_key: e.target.value }))}
+          style={{ ...inputStyle, maxWidth: 420 }}
+        />
+      </Section>
+
+      <Section>
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 10px" }}>Parametry scrapowania</h3>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Limit firm na zapytanie</span>
+            <input
+              type="number"
+              min={20}
+              max={180}
+              step={20}
+              value={config.max_results_per_query}
+              onChange={(e) => setConfig((c) => ({ ...c, max_results_per_query: Number(e.target.value) }))}
+              style={{ ...inputStyle, width: 160 }}
+            />
+          </label>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Opóźnienie między zapytaniami (ms)</span>
+            <input
+              type="number"
+              min={0}
+              step={100}
+              value={config.request_delay_ms}
+              onChange={(e) => setConfig((c) => ({ ...c, request_delay_ms: Number(e.target.value) }))}
+              style={{ ...inputStyle, width: 220 }}
+            />
+          </label>
+        </div>
+      </Section>
+
+      <Section>
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 4px" }}>Konfiguracja scoringu</h3>
+        <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 14px" }}>
+          Status strony WWW — dokładnie jeden z trzech stanów + osobny bonus za brak mobilności.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+          <NumField
+            label="Brak strony/domeny"
+            value={config.scoring_weights.brak_strony}
+            onChange={(v) => setConfig((c) => ({ ...c, scoring_weights: { ...c.scoring_weights, brak_strony: v } }))}
+          />
+          <NumField
+            label="Jest domena, nie działa"
+            value={config.scoring_weights.strona_nie_dziala}
+            onChange={(v) => setConfig((c) => ({ ...c, scoring_weights: { ...c.scoring_weights, strona_nie_dziala: v } }))}
+          />
+          <NumField
+            label="Jest strona i działa"
+            value={config.scoring_weights.strona_dziala}
+            onChange={(v) => setConfig((c) => ({ ...c, scoring_weights: { ...c.scoring_weights, strona_dziala: v } }))}
+          />
+          <NumField
+            label="Bonus: niemobilna"
+            value={config.scoring_weights.niemobilna_bonus}
+            onChange={(v) => setConfig((c) => ({ ...c, scoring_weights: { ...c.scoring_weights, niemobilna_bonus: v } }))}
+          />
+        </div>
+
+        <RuleListEditor
+          title="Reguły punktowe — liczba opinii"
+          thresholdKey="min_count"
+          thresholdLabel="min. liczba opinii"
+          rules={config.scoring_rules_reviews}
+          onChange={(rules) => setConfig((c) => ({ ...c, scoring_rules_reviews: rules }))}
+        />
+        <div style={{ height: 14 }} />
+        <RuleListEditor
+          title="Reguły punktowe — ocena Google"
+          thresholdKey="min_rating"
+          thresholdLabel="min. ocena"
+          step={0.1}
+          rules={config.scoring_rules_rating}
+          onChange={(rules) => setConfig((c) => ({ ...c, scoring_rules_rating: rules }))}
+        />
+
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button onClick={() => saveAll(config)} disabled={saving} style={primaryButton}>
+            {saving ? "Zapisywanie…" : "Zapisz ustawienia"}
+          </button>
+          <button
+            onClick={() => {
+              setConfig(DEFAULT_SCRAPER_CONFIG);
+              saveAll(DEFAULT_SCRAPER_CONFIG);
+            }}
+            style={ghostButton}
+          >
+            Przywróć wartości domyślne
+          </button>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function NumField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <label style={{ display: "grid", gap: 6 }}>
+      <span style={{ fontSize: 12.5, fontWeight: 600, color: tokens.muted }}>{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={inputStyle}
+      />
+    </label>
+  );
+}
+
+function RuleListEditor({
+  title,
+  thresholdKey,
+  thresholdLabel,
+  step = 1,
+  rules,
+  onChange,
+}: {
+  title: string;
+  thresholdKey: "min_count" | "min_rating";
+  thresholdLabel: string;
+  step?: number;
+  rules: ScraperConfigRule[];
+  onChange: (rules: ScraperConfigRule[]) => void;
+}) {
+  function patch(i: number, partial: Partial<ScraperConfigRule>) {
+    onChange(rules.map((r, idx) => (idx === i ? { ...r, ...partial } : r)));
+  }
+  function remove(i: number) {
+    onChange(rules.filter((_, idx) => idx !== i));
+  }
+  function add() {
+    onChange([...rules, { [thresholdKey]: 0, points: 0 } as ScraperConfigRule]);
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{title}</div>
+      <div style={{ display: "grid", gap: 6 }}>
+        {rules.map((r, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="number"
+              step={step}
+              placeholder={thresholdLabel}
+              value={r[thresholdKey] ?? 0}
+              onChange={(e) => patch(i, { [thresholdKey]: Number(e.target.value) } as Partial<ScraperConfigRule>)}
+              style={{ ...inputStyle, width: 140 }}
+            />
+            <span style={{ fontSize: 12.5, color: tokens.muted }}>→</span>
+            <input
+              type="number"
+              placeholder="punkty"
+              value={r.points}
+              onChange={(e) => patch(i, { points: Number(e.target.value) })}
+              style={{ ...inputStyle, width: 100 }}
+            />
+            <span style={{ fontSize: 12.5, color: tokens.muted }}>pkt</span>
+            <button
+              onClick={() => remove(i)}
+              aria-label="Usuń regułę"
+              style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
+            >
+              <Trash2 size={13} color={tokens.muted} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button onClick={add} style={{ ...ghostButton, marginTop: 8, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px" }}>
+        <Plus size={14} /> Dodaj regułę
       </button>
     </div>
   );
