@@ -1,11 +1,13 @@
 // components/ProspectTable.tsx — widok TABELI dla Prospectingu. Odwzorowuje
 // wzorzec z components/LeadTable.tsx (sortowalne nagłówki, hover wiersza,
-// paginacja, poziome przewijanie na wąskich ekranach), ale na typie Prospect
-// i ze stałym zestawem kolumn właściwych dla zimnych leadów z Google Maps.
+// paginacja, poziome przewijanie na wąskich ekranach) oraz wzorzec zaznaczania
+// z zakładki Scraper → Leady (checkbox per wiersz + „Zaznacz wszystkie” +
+// akcja zbiorcza). Obsługuje archiwizację (miękkie usunięcie) pojedynczo i
+// zbiorczo, a w trybie archiwum — przywracanie.
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronUp, ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronUp, ChevronDown, CheckSquare, Square, Archive, RotateCcw } from "lucide-react";
 import { tokens, formatDateTime } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
@@ -18,7 +20,7 @@ const WEBSITE_STATUS_LABEL: Record<string, string> = {
   slow: "Wolna",
 };
 
-type SortConfig = { key: string; direction: "asc" | "desc" };
+export type SortConfig = { key: string; direction: "asc" | "desc" };
 
 const COLUMNS: { key: string; label: string; width: number }[] = [
   { key: "name", label: "Nazwa", width: 200 },
@@ -35,13 +37,31 @@ const COLUMNS: { key: string; label: string; width: number }[] = [
 export default function ProspectTable({
   prospects,
   onRowClick,
+  sort,
+  onSortChange,
+  archiveMode = false,
+  onArchive,
+  onRestore,
 }: {
   prospects: Prospect[];
   onRowClick: (id: string) => void;
+  sort: SortConfig;
+  onSortChange: (sort: SortConfig) => void;
+  archiveMode?: boolean;
+  onArchive?: (ids: string[]) => void;
+  onRestore?: (ids: string[]) => void;
 }) {
-  const [sort, setSort] = useState<SortConfig>({ key: "lead_score", direction: "desc" });
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const pageSize = 25;
+
+  // Odznacz wiersze, które zniknęły z listy (zarchiwizowane / przywrócone gdzie indziej).
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => prospects.some((p) => p.id === id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [prospects]);
 
   const sorted = useMemo(() => {
     const arr = [...prospects].sort((a, b) => {
@@ -59,20 +79,98 @@ export default function ProspectTable({
   const safePage = Math.min(page, Math.max(1, totalPages));
   const paginated = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
+  const allSelected = prospects.length > 0 && selected.size === prospects.length;
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(prospects.map((p) => p.id)));
+  }
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function bulkAction() {
+    if (selected.size === 0) return;
+    const ids = [...selected];
+    if (archiveMode) onRestore?.(ids);
+    else onArchive?.(ids);
+    setSelected(new Set());
+  }
+
   function handleSort(key: string) {
-    setSort((prev) => ({
+    onSortChange({
       key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }));
+      direction: sort.key === key && sort.direction === "asc" ? "desc" : "asc",
+    });
     setPage(1);
   }
 
   return (
     <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
+      {/* Pasek akcji zbiorczych */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 10,
+          padding: "12px 16px",
+          borderBottom: `1px solid ${tokens.border}`,
+        }}
+      >
+        <button
+          onClick={toggleAll}
+          disabled={prospects.length === 0}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: prospects.length === 0 ? "default" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            color: tokens.text,
+            fontSize: 13,
+            fontWeight: 600,
+            opacity: prospects.length === 0 ? 0.5 : 1,
+          }}
+        >
+          {allSelected ? <CheckSquare size={17} color={tokens.accent} /> : <Square size={17} color={tokens.muted} />}
+          Zaznacz wszystkie
+        </button>
+        <div style={{ flex: 1, minWidth: 8 }} />
+        <button
+          onClick={bulkAction}
+          disabled={selected.size === 0}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "7px 14px",
+            borderRadius: 10,
+            border: `1px solid ${tokens.border}`,
+            background: tokens.card,
+            color: tokens.text,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: selected.size === 0 ? "default" : "pointer",
+            opacity: selected.size === 0 ? 0.5 : 1,
+          }}
+        >
+          {archiveMode ? <RotateCcw size={15} /> : <Archive size={15} />}
+          {archiveMode ? `Przywróć zaznaczone (${selected.size})` : `Archiwizuj zaznaczone (${selected.size})`}
+        </button>
+      </div>
+
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
+              <th style={{ padding: "12px 16px", width: 44 }} />
               {COLUMNS.map((col) => (
                 <th
                   key={col.key}
@@ -96,28 +194,67 @@ export default function ProspectTable({
                   </div>
                 </th>
               ))}
+              <th style={{ padding: "12px 16px", width: 56 }} />
             </tr>
           </thead>
           <tbody>
-            {paginated.map((p) => (
-              <tr
-                key={p.id}
-                onClick={() => onRowClick(p.id)}
-                style={{ borderBottom: `1px solid ${tokens.border}`, cursor: "pointer", transition: "background 0.15s ease" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-              >
-                {COLUMNS.map((col) => (
-                  <td key={col.key} style={{ ...tdStyle, width: col.width, maxWidth: col.width }}>
-                    {renderCell(p, col.key)}
+            {paginated.map((p) => {
+              const isSelected = selected.has(p.id);
+              return (
+                <tr
+                  key={p.id}
+                  onClick={() => onRowClick(p.id)}
+                  style={{
+                    borderBottom: `1px solid ${tokens.border}`,
+                    cursor: "pointer",
+                    transition: "background 0.15s ease",
+                    background: isSelected ? tokens.accentSoft : "transparent",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : tokens.bg)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : "transparent")}
+                >
+                  <td style={{ ...tdStyle, width: 44, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => toggleOne(p.id)}
+                      aria-label={isSelected ? "Odznacz" : "Zaznacz"}
+                      style={{ background: "none", border: "none", cursor: "pointer", display: "grid", placeItems: "center", padding: 0 }}
+                    >
+                      {isSelected ? <CheckSquare size={17} color={tokens.accent} /> : <Square size={17} color={tokens.muted} />}
+                    </button>
                   </td>
-                ))}
-              </tr>
-            ))}
+                  {COLUMNS.map((col) => (
+                    <td key={col.key} style={{ ...tdStyle, width: col.width, maxWidth: col.width }}>
+                      {renderCell(p, col.key)}
+                    </td>
+                  ))}
+                  <td style={{ ...tdStyle, width: 56, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => (archiveMode ? onRestore?.([p.id]) : onArchive?.([p.id]))}
+                      title={archiveMode ? "Przywróć" : "Archiwizuj"}
+                      aria-label={archiveMode ? "Przywróć prospekt" : "Archiwizuj prospekt"}
+                      style={{
+                        background: "none",
+                        border: `1px solid ${tokens.border}`,
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        color: tokens.muted,
+                        display: "grid",
+                        placeItems: "center",
+                        width: 30,
+                        height: 30,
+                        margin: "0 auto",
+                      }}
+                    >
+                      {archiveMode ? <RotateCcw size={15} /> : <Archive size={15} />}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
             {paginated.length === 0 && (
               <tr>
-                <td colSpan={COLUMNS.length} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
-                  Brak prospektów spełniających kryteria.
+                <td colSpan={COLUMNS.length + 2} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
+                  {archiveMode ? "Archiwum jest puste." : "Brak prospektów spełniających kryteria."}
                 </td>
               </tr>
             )}

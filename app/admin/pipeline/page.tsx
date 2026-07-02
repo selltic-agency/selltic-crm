@@ -23,6 +23,7 @@ import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/Fil
 import SavedViewTabs from "@/components/SavedViewTabs";
 import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
+import { loadViewPrefs, saveViewPrefs, planHydration, type ViewMode } from "@/lib/viewPrefs";
 
 const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
   { key: "stage", label: "Etap", type: "stage" },
@@ -60,14 +61,15 @@ export default function PipelinePage() {
   const [tableSort, setTableSort] = useState<SortConfig>(DEFAULT_TABLE_SORT);
   const filterBarRef = useRef<FilterBarHandle>(null);
 
+  // ID zalogowanego użytkownika — do namespace'owania trwałego stanu widoku.
+  // `undefined` = jeszcze nie wiadomo, `null` = brak sesji.
+  const [userId, setUserId] = useState<string | null | undefined>(undefined);
   useEffect(() => {
-    const saved = localStorage.getItem("selltic_pipeline_view");
-    if (saved === "kanban" || saved === "table") setViewMode(saved);
-  }, []);
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+  }, [supabase]);
 
   const toggleView = (mode: "kanban" | "table") => {
     setViewMode(mode);
-    localStorage.setItem("selltic_pipeline_view", mode);
   };
 
   const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
@@ -105,25 +107,33 @@ export default function PipelinePage() {
   const applyView = useCallback((filters_: Filter[], mode: "kanban" | "table", sort: Sort | null) => {
     filterBarRef.current?.setFilters(filters_);
     setViewMode(mode);
-    localStorage.setItem("selltic_pipeline_view", mode);
     setTableSort(sort ? { key: sort.column, direction: sort.direction } : DEFAULT_TABLE_SORT);
   }, []);
 
-  // Przy pierwszym wczytaniu: jeśli w URL nie ma udostępnionych filtrów,
-  // zastosuj domyślny (pierwszy) zapisany widok. Jeśli są — zostają (link
-  // do zakładki ma pierwszeństwo), a żadna zakładka nie jest podświetlona.
-  const appliedInitial = useRef(false);
+  // ── Hydratacja trwałego stanu widoku (per-user, przeżywa odświeżenie i
+  // nawigację). Uruchamiana raz, gdy znamy użytkownika i wczytano widoki. ──
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
-    if (appliedInitial.current || viewsLoading) return;
-    appliedInitial.current = true;
-    if (searchParams.get("f")) {
+    if (hydrated || viewsLoading || userId === undefined) return;
+    // Filtry z URL (?f=…) obejmują zwykłe odświeżenie (FilterBar sam zapisuje je
+    // do URL) i udostępniony link — wtedy FilterBar odtwarza je sam z URL, więc
+    // ich nie nadpisujemy. Tryb widoku, sortowanie i aktywny widok odtwarzamy
+    // ZAWSZE z prefs (nie ma ich w URL), więc odświeżenie przywraca pełny stan.
+    const hasUrlFilters = !!searchParams.get("f");
+    const prefs = loadViewPrefs("deals", userId);
+    const plan = planHydration(prefs, hasUrlFilters);
+    if (plan.restoreFromPrefs && prefs) {
+      if (prefs.viewMode) setViewMode(prefs.viewMode);
+      if (prefs.sort !== undefined) setTableSort(prefs.sort ? { key: prefs.sort.column, direction: prefs.sort.direction } : DEFAULT_TABLE_SORT);
+      if (prefs.activeViewId !== undefined) selectView(prefs.activeViewId);
+      if (plan.restoreFiltersFromPrefs) filterBarRef.current?.setFilters(prefs.filters ?? []);
+    } else if (plan.clearActiveView) {
       selectView(null);
-      return;
-    }
-    if (activeView) {
+    } else if (plan.applyDefaultView && activeView) {
       applyView(activeView.filters, activeView.view_mode, activeView.sort);
     }
-  }, [viewsLoading, activeView, applyView, searchParams, selectView]);
+    setHydrated(true);
+  }, [hydrated, viewsLoading, userId, activeView, applyView, searchParams, selectView]);
 
   const handleSelectView = (id: string) => {
     selectView(id);
@@ -141,6 +151,17 @@ export default function PipelinePage() {
       JSON.stringify(currentSort) !== JSON.stringify(activeView.sort ?? null)
     );
   }, [activeView, filters, viewMode, currentSort]);
+
+  // ── Zapis trwałego stanu widoku ───────────────────────────────────────
+  useEffect(() => {
+    if (!hydrated) return;
+    saveViewPrefs("deals", userId ?? null, {
+      activeViewId: activeId,
+      filters,
+      sort: { column: tableSort.key, direction: tableSort.direction },
+      viewMode: viewMode as ViewMode,
+    });
+  }, [hydrated, userId, activeId, filters, tableSort, viewMode]);
 
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);

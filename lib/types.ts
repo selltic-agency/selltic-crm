@@ -85,6 +85,7 @@ export type Prospect = {
   lead_score: number | null;
   lead_score_breakdown: Record<string, unknown> | null;
   converted_deal_id: string | null;
+  archived_at: string | null;
   props: Record<string, unknown>;
 };
 
