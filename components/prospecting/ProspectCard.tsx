@@ -80,7 +80,7 @@ export default function ProspectCard({
       {/* Nazwa + branża/miasto + tagi */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 700, fontSize: 15, color: tokens.text }}>{p.name}</span>
+          <span style={{ fontWeight: 700, fontSize: 15, color: tokens.text, overflowWrap: "anywhere", minWidth: 0 }}>{p.name}</span>
           {closed && (
             <span
               style={{

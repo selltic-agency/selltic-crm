@@ -179,7 +179,7 @@ export type ScrapeJob = {
   completed_at: string | null;
 };
 
-export type ScrapedLeadStatus = "new" | "moved" | "duplicate";
+export type ScrapedLeadStatus = "new" | "moved" | "duplicate" | "rejected";
 
 export type ScrapedLead = {
   id: string;
