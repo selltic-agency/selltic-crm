@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2, AlertTriangle } from "lucide-react";
+import { Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2, AlertTriangle, Archive, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
@@ -13,7 +13,7 @@ import { humanizeScrapeError, ZERO_RESULTS_MESSAGE } from "@/lib/scraperMessages
 import { ScoreBadge } from "@/components/ScoreBreakdown";
 import type { ScrapeJob, ScrapedLead, Prospect } from "@/lib/types";
 
-type Tab = "leads" | "duplicates";
+type Tab = "leads" | "duplicates" | "archive";
 
 const JOB_STATUS_LABEL: Record<ScrapeJob["status"], string> = {
   pending: "Oczekuje",
@@ -82,7 +82,7 @@ export default function ScraperPage() {
     const { data, error } = await supabase
       .from("scraped_leads")
       .select("*")
-      .in("status", ["new", "duplicate"])
+      .in("status", ["new", "duplicate", "rejected"])
       .order("score", { ascending: false });
     if (!error) setLeads((data as ScrapedLead[]) ?? []);
     return error;
@@ -242,6 +242,7 @@ export default function ScraperPage() {
 
   const newLeads = leads.filter((l) => l.status === "new");
   const duplicateLeads = leads.filter((l) => l.status === "duplicate");
+  const archivedLeads = leads.filter((l) => l.status === "rejected");
 
   const recentBatchIds = useMemo(() => {
     const seen: string[] = [];
@@ -269,7 +270,7 @@ export default function ScraperPage() {
           Podaj słowa kluczowe i lokalizacje (po jednej w linii). Scraper wygeneruje zadanie
           dla każdej kombinacji słowo kluczowe × lokalizacja.
         </p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
           <label style={{ display: "grid", gap: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>Słowa kluczowe</span>
             <textarea
@@ -330,43 +331,24 @@ export default function ScraperPage() {
         </section>
       )}
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-        <button
-          onClick={() => setTab("leads")}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 10,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-            border: `1px solid ${tab === "leads" ? tokens.accent : tokens.border}`,
-            background: tab === "leads" ? tokens.accentSoft : "#fff",
-            color: tab === "leads" ? tokens.accent : tokens.muted,
-          }}
-        >
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+        <TabButton active={tab === "leads"} onClick={() => setTab("leads")}>
           Leady ({newLeads.length})
-        </button>
-        <button
-          onClick={() => setTab("duplicates")}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 10,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-            border: `1px solid ${tab === "duplicates" ? tokens.accent : tokens.border}`,
-            background: tab === "duplicates" ? tokens.accentSoft : "#fff",
-            color: tab === "duplicates" ? tokens.accent : tokens.muted,
-          }}
-        >
+        </TabButton>
+        <TabButton active={tab === "duplicates"} onClick={() => setTab("duplicates")}>
           Duplikaty ({duplicateLeads.length})
-        </button>
+        </TabButton>
+        <TabButton active={tab === "archive"} onClick={() => setTab("archive")}>
+          Archiwum ({archivedLeads.length})
+        </TabButton>
       </div>
 
       {tab === "leads" ? (
         <LeadsTab leads={newLeads} onMoved={loadLeads} />
-      ) : (
+      ) : tab === "duplicates" ? (
         <DuplicatesTab leads={duplicateLeads} supabase={supabase} />
+      ) : (
+        <ArchiveTab leads={archivedLeads} supabase={supabase} onChanged={loadLeads} />
       )}
     </div>
   );
@@ -415,7 +397,8 @@ function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) 
         <div
           style={{
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
+            flexWrap: "wrap",
             gap: 8,
             fontSize: 12.5,
             fontWeight: 700,
@@ -424,9 +407,12 @@ function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) 
             borderRadius: 10,
             padding: "8px 12px",
             marginBottom: 10,
+            overflowWrap: "anywhere",
           }}
         >
-          {errored > 0 ? <AlertTriangle size={15} /> : <span>✓</span>}
+          <span style={{ flexShrink: 0, display: "flex" }}>
+            {errored > 0 ? <AlertTriangle size={15} /> : <span>✓</span>}
+          </span>{" "}
           {errored > 0
             ? `${done} z ${jobs.length} zadań zakończone, ${errored} ${errored === 1 ? "błąd" : "błędów"} · ${total} leadów`
             : total > 0
@@ -454,6 +440,8 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
   // szczegóły pokazują całość z zawijaniem.
   const rawError = j.error_message ?? "";
 
+  const statusText = isError ? humanizeScrapeError(j.error_message).text : "";
+
   return (
     <div
       style={{
@@ -463,48 +451,51 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
         borderRadius: 10,
         border: `1px solid ${tokens.border}`,
         background: tokens.card,
+        minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {/* Wiersz tytułu: zawija się na wąskich ekranach zamiast wypływać poza kartę */}
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
         {j.status === "running" ? (
           <Loader2 size={13} className="selltic-spin" color={color} style={{ flexShrink: 0 }} />
         ) : (
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
         )}
 
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: tokens.text, whiteSpace: "nowrap" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: tokens.text, wordBreak: "break-word", minWidth: 0 }}>
           {j.keyword} · {j.location}
         </span>
 
-        {/* Bieżący krok / status / błąd (skrócony w wierszu, pełny w tooltipie/rozwinięciu) */}
-        <span
-          title={isError ? rawError || undefined : undefined}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 12,
-            color: isError ? tokens.danger : tokens.muted,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {j.status === "running"
-            ? j.current_step || "W trakcie…"
-            : isError
-              ? humanizeScrapeError(j.error_message).text
+        {/* Krok „w trakcie” / status końcowy (nie-błąd) — skrócony wielokropkiem,
+            błąd pokazujemy z pełnym zawijaniem w osobnym wierszu poniżej. */}
+        {!isError && (
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 12,
+              color: tokens.muted,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {j.status === "running"
+              ? j.current_step || "W trakcie…"
               : j.status === "done"
                 ? j.results_count > 0
                   ? `${j.results_count} ${j.results_count === 1 ? "lead" : "leadów"}`
                   : "Brak wyników"
                 : JOB_STATUS_LABEL[j.status]}
-        </span>
+          </span>
+        )}
 
-        {/* Rozwiń pełny komunikat błędu (bez ucinania) */}
+        {/* Rozwiń pełny, surowy komunikat błędu (techniczny) */}
         {isError && rawError && (
           <button
             onClick={() => setExpanded((v) => !v)}
             style={{
+              marginLeft: "auto",
               flexShrink: 0,
               background: "none",
               border: "none",
@@ -521,11 +512,26 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
 
         {/* Licznik leadów na żywo (running) / wynik końcowy (done) */}
         {(j.status === "running" || j.status === "done") && j.results_count > 0 && (
-          <span style={{ fontSize: 12, fontWeight: 700, color: tokens.success, flexShrink: 0 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: tokens.success, flexShrink: 0, marginLeft: "auto" }}>
             {j.results_count}
           </span>
         )}
       </div>
+
+      {/* Komunikat błędu — PEŁNY, z zawijaniem, nigdy nie ucinany. */}
+      {isError && (
+        <div
+          style={{
+            fontSize: 12,
+            color: tokens.danger,
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+            lineHeight: 1.45,
+          }}
+        >
+          {statusText}
+        </div>
+      )}
 
       {isError && expanded && rawError && (
         <div
@@ -552,6 +558,10 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
   const toast = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  // Pojedynczy lead w trakcie odrzucania (blokuje jego przycisk w wierszu).
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const busy = moving || rejecting || rejectingId !== null;
 
   useEffect(() => {
     // Odznacz leady, które zniknęły z listy (już przeniesione/oznaczone duplikatem gdzie indziej).
@@ -601,6 +611,51 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
     }
   }
 
+  // Odrzucenie (archiwizacja) — pojedynczy lead lub cała zaznaczona grupa.
+  async function reject(ids: string[]) {
+    if (ids.length === 0) return;
+    const resp = await fetch("/api/scraper/reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scraped_lead_ids: ids }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      toast.error(data.error ?? "Nie udało się odrzucić leadów.");
+      return;
+    }
+    toast.success(
+      data.rejected === 1
+        ? "Lead przeniesiony do Archiwum."
+        : `Przeniesiono ${data.rejected} leadów do Archiwum.`
+    );
+    onMoved();
+  }
+
+  async function rejectSelected() {
+    if (selected.size === 0) return;
+    setRejecting(true);
+    try {
+      await reject([...selected]);
+      setSelected(new Set());
+    } catch {
+      toast.error("Błąd połączenia z serwerem.");
+    } finally {
+      setRejecting(false);
+    }
+  }
+
+  async function rejectOne(id: string) {
+    setRejectingId(id);
+    try {
+      await reject([id]);
+    } catch {
+      toast.error("Błąd połączenia z serwerem.");
+    } finally {
+      setRejectingId(null);
+    }
+  }
+
   if (leads.length === 0) {
     return (
       <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 30, textAlign: "center", color: tokens.muted }}>
@@ -611,15 +666,23 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
 
   return (
     <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: `1px solid ${tokens.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "12px 16px", borderBottom: `1px solid ${tokens.border}` }}>
         <button onClick={toggleAll} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: tokens.text, fontSize: 13, fontWeight: 600 }}>
           {allSelected ? <CheckSquare size={17} color={tokens.accent} /> : <Square size={17} color={tokens.muted} />}
           Zaznacz wszystkie
         </button>
-        <div style={{ flex: 1 }} />
+        <div style={{ flex: 1, minWidth: 8 }} />
+        <button
+          onClick={rejectSelected}
+          disabled={selected.size === 0 || busy}
+          style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, opacity: selected.size === 0 ? 0.5 : 1 }}
+        >
+          <Archive size={15} />
+          {rejecting ? "Odrzucanie…" : `Odrzuć zaznaczone (${selected.size})`}
+        </button>
         <button
           onClick={moveSelected}
-          disabled={selected.size === 0 || moving}
+          disabled={selected.size === 0 || busy}
           style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6, opacity: selected.size === 0 ? 0.5 : 1 }}
         >
           <ArrowRightCircle size={16} />
@@ -655,6 +718,122 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
             <div style={{ width: 50, flexShrink: 0, textAlign: "right" }}>
               <ScoreBadge score={l.score} breakdown={l.score_breakdown} />
             </div>
+            <button
+              onClick={() => rejectOne(l.id)}
+              disabled={busy}
+              title="Odrzuć (przenieś do Archiwum)"
+              aria-label="Odrzuć lead"
+              style={{
+                flexShrink: 0,
+                background: "none",
+                border: `1px solid ${tokens.border}`,
+                borderRadius: 8,
+                cursor: busy ? "default" : "pointer",
+                color: tokens.muted,
+                display: "grid",
+                placeItems: "center",
+                width: 30,
+                height: 30,
+                opacity: rejectingId === l.id ? 0.5 : 1,
+              }}
+            >
+              {rejectingId === l.id ? <Loader2 size={15} className="selltic-spin" /> : <Archive size={15} />}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "8px 16px",
+        borderRadius: 10,
+        fontSize: 14,
+        fontWeight: 600,
+        cursor: "pointer",
+        border: `1px solid ${active ? tokens.accent : tokens.border}`,
+        background: active ? tokens.accentSoft : "#fff",
+        color: active ? tokens.accent : tokens.muted,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Archiwum: leady odrzucone przez użytkownika (status 'rejected'). Zachowane do
+// wglądu, poza aktywną listą „Leady”. Można je przywrócić (z powrotem do 'new').
+function ArchiveTab({
+  leads,
+  supabase,
+  onChanged,
+}: {
+  leads: ScrapedLead[];
+  supabase: ReturnType<typeof createClient>;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  async function restore(id: string) {
+    setRestoringId(id);
+    // RLS ogranicza zapis do własnych leadów; wracamy tylko z 'rejected' do 'new'.
+    const { error } = await supabase
+      .from("scraped_leads")
+      .update({ status: "new" })
+      .eq("id", id)
+      .eq("status", "rejected");
+    setRestoringId(null);
+    if (error) {
+      toast.error("Nie udało się przywrócić leada.");
+      return;
+    }
+    toast.success("Lead przywrócony do listy „Leady”.");
+    onChanged();
+  }
+
+  if (leads.length === 0) {
+    return (
+      <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 30, textAlign: "center", color: tokens.muted }}>
+        Archiwum jest puste — odrzucone leady pojawią się tutaj.
+      </section>
+    );
+  }
+
+  return (
+    <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, overflow: "hidden" }}>
+      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${tokens.border}`, fontSize: 13, color: tokens.muted }}>
+        Odrzucone leady — zachowane do wglądu, nie trafiają do Prospectingu. Możesz je przywrócić.
+      </div>
+      <div style={{ maxHeight: 560, overflowY: "auto" }}>
+        {leads.map((l) => (
+          <div
+            key={l.id}
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${tokens.border}` }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.business_name}</div>
+              <div style={{ fontSize: 12.5, color: tokens.muted }}>
+                {l.source_keyword} · {l.source_location} · {l.address ?? "brak adresu"}
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: tokens.muted, width: 130, flexShrink: 0 }}>{l.phone ?? "—"}</div>
+            <div style={{ width: 50, flexShrink: 0, textAlign: "right" }}>
+              <ScoreBadge score={l.score} breakdown={l.score_breakdown} />
+            </div>
+            <button
+              onClick={() => restore(l.id)}
+              disabled={restoringId !== null}
+              style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", flexShrink: 0, opacity: restoringId === l.id ? 0.5 : 1 }}
+            >
+              {restoringId === l.id ? <Loader2 size={14} className="selltic-spin" /> : <RotateCcw size={14} />}
+              Przywróć
+            </button>
           </div>
         ))}
       </div>

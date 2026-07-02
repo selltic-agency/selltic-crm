@@ -37,6 +37,17 @@ export function humanizeScrapeError(raw: string | null | undefined): HumanMessag
     return { text: "Nieprawidłowe zapytanie do Google — sprawdź słowo kluczowe i lokalizację." };
   }
 
+  // Watchdog CRM: zadanie utknęło i zostało ubite po limicie czasu (patrz
+  // /api/scraper/reap-stale). Skracamy do zwięzłej, akcjonowalnej treści —
+  // pełny komunikat i tak jest dostępny w rozwijanych „Szczegółach”.
+  if (lower.includes("limit czasu") || lower.includes("przekroczył")) {
+    return {
+      text:
+        "Zadanie przekroczyło limit czasu — backend scrapera nie odebrał zlecenia lub został uśpiony. " +
+        "Uruchom usługę z „CPU always allocated” / min-instances ≥ 1 i spróbuj ponownie.",
+    };
+  }
+
   // Problemy z połączeniem sieciowym / timeout.
   if (
     lower.includes("timeout") ||
@@ -47,8 +58,11 @@ export function humanizeScrapeError(raw: string | null | undefined): HumanMessag
     return { text: "Problem z połączeniem podczas scrapowania — spróbuj ponownie za chwilę." };
   }
 
-  // Fallback: pokaż surowy komunikat, ale przycięty (bez stack trace).
-  const firstLine = msg.split("\n")[0].slice(0, 160);
+  // Fallback: pokaż surowy komunikat (pierwsza linia, bez stack trace). Nie
+  // przycinamy sztywno do N znaków — UI zawija tekst i pokazuje całość, a raw
+  // komunikat jest też w „Szczegółach”. Ograniczamy tylko patologicznie długie
+  // jednolinijkowce, by nie zalać widoku.
+  const firstLine = msg.split("\n")[0].slice(0, 400);
   return { text: `Błąd scrapera: ${firstLine}` };
 }
 

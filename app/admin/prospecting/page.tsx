@@ -7,11 +7,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Phone } from "lucide-react";
+import { Phone, KanbanSquare, Table } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import type { Prospect } from "@/lib/types";
+import ProspectTable from "@/components/ProspectTable";
 import {
   DISPLAY_STATUSES,
   STATUS_LABEL,
@@ -88,7 +89,18 @@ export default function ProspectingPage() {
   const [statusFilter, setStatusFilter] = useState<DisplayStatus | "">("");
   const [filters, setFilters] = useState<Filter[]>([]);
   const [sort, setSort] = useState<Sort | null>(null);
+  const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
   const filterBarRef = useRef<FilterBarHandle>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("selltic_prospecting_view");
+    if (saved === "kanban" || saved === "table") setViewMode(saved);
+  }, []);
+
+  const toggleView = (mode: "kanban" | "table") => {
+    setViewMode(mode);
+    localStorage.setItem("selltic_prospecting_view", mode);
+  };
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [callingMode, setCallingMode] = useState(false);
@@ -133,9 +145,11 @@ export default function ProspectingPage() {
     deleteView,
   } = useSavedViews("prospecting", seedDefaults);
 
-  const applyView = useCallback((filters_: Filter[], sort_: Sort | null) => {
+  const applyView = useCallback((filters_: Filter[], sort_: Sort | null, mode: "kanban" | "table") => {
     filterBarRef.current?.setFilters(filters_);
     setSort(sort_);
+    setViewMode(mode);
+    localStorage.setItem("selltic_prospecting_view", mode);
   }, []);
 
   const appliedInitial = useRef(false);
@@ -146,22 +160,23 @@ export default function ProspectingPage() {
       selectView(null);
       return;
     }
-    if (activeView) applyView(activeView.filters, activeView.sort);
+    if (activeView) applyView(activeView.filters, activeView.sort, activeView.view_mode);
   }, [viewsLoading, activeView, applyView, searchParams, selectView]);
 
   const handleSelectView = (id: string) => {
     selectView(id);
     const v = views.find((x) => x.id === id);
-    if (v) applyView(v.filters, v.sort);
+    if (v) applyView(v.filters, v.sort, v.view_mode);
   };
 
   const isDirty = useMemo(() => {
     if (!activeView) return false;
     return (
       JSON.stringify(filters) !== JSON.stringify(activeView.filters) ||
-      JSON.stringify(sort) !== JSON.stringify(activeView.sort ?? null)
+      JSON.stringify(sort) !== JSON.stringify(activeView.sort ?? null) ||
+      viewMode !== activeView.view_mode
     );
-  }, [activeView, filters, sort]);
+  }, [activeView, filters, sort, viewMode]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -263,7 +278,35 @@ export default function ProspectingPage() {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Prospecting</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Prospecting</h1>
+          <div style={{ display: "flex", background: tokens.border, padding: 2, borderRadius: 10, gap: 2 }}>
+            <button
+              onClick={() => toggleView("kanban")}
+              title="Karty"
+              style={{
+                ...viewTabBtn,
+                background: viewMode === "kanban" ? tokens.card : "transparent",
+                color: viewMode === "kanban" ? tokens.accent : tokens.muted,
+                boxShadow: viewMode === "kanban" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
+              }}
+            >
+              <KanbanSquare size={16} />
+            </button>
+            <button
+              onClick={() => toggleView("table")}
+              title="Tabela"
+              style={{
+                ...viewTabBtn,
+                background: viewMode === "table" ? tokens.card : "transparent",
+                color: viewMode === "table" ? tokens.accent : tokens.muted,
+                boxShadow: viewMode === "table" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
+              }}
+            >
+              <Table size={16} />
+            </button>
+          </div>
+        </div>
         <button
           onClick={() => setCallingMode(true)}
           disabled={callableQueue.length === 0}
@@ -324,10 +367,10 @@ export default function ProspectingPage() {
         loading={viewsLoading}
         isDirty={isDirty}
         onSelect={handleSelectView}
-        onCreate={(name) => createView(name, { filters, sort, view_mode: "kanban" })}
+        onCreate={(name) => createView(name, { filters, sort, view_mode: viewMode })}
         onRename={(id, name) => updateView(id, { name })}
         onDelete={deleteView}
-        onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort })}
+        onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort, view_mode: viewMode })}
       />
 
       <FilterBar
@@ -340,6 +383,8 @@ export default function ProspectingPage() {
       {/* Lista kart */}
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      ) : viewMode === "table" ? (
+        <ProspectTable prospects={visible} onRowClick={(id) => setSelectedId(id)} />
       ) : visible.length === 0 ? (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 40, textAlign: "center", color: tokens.muted }}>
           Brak prospektów spełniających kryteria.
@@ -379,3 +424,14 @@ export default function ProspectingPage() {
     </div>
   );
 }
+
+const viewTabBtn: React.CSSProperties = {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  display: "grid",
+  placeItems: "center",
+  border: "none",
+  cursor: "pointer",
+  transition: "all 0.2s ease",
+};
