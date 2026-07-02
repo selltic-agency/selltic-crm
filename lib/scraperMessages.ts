@@ -69,3 +69,29 @@ export function humanizeScrapeError(raw: string | null | undefined): HumanMessag
 // Komunikat dla zadania zakończonego bez wyników (status done, 0 leadów).
 export const ZERO_RESULTS_MESSAGE =
   "Brak wyników dla tej kombinacji — spróbuj innej lokalizacji lub słowa kluczowego.";
+
+function pluralLeady(n: number): string {
+  return n === 1 ? "lead" : "leadów";
+}
+
+// Rozbicie „znaleziono” na NOWE vs „już w bazie”. Backend liczy results_count
+// jako liczbę przetworzonych wyników API; new_count/existing_count dzielą ją na
+// leady faktycznie dodane i te tylko odświeżone (ten sam place_id znaleziony
+// wcześniej — częste przy bliskoznacznych słowach kluczowych). Świadomie
+// unikamy słowa „duplikaty”, żeby nie mylić z zakładką „Duplikaty” (kolizje
+// przy przenoszeniu do Prospectingu — tam duplikat wymaga decyzji; tu nie).
+//
+// - existing === 0  → „20 leadów” (wszystko nowe, brak szumu).
+// - existing > 0    → „20 (12 nowych, 8 już w bazie)”.
+// - dane niespójne (stare zadania sprzed migracji: new+existing ≠ total) →
+//   sam total, bez rozbicia.
+export function formatFound(total: number, newCount = 0, existingCount = 0): string {
+  const n = Math.max(0, total || 0);
+  const nw = Math.max(0, newCount || 0);
+  const ex = Math.max(0, existingCount || 0);
+  const consistent = nw + ex === n && n > 0;
+  if (consistent && ex > 0) {
+    return `${n} (${nw} ${nw === 1 ? "nowy" : "nowych"}, ${ex} już w bazie)`;
+  }
+  return `${n} ${pluralLeady(n)}`;
+}

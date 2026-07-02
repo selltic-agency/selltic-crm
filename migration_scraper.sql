@@ -21,6 +21,8 @@ create table if not exists scrape_jobs (
   status          text not null default 'pending'
                     check (status in ('pending', 'running', 'done', 'error')),
   results_count   int not null default 0,
+  new_count       int not null default 0,   -- z results_count: ile było NOWYCH leadów
+  existing_count  int not null default 0,   -- z results_count: ile już istniało (odświeżone)
   current_step    text,              -- krótki opis aktualnego kroku (widoczność na żywo)
   error_message   text,
   batch_id        uuid not null,     -- grupuje zadania z jednego kliknięcia "Rozpocznij scrapowanie"
@@ -64,6 +66,10 @@ create table if not exists scraper_config (
 
 -- Kolumna postępu — dla baz, gdzie scrape_jobs istniało przed tą zmianą.
 alter table scrape_jobs add column if not exists current_step text;
+
+-- Rozbicie results_count na NOWE vs „już w bazie” — dla istniejących baz.
+alter table scrape_jobs add column if not exists new_count     int not null default 0;
+alter table scrape_jobs add column if not exists existing_count int not null default 0;
 
 -- ── INDEKSY ─────────────────────────────────────────────────────────────
 create index if not exists idx_scrape_jobs_batch    on scrape_jobs (batch_id);
