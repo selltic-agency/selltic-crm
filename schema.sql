@@ -89,6 +89,7 @@ create table if not exists prospects (
   lead_score               int check (lead_score is null or (lead_score >= 0 and lead_score <= 100)),
   lead_score_breakdown     jsonb,
   converted_deal_id        uuid references deals on delete set null,
+  archived_at              timestamptz,                    -- miękkie usunięcie: !null = w Archiwum
   props                    jsonb not null default '{}',    -- google_maps_url, priority_label, score_reasons...
   unique (place_id)
 );
@@ -214,6 +215,7 @@ create index if not exists idx_prospects_status     on prospects (prospecting_st
 create index if not exists idx_prospects_industry   on prospects (industry);
 create index if not exists idx_prospects_city       on prospects (city);
 create index if not exists idx_prospects_lead_score on prospects (lead_score);
+create index if not exists idx_prospects_archived_at on prospects (archived_at);
 create index if not exists idx_activities_deal      on activities (deal_id, created_at desc);
 create index if not exists idx_submissions_form     on submissions (form_id, created_at desc);
 create index if not exists idx_tasks_owner_due      on tasks (owner, due_at) where done = false;

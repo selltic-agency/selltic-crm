@@ -1,18 +1,21 @@
 // app/admin/prospecting/page.tsx — Prospecting: zimne leady z Google Maps.
-// Karty zamiast tabeli, cztery statusy (new/no_answer/not_interested/converted)
-// i „Tryb dzwonienia” (Tinder-style) do szybkiego przechodzenia przez kolejkę
-// telefonów. Baza danych nadal zapisuje starą wartość `contact_attempted`
-// (patrz lib/prospectStatus.ts) — to wyłącznie kosmetyka UI.
+// Widok wyłącznie tabelaryczny (tabela pokrywa wszystko, co dawał widok kart,
+// plus więcej kolumn i akcje zbiorcze) + „Tryb dzwonienia” (Tinder-style) do
+// szybkiego przechodzenia przez kolejkę telefonów. Baza danych nadal zapisuje
+// starą wartość `contact_attempted` (patrz lib/prospectStatus.ts) — to
+// wyłącznie kosmetyka UI. Archiwum to miękkie usunięcie (kolumna archived_at).
+// Stan widoku (aktywna zakładka, filtry, sortowanie) jest trwały per-user
+// (lib/viewPrefs.ts) — przeżywa odświeżenie i nawigację.
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Phone, KanbanSquare, Table } from "lucide-react";
+import { Phone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import type { Prospect } from "@/lib/types";
-import ProspectTable from "@/components/ProspectTable";
+import ProspectTable, { type SortConfig } from "@/components/ProspectTable";
 import {
   DISPLAY_STATUSES,
   STATUS_LABEL,
@@ -24,21 +27,27 @@ import {
   type DisplayStatus,
   type WritableDisplayStatus,
 } from "@/lib/prospectStatus";
-import ProspectCard from "@/components/prospecting/ProspectCard";
 import ProspectDetailDrawer from "@/components/prospecting/ProspectDetailDrawer";
 import CallingMode from "@/components/prospecting/CallingMode";
 import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/FilterBar";
 import SavedViewTabs from "@/components/SavedViewTabs";
 import { Filter, Sort, buildFilterQuery, columnForProspect } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
+import { loadViewPrefs, saveViewPrefs, planHydration } from "@/lib/viewPrefs";
 
-const TABS: { key: DisplayStatus | ""; label: string }[] = [
+// Zakładka statusu. "" = wszystkie aktywne; "archived" = miękko usunięte.
+type StatusTab = DisplayStatus | "" | "archived";
+
+const TABS: { key: StatusTab; label: string }[] = [
   { key: "", label: "Wszystkie" },
   { key: "new", label: "Nowe" },
   { key: "no_answer", label: "Nie odbiera" },
   { key: "converted", label: "Skonwertowane" },
   { key: "not_interested", label: "Niezainteresowane" },
+  { key: "archived", label: "Archiwum" },
 ];
+
+const DEFAULT_SORT: SortConfig = { key: "lead_score", direction: "desc" };
 
 const WEBSITE_STATUS_LABEL: Record<string, string> = {
   none: "Brak strony",
@@ -76,36 +85,37 @@ export default function ProspectingPage() {
   const searchParams = useSearchParams();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [archivedProspects, setArchivedProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
+  const [archivedLoading, setArchivedLoading] = useState(false);
   const [counts, setCounts] = useState<Record<DisplayStatus, number>>({
     new: 0,
     no_answer: 0,
     not_interested: 0,
     converted: 0,
   });
+  const [archivedCount, setArchivedCount] = useState(0);
   const [industries, setIndustries] = useState<string[]>([]);
   const [cities, setCities] = useState<string[]>([]);
 
-  const [statusFilter, setStatusFilter] = useState<DisplayStatus | "">("");
+  const [statusFilter, setStatusFilter] = useState<StatusTab>("");
   const [filters, setFilters] = useState<Filter[]>([]);
   const [sort, setSort] = useState<Sort | null>(null);
-  const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
   const filterBarRef = useRef<FilterBarHandle>(null);
 
+  // ID zalogowanego użytkownika — do namespace'owania trwałego stanu widoku.
+  // `undefined` = jeszcze nie wiadomo, `null` = brak sesji.
+  const [userId, setUserId] = useState<string | null | undefined>(undefined);
   useEffect(() => {
-    const saved = localStorage.getItem("selltic_prospecting_view");
-    if (saved === "kanban" || saved === "table") setViewMode(saved);
-  }, []);
-
-  const toggleView = (mode: "kanban" | "table") => {
-    setViewMode(mode);
-    localStorage.setItem("selltic_prospecting_view", mode);
-  };
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+  }, [supabase]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [callingMode, setCallingMode] = useState(false);
 
-  // Pola miasta/branży są dynamiczne (zależą od zaimportowanych danych).
+  const showingArchive = statusFilter === "archived";
+
+  // Kolumny miasta/branży są dynamiczne (zależą od zaimportowanych danych).
   const builtInFields = useMemo<FieldDef[]>(
     () => [
       ...PROSPECT_BUILT_IN_FIELDS,
@@ -117,16 +127,16 @@ export default function ProspectingPage() {
 
   const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
     return [
-      { name: "Wszystkie", view_mode: "kanban", filters: [], sort: null },
+      { name: "Wszystkie", view_mode: "table", filters: [], sort: null },
       {
         name: "Do zadzwonienia",
-        view_mode: "kanban",
+        view_mode: "table",
         filters: [{ field: "prospecting_status", operator: "in", value: ["new", "contact_attempted"] }],
         sort: { column: "lead_score", direction: "desc" },
       },
       {
         name: "Wysokie priorytety",
-        view_mode: "kanban",
+        view_mode: "table",
         // >= 70: brak operatora "gte" w modelu filtrów, 69 daje ten sam próg dla liczb całkowitych.
         filters: [{ field: "lead_score", operator: "gt", value: 69 }],
         sort: null,
@@ -145,42 +155,61 @@ export default function ProspectingPage() {
     deleteView,
   } = useSavedViews("prospecting", seedDefaults);
 
-  const applyView = useCallback((filters_: Filter[], sort_: Sort | null, mode: "kanban" | "table") => {
+  const applyView = useCallback((filters_: Filter[], sort_: Sort | null) => {
     filterBarRef.current?.setFilters(filters_);
     setSort(sort_);
-    setViewMode(mode);
-    localStorage.setItem("selltic_prospecting_view", mode);
   }, []);
-
-  const appliedInitial = useRef(false);
-  useEffect(() => {
-    if (appliedInitial.current || viewsLoading) return;
-    appliedInitial.current = true;
-    if (searchParams.get("f")) {
-      selectView(null);
-      return;
-    }
-    if (activeView) applyView(activeView.filters, activeView.sort, activeView.view_mode);
-  }, [viewsLoading, activeView, applyView, searchParams, selectView]);
 
   const handleSelectView = (id: string) => {
     selectView(id);
     const v = views.find((x) => x.id === id);
-    if (v) applyView(v.filters, v.sort, v.view_mode);
+    if (v) applyView(v.filters, v.sort);
   };
+
+  // ── Hydratacja trwałego stanu widoku ──────────────────────────────────
+  // Uruchamiana raz, gdy znamy użytkownika i wczytano zapisane widoki.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    if (hydrated || viewsLoading || userId === undefined) return;
+    // Filtry z URL (?f=…) obejmują zarówno zwykłe odświeżenie (FilterBar sam
+    // zapisuje je do URL), jak i udostępniony link. Gdy są obecne, FilterBar
+    // odtwarza je samodzielnie z URL — nie nadpisujemy ich z prefs. Zakładkę
+    // statusu, sortowanie i aktywny widok odtwarzamy ZAWSZE z prefs (nie ma
+    // ich w URL), więc odświeżenie przywraca pełny stan.
+    const hasUrlFilters = !!searchParams.get("f");
+    const prefs = loadViewPrefs("prospecting", userId);
+    const plan = planHydration(prefs, hasUrlFilters);
+    if (plan.restoreFromPrefs && prefs) {
+      if (prefs.statusFilter !== undefined) setStatusFilter(prefs.statusFilter as StatusTab);
+      if (prefs.sort !== undefined) setSort(prefs.sort ?? null);
+      if (prefs.activeViewId !== undefined) selectView(prefs.activeViewId);
+      if (plan.restoreFiltersFromPrefs) filterBarRef.current?.setFilters(prefs.filters ?? []);
+    } else if (plan.clearActiveView) {
+      selectView(null);
+    } else if (plan.applyDefaultView && activeView) {
+      applyView(activeView.filters, activeView.sort);
+    }
+    setHydrated(true);
+  }, [hydrated, viewsLoading, userId, activeView, applyView, searchParams, selectView]);
+
+  // ── Zapis trwałego stanu widoku ───────────────────────────────────────
+  useEffect(() => {
+    if (!hydrated) return;
+    saveViewPrefs("prospecting", userId ?? null, { activeViewId: activeId, statusFilter, filters, sort });
+  }, [hydrated, userId, activeId, statusFilter, filters, sort]);
 
   const isDirty = useMemo(() => {
     if (!activeView) return false;
     return (
       JSON.stringify(filters) !== JSON.stringify(activeView.filters) ||
-      JSON.stringify(sort) !== JSON.stringify(activeView.sort ?? null) ||
-      viewMode !== activeView.view_mode
+      JSON.stringify(sort) !== JSON.stringify(activeView.sort ?? null)
     );
-  }, [activeView, filters, sort, viewMode]);
+  }, [activeView, filters, sort]);
 
+  // Aktywne prospekty (nie zarchiwizowane) — sterowane filtrami i sortowaniem.
   const load = useCallback(async () => {
     setLoading(true);
-    let query = supabase.from("prospects").select("*");
+    let query = supabase.from("prospects").select("*").is("archived_at", null);
     query = buildFilterQuery(query, filters, columnForProspect);
     if (sort) query = query.order(sort.column, { ascending: sort.direction === "asc" });
     else query = query.order("lead_score", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
@@ -194,25 +223,52 @@ export default function ProspectingPage() {
     load();
   }, [load]);
 
-  // Dashboard liczników i opcje filtrów — niezależne od aktywnych filtrów.
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("prospects").select("prospecting_status, industry, city");
-      const rows = (data as { prospecting_status: string; industry: string | null; city: string | null }[]) ?? [];
-      const c: Record<DisplayStatus, number> = { new: 0, no_answer: 0, not_interested: 0, converted: 0 };
-      for (const r of rows) c[toDisplayStatus(r.prospecting_status)]++;
-      setCounts(c);
-      setIndustries([...new Set(rows.map((r) => r.industry).filter(Boolean))] as string[]);
-      setCities([...new Set(rows.map((r) => r.city).filter(Boolean))] as string[]);
-    })();
-  }, [supabase, prospects.length]);
+  // Zarchiwizowane prospekty — wczytywane leniwie, gdy otwarto zakładkę Archiwum.
+  const loadArchived = useCallback(async () => {
+    setArchivedLoading(true);
+    let query = supabase.from("prospects").select("*").not("archived_at", "is", null);
+    query = buildFilterQuery(query, filters, columnForProspect);
+    query = query.order("archived_at", { ascending: false });
+    const { data } = await query;
+    setArchivedProspects((data as Prospect[]) ?? []);
+    setArchivedLoading(false);
+  }, [supabase, filters]);
 
-  const visible = useMemo(
-    () => (statusFilter ? prospects.filter((p) => toDisplayStatus(p.prospecting_status) === statusFilter) : prospects),
-    [prospects, statusFilter]
-  );
+  useEffect(() => {
+    if (showingArchive) loadArchived();
+  }, [showingArchive, loadArchived]);
+
+  // Dashboard liczników i opcje filtrów — niezależne od aktywnych filtrów.
+  const refreshCounts = useCallback(async () => {
+    const { data } = await supabase.from("prospects").select("prospecting_status, industry, city, archived_at");
+    const rows =
+      (data as { prospecting_status: string; industry: string | null; city: string | null; archived_at: string | null }[]) ??
+      [];
+    const c: Record<DisplayStatus, number> = { new: 0, no_answer: 0, not_interested: 0, converted: 0 };
+    let archived = 0;
+    for (const r of rows) {
+      if (r.archived_at) archived++;
+      else c[toDisplayStatus(r.prospecting_status)]++;
+    }
+    setCounts(c);
+    setArchivedCount(archived);
+    setIndustries([...new Set(rows.map((r) => r.industry).filter(Boolean))] as string[]);
+    setCities([...new Set(rows.map((r) => r.city).filter(Boolean))] as string[]);
+  }, [supabase]);
+
+  useEffect(() => {
+    refreshCounts();
+  }, [refreshCounts]);
+
+  const visible = useMemo(() => {
+    if (!statusFilter) return prospects;
+    return prospects.filter((p) => toDisplayStatus(p.prospecting_status) === statusFilter);
+  }, [prospects, statusFilter]);
 
   const callableQueue = useMemo(() => prospects.filter(isCallable), [prospects]);
+
+  const tableSort: SortConfig = sort ? { key: sort.column, direction: sort.direction } : DEFAULT_SORT;
+  const onTableSortChange = useCallback((s: SortConfig) => setSort({ column: s.key, direction: s.direction }), []);
 
   // Powrót z konwersji w trybie dzwonienia (?calling=1) — automatycznie wznów
   // sesję z pozostałą kolejką prospektów do zadzwonienia.
@@ -227,7 +283,9 @@ export default function ProspectingPage() {
     window.history.replaceState(null, "", "/admin/prospecting");
   }, [searchParams, loading, callableQueue.length]);
 
-  const selected = selectedId ? prospects.find((p) => p.id === selectedId) ?? null : null;
+  const selected = selectedId
+    ? prospects.find((p) => p.id === selectedId) ?? archivedProspects.find((p) => p.id === selectedId) ?? null
+    : null;
 
   async function setStatus(p: Prospect, status: WritableDisplayStatus): Promise<boolean> {
     const dbStatus = dbStatusForWrite(status);
@@ -275,38 +333,51 @@ export default function ProspectingPage() {
     return true;
   }
 
+  // Archiwizacja (miękkie usunięcie) — pojedynczy prospekt lub zaznaczona grupa.
+  const archiveProspects = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const res = await fetch("/api/prospecting/archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, archived: true }),
+      });
+      if (!res.ok) {
+        toast.error("Nie udało się zarchiwizować prospektów.");
+        return;
+      }
+      setProspects((list) => list.filter((p) => !ids.includes(p.id)));
+      if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+      toast.success(ids.length === 1 ? "Prospekt przeniesiony do Archiwum." : `Przeniesiono ${ids.length} prospektów do Archiwum.`);
+      refreshCounts();
+    },
+    [toast, refreshCounts, selectedId]
+  );
+
+  const restoreProspects = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const res = await fetch("/api/prospecting/archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, archived: false }),
+      });
+      if (!res.ok) {
+        toast.error("Nie udało się przywrócić prospektów.");
+        return;
+      }
+      setArchivedProspects((list) => list.filter((p) => !ids.includes(p.id)));
+      toast.success(ids.length === 1 ? "Prospekt przywrócony." : `Przywrócono ${ids.length} prospektów.`);
+      load();
+      refreshCounts();
+    },
+    [toast, load, refreshCounts]
+  );
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Prospecting</h1>
-          <div style={{ display: "flex", background: tokens.border, padding: 2, borderRadius: 10, gap: 2 }}>
-            <button
-              onClick={() => toggleView("kanban")}
-              title="Karty"
-              style={{
-                ...viewTabBtn,
-                background: viewMode === "kanban" ? tokens.card : "transparent",
-                color: viewMode === "kanban" ? tokens.accent : tokens.muted,
-                boxShadow: viewMode === "kanban" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
-              }}
-            >
-              <KanbanSquare size={16} />
-            </button>
-            <button
-              onClick={() => toggleView("table")}
-              title="Tabela"
-              style={{
-                ...viewTabBtn,
-                background: viewMode === "table" ? tokens.card : "transparent",
-                color: viewMode === "table" ? tokens.accent : tokens.muted,
-                boxShadow: viewMode === "table" ? "0 2px 8px rgba(0,0,0,0.08)" : "none",
-              }}
-            >
-              <Table size={16} />
-            </button>
-          </div>
-        </div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Prospecting</h1>
         <button
           onClick={() => setCallingMode(true)}
           disabled={callableQueue.length === 0}
@@ -357,44 +428,57 @@ export default function ProspectingPage() {
             }}
           >
             {tab.label}
+            {tab.key === "archived" && archivedCount > 0 ? ` (${archivedCount})` : ""}
           </button>
         ))}
       </div>
 
-      <SavedViewTabs
-        views={views}
-        activeId={activeId}
-        loading={viewsLoading}
-        isDirty={isDirty}
-        onSelect={handleSelectView}
-        onCreate={(name) => createView(name, { filters, sort, view_mode: viewMode })}
-        onRename={(id, name) => updateView(id, { name })}
-        onDelete={deleteView}
-        onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort, view_mode: viewMode })}
-      />
+      {!showingArchive && (
+        <>
+          <SavedViewTabs
+            views={views}
+            activeId={activeId}
+            loading={viewsLoading}
+            isDirty={isDirty}
+            onSelect={handleSelectView}
+            onCreate={(name) => createView(name, { filters, sort, view_mode: "table" })}
+            onRename={(id, name) => updateView(id, { name })}
+            onDelete={deleteView}
+            onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort, view_mode: "table" })}
+          />
 
-      <FilterBar
-        ref={filterBarRef}
-        builtInFields={builtInFields}
-        onFilterChange={setFilters}
-        quickFilters={[{ label: "Tylko bez strony", filter: NO_WEBSITE_QUICK_FILTER }]}
-      />
+          <FilterBar
+            ref={filterBarRef}
+            builtInFields={builtInFields}
+            onFilterChange={setFilters}
+            quickFilters={[{ label: "Tylko bez strony", filter: NO_WEBSITE_QUICK_FILTER }]}
+          />
+        </>
+      )}
 
-      {/* Lista kart */}
-      {loading ? (
+      {showingArchive ? (
+        archivedLoading ? (
+          <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+        ) : (
+          <ProspectTable
+            prospects={archivedProspects}
+            onRowClick={(id) => setSelectedId(id)}
+            sort={tableSort}
+            onSortChange={onTableSortChange}
+            archiveMode
+            onRestore={restoreProspects}
+          />
+        )
+      ) : loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
-      ) : viewMode === "table" ? (
-        <ProspectTable prospects={visible} onRowClick={(id) => setSelectedId(id)} />
-      ) : visible.length === 0 ? (
-        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 40, textAlign: "center", color: tokens.muted }}>
-          Brak prospektów spełniających kryteria.
-        </div>
       ) : (
-        <div style={{ display: "grid", gap: 10 }}>
-          {visible.map((p) => (
-            <ProspectCard key={p.id} prospect={p} onOpen={() => setSelectedId(p.id)} onConvert={() => convertToLead(p)} />
-          ))}
-        </div>
+        <ProspectTable
+          prospects={visible}
+          onRowClick={(id) => setSelectedId(id)}
+          sort={tableSort}
+          onSortChange={onTableSortChange}
+          onArchive={archiveProspects}
+        />
       )}
 
       {selected && (
@@ -424,14 +508,3 @@ export default function ProspectingPage() {
     </div>
   );
 }
-
-const viewTabBtn: React.CSSProperties = {
-  width: 32,
-  height: 32,
-  borderRadius: 8,
-  display: "grid",
-  placeItems: "center",
-  border: "none",
-  cursor: "pointer",
-  transition: "all 0.2s ease",
-};
