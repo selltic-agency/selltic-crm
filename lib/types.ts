@@ -172,6 +172,8 @@ export type ScrapeJob = {
   location: string;
   status: ScrapeJobStatus;
   results_count: number;
+  new_count: number;
+  existing_count: number;
   current_step: string | null;
   error_message: string | null;
   batch_id: string;

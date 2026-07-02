@@ -9,7 +9,7 @@ import { Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2, Aler
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
-import { humanizeScrapeError, ZERO_RESULTS_MESSAGE } from "@/lib/scraperMessages";
+import { humanizeScrapeError, ZERO_RESULTS_MESSAGE, formatFound } from "@/lib/scraperMessages";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
 import type { ScrapeJob, ScrapedLead, Prospect } from "@/lib/types";
 
@@ -173,7 +173,8 @@ export default function ScraperPage() {
           if (j.status === "error") {
             toast.error(`✗ ${j.keyword} · ${j.location}: ${humanizeScrapeError(j.error_message).text}`);
           } else if (list.length === 1) {
-            if (j.results_count > 0) toast.success(`✓ ${j.keyword} · ${j.location}: ${j.results_count} leadów`);
+            if (j.results_count > 0)
+              toast.success(`✓ ${j.keyword} · ${j.location}: ${formatFound(j.results_count, j.new_count, j.existing_count)}`);
             else toast.info(ZERO_RESULTS_MESSAGE);
           }
         }
@@ -187,13 +188,15 @@ export default function ScraperPage() {
           const done = list.filter((j) => j.status === "done").length;
           const errored = list.filter((j) => j.status === "error").length;
           const total = list.reduce((s, j) => s + (j.results_count || 0), 0);
+          const totalNew = list.reduce((s, j) => s + (j.new_count || 0), 0);
+          const totalExisting = list.reduce((s, j) => s + (j.existing_count || 0), 0);
           if (errored === 0) {
-            if (total > 0) toast.success(`✓ Zakończono: ${total} leadów z ${list.length} zadań.`);
+            if (total > 0) toast.success(`✓ Zakończono: ${formatFound(total, totalNew, totalExisting)} z ${list.length} zadań.`);
             else toast.info(ZERO_RESULTS_MESSAGE);
           } else {
             toast.error(
               `${done} z ${list.length} zadań zakończone, ${errored} ${errored === 1 ? "błąd" : "błędów"}. ` +
-                `Znaleziono ${total} leadów.`
+                `Znaleziono ${formatFound(total, totalNew, totalExisting)}.`
             );
           }
         }
@@ -358,6 +361,8 @@ function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) 
   const done = jobs.filter((j) => j.status === "done").length;
   const errored = jobs.filter((j) => j.status === "error").length;
   const total = jobs.reduce((s, j) => s + (j.results_count || 0), 0);
+  const totalNew = jobs.reduce((s, j) => s + (j.new_count || 0), 0);
+  const totalExisting = jobs.reduce((s, j) => s + (j.existing_count || 0), 0);
   const active = jobs.some((j) => j.status === "running" || j.status === "pending");
   const allTerminal = done + errored === jobs.length;
 
@@ -385,7 +390,7 @@ function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) 
             padding: "3px 10px",
           }}
         >
-          Znaleziono: {total} {total === 1 ? "lead" : "leadów"}
+          Znaleziono: {formatFound(total, totalNew, totalExisting)}
         </span>
       </div>
 
@@ -414,9 +419,9 @@ function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) 
             {errored > 0 ? <AlertTriangle size={15} /> : <span>✓</span>}
           </span>{" "}
           {errored > 0
-            ? `${done} z ${jobs.length} zadań zakończone, ${errored} ${errored === 1 ? "błąd" : "błędów"} · ${total} leadów`
+            ? `${done} z ${jobs.length} zadań zakończone, ${errored} ${errored === 1 ? "błąd" : "błędów"} · ${formatFound(total, totalNew, totalExisting)}`
             : total > 0
-              ? `Zakończono — znaleziono ${total} ${total === 1 ? "lead" : "leadów"}`
+              ? `Zakończono — znaleziono ${formatFound(total, totalNew, totalExisting)}`
               : "Zakończono — brak wyników dla tej kombinacji"}
         </div>
       )}
@@ -484,7 +489,7 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
               ? j.current_step || "W trakcie…"
               : j.status === "done"
                 ? j.results_count > 0
-                  ? `${j.results_count} ${j.results_count === 1 ? "lead" : "leadów"}`
+                  ? formatFound(j.results_count, j.new_count, j.existing_count)
                   : "Brak wyników"
                 : JOB_STATUS_LABEL[j.status]}
           </span>
