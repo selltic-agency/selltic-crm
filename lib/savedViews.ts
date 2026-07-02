@@ -29,7 +29,19 @@ export type SeedView = {
   sort: Sort | null;
 };
 
-export function useSavedViews(page: SavedViewPage, seedDefaults: () => Promise<SeedView[]>) {
+/**
+ * @param ready Gdy `false`, wstrzymuje zasiew domyślnych widoków. Kluczowe dla
+ * Leadów: `seedDefaults` czyta konfigurowalne etapy (`stages`), które ładują się
+ * asynchronicznie. Zasiew przed ich wczytaniem tworzył domyślne widoki „Wygrane"
+ * / „Przegrane" z PUSTYMI filtrami (bo brak klucza wygranej/przegranej), przez
+ * co filtr zamkniętych deali nie działał na stałe. Wywołujący przekazuje `ready`
+ * dopiero gdy dane potrzebne do zasiewu są dostępne.
+ */
+export function useSavedViews(
+  page: SavedViewPage,
+  seedDefaults: () => Promise<SeedView[]>,
+  ready: boolean = true
+) {
   const supabase = useMemo(() => createClient(), []);
   const [views, setViews] = useState<SavedView[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -46,6 +58,9 @@ export function useSavedViews(page: SavedViewPage, seedDefaults: () => Promise<S
     let rows = (data as SavedView[]) ?? [];
 
     if (rows.length === 0) {
+      // Nie zasiewaj, dopóki wywołujący nie jest gotowy (np. etapy lejka nie
+      // wczytane) — inaczej domyślne widoki dostają puste filtry na stałe.
+      if (!ready) return; // pozostaw loading=true; efekt uruchomi się ponownie, gdy `ready` się zmieni
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -73,7 +88,7 @@ export function useSavedViews(page: SavedViewPage, seedDefaults: () => Promise<S
     setViews(rows);
     setActiveId((prev) => prev ?? rows[0]?.id ?? null);
     setLoading(false);
-  }, [supabase, page]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [supabase, page, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();
@@ -81,12 +96,15 @@ export function useSavedViews(page: SavedViewPage, seedDefaults: () => Promise<S
 
   const activeView = useMemo(() => views.find((v) => v.id === activeId) ?? null, [views, activeId]);
 
+  // create/update/delete zwracają błąd (string) lub null przy sukcesie, aby
+  // wywołujący mógł pokazać komunikat — wcześniej awarie były połykane po cichu,
+  // więc „nie da się zapisać widoku" nie dawało żadnej informacji zwrotnej.
   const createView = useCallback(
     async (name: string, state: { filters: Filter[]; sort: Sort | null; view_mode: ViewMode }) => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return null;
+      if (!user) return { view: null, error: "Sesja wygasła. Zaloguj się ponownie." };
       const { data, error } = await supabase
         .from("saved_views")
         .insert({
@@ -101,11 +119,11 @@ export function useSavedViews(page: SavedViewPage, seedDefaults: () => Promise<S
         })
         .select("*")
         .single();
-      if (error || !data) return null;
+      if (error || !data) return { view: null, error: error?.message ?? "Nie udało się zapisać widoku." };
       const created = data as SavedView;
       setViews((v) => [...v, created]);
       setActiveId(created.id);
-      return created;
+      return { view: created, error: null };
     },
     [supabase, page, views.length]
   );
@@ -113,9 +131,10 @@ export function useSavedViews(page: SavedViewPage, seedDefaults: () => Promise<S
   const updateView = useCallback(
     async (id: string, patch: Partial<Pick<SavedView, "name" | "view_mode" | "filters" | "sort">>) => {
       const { data, error } = await supabase.from("saved_views").update(patch).eq("id", id).select("*").single();
-      if (error || !data) return;
+      if (error || !data) return error?.message ?? "Nie udało się zapisać zmian w widoku.";
       const updated = data as SavedView;
       setViews((list) => list.map((v) => (v.id === id ? updated : v)));
+      return null;
     },
     [supabase]
   );
@@ -123,10 +142,12 @@ export function useSavedViews(page: SavedViewPage, seedDefaults: () => Promise<S
   const deleteView = useCallback(
     async (id: string) => {
       const target = views.find((v) => v.id === id);
-      if (!target || target.is_default) return;
-      await supabase.from("saved_views").delete().eq("id", id);
+      if (!target || target.is_default) return "Nie można usunąć widoku domyślnego.";
+      const { error } = await supabase.from("saved_views").delete().eq("id", id);
+      if (error) return error.message;
       setViews((list) => list.filter((v) => v.id !== id));
       setActiveId((prev) => (prev === id ? views.find((v) => v.id !== id)?.id ?? null : prev));
+      return null;
     },
     [supabase, views]
   );

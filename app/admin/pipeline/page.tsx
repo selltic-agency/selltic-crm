@@ -17,6 +17,7 @@ import {
 } from "@/lib/ui";
 import { type Deal, type Stage } from "@/lib/types";
 import { useStages } from "@/lib/stages";
+import { useToast } from "@/components/Toast";
 import LeadTable, { type SortConfig } from "@/components/LeadTable";
 import OwnerAvatar from "@/components/OwnerAvatar";
 import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/FilterBar";
@@ -52,7 +53,8 @@ export default function PipelinePage() {
   const reduce = useReducedMotion();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { stages } = useStages();
+  const toast = useToast();
+  const { stages, loading: stagesLoading } = useStages();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -101,7 +103,7 @@ export default function PipelinePage() {
     createView,
     updateView,
     deleteView,
-  } = useSavedViews("deals", seedDefaults);
+  } = useSavedViews("deals", seedDefaults, !stagesLoading);
 
   // Zastosuj widok (zakładkę) do filtrów/trybu/sortu.
   const applyView = useCallback((filters_: Filter[], mode: "kanban" | "table", sort: Sort | null) => {
@@ -255,10 +257,25 @@ export default function PipelinePage() {
         loading={viewsLoading}
         isDirty={isDirty}
         onSelect={handleSelectView}
-        onCreate={(name) => createView(name, { filters, sort: currentSort, view_mode: viewMode })}
-        onRename={(id, name) => updateView(id, { name })}
-        onDelete={deleteView}
-        onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort: currentSort, view_mode: viewMode })}
+        onCreate={async (name) => {
+          const { error } = await createView(name, { filters, sort: currentSort, view_mode: viewMode });
+          if (error) toast.error(error);
+          else toast.success(`Zapisano widok „${name}".`);
+        }}
+        onRename={async (id, name) => {
+          const error = await updateView(id, { name });
+          if (error) toast.error(error);
+        }}
+        onDelete={async (id) => {
+          const error = await deleteView(id);
+          if (error) toast.error(error);
+        }}
+        onSaveChanges={async () => {
+          if (!activeView) return;
+          const error = await updateView(activeView.id, { filters, sort: currentSort, view_mode: viewMode });
+          if (error) toast.error(error);
+          else toast.success(`Zapisano zmiany w „${activeView.name}".`);
+        }}
       />
 
       <FilterBar ref={filterBarRef} builtInFields={DEAL_BUILT_IN_FIELDS} withCustomProperties onFilterChange={setFilters} />

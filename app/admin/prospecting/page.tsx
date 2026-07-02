@@ -441,10 +441,25 @@ export default function ProspectingPage() {
             loading={viewsLoading}
             isDirty={isDirty}
             onSelect={handleSelectView}
-            onCreate={(name) => createView(name, { filters, sort, view_mode: "table" })}
-            onRename={(id, name) => updateView(id, { name })}
-            onDelete={deleteView}
-            onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort, view_mode: "table" })}
+            onCreate={async (name) => {
+              const { error } = await createView(name, { filters, sort, view_mode: "table" });
+              if (error) toast.error(error);
+              else toast.success(`Zapisano widok „${name}".`);
+            }}
+            onRename={async (id, name) => {
+              const error = await updateView(id, { name });
+              if (error) toast.error(error);
+            }}
+            onDelete={async (id) => {
+              const error = await deleteView(id);
+              if (error) toast.error(error);
+            }}
+            onSaveChanges={async () => {
+              if (!activeView) return;
+              const error = await updateView(activeView.id, { filters, sort, view_mode: "table" });
+              if (error) toast.error(error);
+              else toast.success(`Zapisano zmiany w „${activeView.name}".`);
+            }}
           />
 
           <FilterBar
