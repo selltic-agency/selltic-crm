@@ -142,6 +142,52 @@ export default function DealPage() {
 
   const [composer, setComposer] = useState<Composer>({ open: false });
 
+  // ── Sekcje z wsadową edycją: lokalny szkic + jeden przycisk „Zapisz” dla
+  // całej sekcji (zamiast zapisu przy każdej zmianie pola). Szkic resetuje
+  // się tylko przy wczytaniu NOWEGO deala (dependency na id, nie na całym
+  // obiekcie deal) — dzięki temu niezapisany szkic nie ginie przy innych
+  // akcjach na stronie (np. zmianie etapu, która też robi setDeal(...)).
+  const [contactDraft, setContactDraft] = useState({ name: "", company: "", email: "", phone: "" });
+  const [contactSaving, setContactSaving] = useState(false);
+  const [contactSavedAt, setContactSavedAt] = useState<number | null>(null);
+
+  const [propsDraft, setPropsDraft] = useState<{ value: string; assignee: Assignee | ""; custom: Record<string, string> }>({
+    value: "",
+    assignee: "",
+    custom: {},
+  });
+  const [propsSaving, setPropsSaving] = useState(false);
+  const [propsSavedAt, setPropsSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!deal) return;
+    setContactDraft({
+      name: deal.name ?? "",
+      company: deal.company ?? "",
+      email: deal.email ?? "",
+      phone: deal.phone ?? "",
+    });
+    setPropsDraft({
+      value: deal.value ? String(deal.value) : "",
+      assignee: deal.assignee ?? "",
+      custom: { ...(deal.props ?? {}) },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deal?.id]);
+
+  const contactDirty =
+    !!deal &&
+    (contactDraft.name !== (deal.name ?? "") ||
+      contactDraft.company !== (deal.company ?? "") ||
+      contactDraft.email !== (deal.email ?? "") ||
+      contactDraft.phone !== (deal.phone ?? ""));
+
+  const propsDirty =
+    !!deal &&
+    (propsDraft.value !== (deal.value ? String(deal.value) : "") ||
+      propsDraft.assignee !== (deal.assignee ?? "") ||
+      propertyDefs.some((d) => (propsDraft.custom[d.key] ?? "") !== (deal.props?.[d.key] ?? "")));
+
   const propTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Lekkie odświeżenie samej osi czasu (bez pełnego spinnera strony).
@@ -213,39 +259,48 @@ export default function DealPage() {
     return !!(s?.is_won || s?.is_lost);
   }
 
-  async function saveField(field: "name" | "email" | "phone" | "company", value: string) {
-    if (!deal) return;
-    const clean = value.trim() || null;
-    if (deal[field] === clean) return;
-    setDeal({ ...deal, [field]: clean });
-    await supabase.from("deals").update({ [field]: clean }).eq("id", deal.id);
+  // Zapis całej sekcji „Dane kontaktowe” jednym zapytaniem, jednym kliknięciem.
+  async function saveContact() {
+    if (!deal || !contactDirty || contactSaving) return;
+    setContactSaving(true);
+    const patch = {
+      name: contactDraft.name.trim() || null,
+      company: contactDraft.company.trim() || null,
+      email: contactDraft.email.trim() || null,
+      phone: contactDraft.phone.trim() || null,
+    };
+    const { error } = await supabase.from("deals").update(patch).eq("id", deal.id);
+    setContactSaving(false);
+    if (error) {
+      toast.error("Nie udało się zapisać danych kontaktowych.");
+      return;
+    }
+    setDeal({ ...deal, ...patch });
+    setContactSavedAt(Date.now());
+    setTimeout(() => setContactSavedAt(null), 2000);
   }
 
-  async function saveValue(raw: string) {
-    if (!deal) return;
-    const value = raw ? Number(raw) : 0;
-    if (Number(deal.value) === value) return;
-    setDeal({ ...deal, value });
-    await supabase.from("deals").update({ value }).eq("id", deal.id);
-  }
-
-  async function saveAssignee(raw: Assignee | "") {
-    if (!deal) return;
-    const assignee = raw || null;
-    if (deal.assignee === assignee) return;
-    setDeal({ ...deal, assignee });
-    await supabase.from("deals").update({ assignee }).eq("id", deal.id);
-  }
-
-  // Zapis wartości właściwości konfigurowalnej (deals.props[key]).
-  async function savePropValue(key: string, value: string) {
-    if (!deal) return;
+  // Zapis całej sekcji „Właściwości” (wbudowane + konfigurowalne) jednym zapytaniem.
+  async function saveProps() {
+    if (!deal || !propsDirty || propsSaving) return;
+    setPropsSaving(true);
+    const value = propsDraft.value ? Number(propsDraft.value) : 0;
+    const assignee = propsDraft.assignee || null;
     const props = { ...(deal.props ?? {}) };
-    if ((props[key] ?? "") === value) return;
-    if (value === "") delete props[key];
-    else props[key] = value;
-    setDeal({ ...deal, props });
-    await supabase.from("deals").update({ props }).eq("id", deal.id);
+    for (const def of propertyDefs) {
+      const v = (propsDraft.custom[def.key] ?? "").trim();
+      if (v === "") delete props[def.key];
+      else props[def.key] = v;
+    }
+    const { error } = await supabase.from("deals").update({ value, assignee, props }).eq("id", deal.id);
+    setPropsSaving(false);
+    if (error) {
+      toast.error("Nie udało się zapisać właściwości.");
+      return;
+    }
+    setDeal({ ...deal, value, assignee, props });
+    setPropsSavedAt(Date.now());
+    setTimeout(() => setPropsSavedAt(null), 2000);
   }
 
   // Nowa kolejność właściwości → zapis position do property_defs (globalnie,
@@ -480,22 +535,46 @@ export default function DealPage() {
             <ActionButton icon={Calendar} label="Kalendarz" disabled title="Wkrótce — integracja Google" />
           </div>
 
-          {/* Kontakt / tożsamość */}
+          {/* Kontakt / tożsamość — edycja wsadowa: jeden „Zapisz” dla całej sekcji */}
           <SectionTitle>Dane kontaktowe</SectionTitle>
-          <div style={{ display: "grid", gap: 12, marginBottom: 22 }}>
+          <div style={{ display: "grid", gap: 12, marginBottom: 10 }}>
             <FieldLabel label="Nazwa / osoba">
-              <input defaultValue={deal.name ?? ""} onBlur={(e) => saveField("name", e.target.value)} style={inputStyle} />
+              <input
+                value={contactDraft.name}
+                onChange={(e) => setContactDraft((d) => ({ ...d, name: e.target.value }))}
+                style={inputStyle}
+              />
             </FieldLabel>
             <FieldLabel label="Firma">
-              <input defaultValue={deal.company ?? ""} onBlur={(e) => saveField("company", e.target.value)} style={inputStyle} />
+              <input
+                value={contactDraft.company}
+                onChange={(e) => setContactDraft((d) => ({ ...d, company: e.target.value }))}
+                style={inputStyle}
+              />
             </FieldLabel>
             <FieldLabel label="E-mail">
-              <input type="email" defaultValue={deal.email ?? ""} onBlur={(e) => saveField("email", e.target.value)} style={inputStyle} />
+              <input
+                type="email"
+                value={contactDraft.email}
+                onChange={(e) => setContactDraft((d) => ({ ...d, email: e.target.value }))}
+                style={inputStyle}
+              />
             </FieldLabel>
             <FieldLabel label="Telefon">
-              <input defaultValue={deal.phone ?? ""} onBlur={(e) => saveField("phone", e.target.value)} style={inputStyle} />
+              <input
+                value={contactDraft.phone}
+                onChange={(e) => setContactDraft((d) => ({ ...d, phone: e.target.value }))}
+                style={inputStyle}
+              />
             </FieldLabel>
           </div>
+          <SectionSaveBar
+            dirty={contactDirty}
+            saving={contactSaving}
+            savedAt={contactSavedAt}
+            onSave={saveContact}
+            style={{ marginBottom: 22 }}
+          />
 
           {/* Etap lejka */}
           <SectionTitle>Etap</SectionTitle>
@@ -524,21 +603,24 @@ export default function DealPage() {
             })}
           </div>
 
-          {/* Właściwości deala (wbudowane + konfigurowalne) */}
+          {/* Właściwości deala (wbudowane + konfigurowalne) — edycja wsadowa:
+              zmień dowolną liczbę pól i zapisz je jednym kliknięciem. Kolejność
+              (drag) nadal zapisuje się od razu — to bezpośrednia manipulacja,
+              nie pole formularza. */}
           <SectionTitle>Właściwości</SectionTitle>
           <div style={{ display: "grid", gap: 12, marginBottom: 10 }}>
             <FieldLabel label="Wartość (zł)">
               <input
                 type="number"
-                defaultValue={deal.value || ""}
-                onBlur={(e) => saveValue(e.target.value)}
+                value={propsDraft.value}
+                onChange={(e) => setPropsDraft((d) => ({ ...d, value: e.target.value }))}
                 style={inputStyle}
               />
             </FieldLabel>
             <FieldLabel label="Deal Owner">
               <select
-                value={deal.assignee ?? ""}
-                onChange={(e) => saveAssignee(e.target.value as Assignee | "")}
+                value={propsDraft.assignee}
+                onChange={(e) => setPropsDraft((d) => ({ ...d, assignee: e.target.value as Assignee | "" }))}
                 style={inputStyle}
               >
                 <option value="">Nieprzypisany</option>
@@ -562,8 +644,10 @@ export default function DealPage() {
                   <PropertyReorderRow
                     key={def.id}
                     def={def}
-                    value={deal.props?.[def.key] ?? ""}
-                    onChange={(v) => savePropValue(def.key, v)}
+                    value={propsDraft.custom[def.key] ?? ""}
+                    onChange={(v) =>
+                      setPropsDraft((d) => ({ ...d, custom: { ...d.custom, [def.key]: v } }))
+                    }
                   />
                 ))}
               </Reorder.Group>
@@ -576,6 +660,14 @@ export default function DealPage() {
               Brak własnych właściwości. Dodaj je w Ustawieniach → Właściwości.
             </p>
           )}
+
+          <SectionSaveBar
+            dirty={propsDirty}
+            saving={propsSaving}
+            savedAt={propsSavedAt}
+            onSave={saveProps}
+            style={{ marginTop: 14 }}
+          />
 
           {/* Dane z Google Maps (tylko dla deali ze scrapera) */}
           <ProspectingDataCard deal={deal} />
@@ -944,7 +1036,13 @@ function FeedRow({
             </div>
           )}
         </div>
-        <RowActions onEdit={() => onEdit(item)} onDelete={() => onDelete(item)} editLabel="Edytuj zadanie" />
+        <RowActions
+          onToggleComplete={() => onToggleTask(t)}
+          completed={t.done}
+          onEdit={() => onEdit(item)}
+          onDelete={() => onDelete(item)}
+          editLabel="Edytuj zadanie"
+        />
       </Row>
     );
   }
@@ -986,18 +1084,32 @@ function FeedRow({
   );
 }
 
-// Przyciski edycji / usuwania po prawej stronie wpisu osi czasu.
+// Przyciski akcji po prawej stronie wpisu osi czasu: dla zadań dochodzi
+// jawny przycisk „Oznacz jako wykonane” — osobny od edycji, żeby nie trzeba
+// było wchodzić w popup edycji tylko po to, by odhaczyć zadanie.
 function RowActions({
+  onToggleComplete,
+  completed,
   onEdit,
   onDelete,
   editLabel = "Edytuj",
 }: {
+  onToggleComplete?: () => void;
+  completed?: boolean;
   onEdit?: () => void;
   onDelete: () => void;
   editLabel?: string;
 }) {
   return (
     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+      {onToggleComplete && (
+        <IconAction
+          icon={completed ? Circle : CheckCircle2}
+          label={completed ? "Oznacz jako niewykonane" : "Oznacz jako wykonane"}
+          active={!completed}
+          onClick={onToggleComplete}
+        />
+      )}
       {onEdit && <IconAction icon={Pencil} label={editLabel} onClick={onEdit} />}
       <IconAction icon={Trash2} label="Usuń" danger onClick={onDelete} />
     </div>
@@ -1008,11 +1120,13 @@ function IconAction({
   icon: Icon,
   label,
   danger = false,
+  active = false,
   onClick,
 }: {
   icon: typeof Pencil;
   label: string;
   danger?: boolean;
+  active?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -1025,12 +1139,12 @@ function IconAction({
         height: 28,
         borderRadius: 7,
         flexShrink: 0,
-        border: `1px solid ${tokens.border}`,
-        background: "#fff",
+        border: `1px solid ${danger ? tokens.danger : active ? tokens.success : tokens.border}`,
+        background: active ? hexSoft(tokens.success) : "#fff",
         display: "grid",
         placeItems: "center",
         cursor: "pointer",
-        color: danger ? tokens.danger : tokens.muted,
+        color: danger ? tokens.danger : active ? tokens.success : tokens.muted,
       }}
     >
       <Icon size={14} />
@@ -1357,6 +1471,46 @@ function FieldLabel({ label, children }: { label: string; children: React.ReactN
       <span style={{ fontSize: 12, fontWeight: 600, color: tokens.muted }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+// Pasek zapisu dla sekcji z wsadową edycją: jeden przycisk „Zapisz zmiany”
+// dla dowolnej liczby pól naraz + jawny stan (niezapisane / zapisano ✓),
+// żeby zawsze było wiadomo, czy zmiana faktycznie poszła do bazy.
+function SectionSaveBar({
+  dirty,
+  saving,
+  savedAt,
+  onSave,
+  style,
+}: {
+  dirty: boolean;
+  saving: boolean;
+  savedAt: number | null;
+  onSave: () => void;
+  style?: CSSProperties;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, ...style }}>
+      <button
+        onClick={onSave}
+        disabled={!dirty || saving}
+        style={{
+          ...primaryButton,
+          padding: "8px 16px",
+          fontSize: 13,
+          opacity: dirty && !saving ? 1 : 0.5,
+          cursor: dirty && !saving ? "pointer" : "not-allowed",
+        }}
+      >
+        {saving ? "Zapisywanie…" : "Zapisz zmiany"}
+      </button>
+      {dirty ? (
+        <span style={{ fontSize: 12.5, color: tokens.warning, fontWeight: 600 }}>Niezapisane zmiany</span>
+      ) : savedAt ? (
+        <span style={{ fontSize: 12.5, color: tokens.success, fontWeight: 600 }}>Zapisano ✓</span>
+      ) : null}
+    </div>
   );
 }
 

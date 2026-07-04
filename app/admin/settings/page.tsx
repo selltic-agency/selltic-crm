@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Reorder } from "framer-motion";
-import { Plus, Trash2, GripVertical, X } from "lucide-react";
+import { Plus, Trash2, GripVertical, X, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import type {
@@ -103,6 +103,7 @@ function StagesTab() {
   const { stages: ctxStages, loading: ctxLoading, reload } = useStages();
   const [list, setList] = useState<PipelineStage[]>([]);
   const [deleting, setDeleting] = useState<PipelineStage | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
   const posTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Lokalna kopia do edycji, synchronizowana z kontekstem przy wczytaniu.
@@ -110,10 +111,38 @@ function StagesTab() {
     setList(ctxStages);
   }, [ctxStages]);
 
-  // Aktualizacja pojedynczego pola etapu (lokalnie + zapis do bazy).
-  async function patch(id: string, partial: Partial<PipelineStage>) {
+  // Edycja lokalna (bez zapisu) — label / kolor / flagi wygrany-przegrany.
+  // Zapis dopiero po kliknięciu „Zapisz” w wierszu (saveRow), żeby zmiana
+  // kilku pól naraz szła jednym zapytaniem zamiast osobno przy każdej zmianie.
+  function editLocal(id: string, partial: Partial<PipelineStage>) {
     setList((l) => l.map((s) => (s.id === id ? { ...s, ...partial } : s)));
-    await supabase.from("pipeline_stages").update(partial).eq("id", id);
+  }
+
+  // Czy wiersz różni się od ostatnio zapisanego stanu (ctxStages).
+  function isRowDirty(row: PipelineStage): boolean {
+    const orig = ctxStages.find((s) => s.id === row.id);
+    if (!orig) return false;
+    return (
+      orig.label !== row.label ||
+      orig.color !== row.color ||
+      orig.is_won !== row.is_won ||
+      orig.is_lost !== row.is_lost
+    );
+  }
+
+  async function saveRow(row: PipelineStage) {
+    setSavingId(row.id);
+    const label = row.label.trim() || "Etap";
+    const { error } = await supabase
+      .from("pipeline_stages")
+      .update({ label, color: row.color, is_won: row.is_won, is_lost: row.is_lost })
+      .eq("id", row.id);
+    setSavingId(null);
+    if (error) {
+      toast.error("Nie udało się zapisać etapu.");
+      return;
+    }
+    toast.success("Etap zapisany.");
     reload();
   }
 
@@ -233,17 +262,14 @@ function StagesTab() {
               <input
                 type="color"
                 value={s.color}
-                onChange={(e) => patch(s.id, { color: e.target.value })}
+                onChange={(e) => editLocal(s.id, { color: e.target.value })}
                 style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
               />
             </label>
 
             <input
               value={s.label}
-              onChange={(e) =>
-                setList((l) => l.map((x) => (x.id === s.id ? { ...x, label: e.target.value } : x)))
-              }
-              onBlur={(e) => patch(s.id, { label: e.target.value.trim() || "Etap" })}
+              onChange={(e) => editLocal(s.id, { label: e.target.value })}
               style={{ ...inputStyle, flex: 1, minWidth: 0 }}
             />
 
@@ -252,7 +278,7 @@ function StagesTab() {
                 type="checkbox"
                 checked={s.is_won}
                 onChange={(e) =>
-                  patch(s.id, { is_won: e.target.checked, is_lost: e.target.checked ? false : s.is_lost })
+                  editLocal(s.id, { is_won: e.target.checked, is_lost: e.target.checked ? false : s.is_lost })
                 }
                 style={{ accentColor: tokens.success }}
               />
@@ -263,12 +289,38 @@ function StagesTab() {
                 type="checkbox"
                 checked={s.is_lost}
                 onChange={(e) =>
-                  patch(s.id, { is_lost: e.target.checked, is_won: e.target.checked ? false : s.is_won })
+                  editLocal(s.id, { is_lost: e.target.checked, is_won: e.target.checked ? false : s.is_won })
                 }
                 style={{ accentColor: tokens.danger }}
               />
               Przegrany
             </label>
+
+            {isRowDirty(s) && (
+              <button
+                onClick={() => saveRow(s)}
+                disabled={savingId === s.id}
+                title="Zapisz zmiany w etapie"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: tokens.accent,
+                  color: "#fff",
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: savingId === s.id ? "not-allowed" : "pointer",
+                  flexShrink: 0,
+                  opacity: savingId === s.id ? 0.7 : 1,
+                }}
+              >
+                <Check size={14} />
+                {savingId === s.id ? "Zapisywanie…" : "Zapisz"}
+              </button>
+            )}
 
             <button
               onClick={() => {
@@ -588,8 +640,14 @@ function PropertiesTab() {
 /* ── Powiadomienia ────────────────────────────────────────── */
 function NotificationsTab() {
   const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  // `settings` = ostatnio zapisany stan (źródło prawdy do porównań); `draft` =
+  // szkic edytowany lokalnie. Wszystkie trzy pola zapisują się jednym
+  // kliknięciem „Zapisz zmiany”, zamiast osobno przy każdej zmianie.
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [draft, setDraft] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
@@ -606,14 +664,16 @@ function NotificationsTab() {
       .select("*")
       .eq("owner", user.id)
       .maybeSingle();
-    setSettings(
-      (data as AppSettings) ?? {
+    const loaded =
+      (data as AppSettings) ??
+      {
         owner: user.id,
         email_new_lead: true,
         email_task_due: false,
         notify_email: null,
-      }
-    );
+      };
+    setSettings(loaded);
+    setDraft(loaded);
     setLoading(false);
   }, [supabase]);
 
@@ -621,28 +681,36 @@ function NotificationsTab() {
     load();
   }, [load]);
 
-  async function persist(patch: Partial<AppSettings>) {
-    if (!settings) return;
-    const next = { ...settings, ...patch };
-    setSettings(next);
-    const { error } = await supabase
-      .from("app_settings")
-      .upsert(
-        {
-          owner: next.owner,
-          email_new_lead: next.email_new_lead,
-          email_task_due: next.email_task_due,
-          notify_email: next.notify_email,
-        },
-        { onConflict: "owner" }
-      );
-    if (!error) {
-      setSavedAt(Date.now());
-      setTimeout(() => setSavedAt(null), 1500);
+  const dirty =
+    !!settings &&
+    !!draft &&
+    (draft.email_new_lead !== settings.email_new_lead ||
+      draft.email_task_due !== settings.email_task_due ||
+      (draft.notify_email ?? "") !== (settings.notify_email ?? ""));
+
+  async function save() {
+    if (!draft || !dirty || saving) return;
+    setSaving(true);
+    const { error } = await supabase.from("app_settings").upsert(
+      {
+        owner: draft.owner,
+        email_new_lead: draft.email_new_lead,
+        email_task_due: draft.email_task_due,
+        notify_email: draft.notify_email,
+      },
+      { onConflict: "owner" }
+    );
+    setSaving(false);
+    if (error) {
+      toast.error("Nie udało się zapisać powiadomień.");
+      return;
     }
+    setSettings(draft);
+    setSavedAt(Date.now());
+    setTimeout(() => setSavedAt(null), 2000);
   }
 
-  if (loading || !settings) {
+  if (loading || !draft) {
     return (
       <section
         style={{
@@ -671,14 +739,14 @@ function NotificationsTab() {
       <ToggleRow
         label="E-mail przy nowym leadzie"
         desc="Wyślij powiadomienie, gdy ktoś wypełni formularz."
-        checked={settings.email_new_lead}
-        onChange={(v) => persist({ email_new_lead: v })}
+        checked={draft.email_new_lead}
+        onChange={(v) => setDraft((d) => (d ? { ...d, email_new_lead: v } : d))}
       />
       <ToggleRow
         label="Przypomnienia o terminach zadań"
         desc="Wyślij e-mail, gdy zbliża się termin zadania."
-        checked={settings.email_task_due}
-        onChange={(v) => persist({ email_task_due: v })}
+        checked={draft.email_task_due}
+        onChange={(v) => setDraft((d) => (d ? { ...d, email_task_due: v } : d))}
       />
 
       <label style={{ display: "grid", gap: 6 }}>
@@ -686,17 +754,30 @@ function NotificationsTab() {
         <input
           type="email"
           placeholder="np. leady@selltic-agency.pl"
-          defaultValue={settings.notify_email ?? ""}
-          onBlur={(e) => persist({ notify_email: e.target.value || null })}
+          value={draft.notify_email ?? ""}
+          onChange={(e) => setDraft((d) => (d ? { ...d, notify_email: e.target.value || null } : d))}
           style={{ ...inputStyle, maxWidth: 360 }}
         />
       </label>
 
-      {savedAt && (
-        <span style={{ fontSize: 13, color: tokens.success, fontWeight: 600 }}>
-          Zapisano ✓
-        </span>
-      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={save}
+          disabled={!dirty || saving}
+          style={{
+            ...primaryButton,
+            opacity: dirty && !saving ? 1 : 0.5,
+            cursor: dirty && !saving ? "pointer" : "not-allowed",
+          }}
+        >
+          {saving ? "Zapisywanie…" : "Zapisz zmiany"}
+        </button>
+        {dirty ? (
+          <span style={{ fontSize: 13, color: tokens.warning, fontWeight: 600 }}>Niezapisane zmiany</span>
+        ) : savedAt ? (
+          <span style={{ fontSize: 13, color: tokens.success, fontWeight: 600 }}>Zapisano ✓</span>
+        ) : null}
+      </div>
     </section>
   );
 }
