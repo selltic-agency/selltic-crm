@@ -24,3 +24,7 @@ alter table saved_views enable row level security;
 drop policy if exists "own saved views" on saved_views;
 create policy "own saved views" on saved_views
   for all using (auth.uid() = owner) with check (auth.uid() = owner);
+
+-- Wymuszenie odświeżenia cache schematu PostgREST — bez tego świeżo utworzona
+-- tabela bywa niewidoczna dla API (błąd PGRST205) i zapis widoków nie działa.
+notify pgrst, 'reload schema';
