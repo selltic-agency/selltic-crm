@@ -67,6 +67,41 @@ select {
   border-radius: 999px;
 }
 
+/* Pionowy odpowiednik — przewijane listy kart wewnątrz kolumn etapów. */
+.selltic-scroll-y {
+  scrollbar-width: thin;
+}
+.selltic-scroll-y::-webkit-scrollbar {
+  width: 8px;
+}
+.selltic-scroll-y::-webkit-scrollbar-thumb {
+  background: #d5d9e2;
+  border-radius: 999px;
+}
+
+/* Strona wypełniająca dokładnie widoczny obszar (bez przewijania całej
+   strony) — wysokość = viewport minus topbar (64px) i pionowe paddingi
+   .selltic-main (28/18/14px góra + dół). Przewijanie żyje wtedy w środku,
+   np. w kolumnach etapów kanbana. */
+.selltic-page-fill {
+  height: calc(100vh - 64px - 56px);
+  height: calc(100dvh - 64px - 56px);
+  display: flex;
+  flex-direction: column;
+}
+@media (max-width: 900px) {
+  .selltic-page-fill {
+    height: calc(100vh - 64px - 36px);
+    height: calc(100dvh - 64px - 36px);
+  }
+}
+@media (max-width: 480px) {
+  .selltic-page-fill {
+    height: calc(100vh - 64px - 28px);
+    height: calc(100dvh - 64px - 28px);
+  }
+}
+
 /* Nieokreślony pasek postępu (scraper „w trakcie”) — nie znamy z góry ile
    będzie wyników, więc zamiast fałszywego procentu pokazujemy przesuwający
    się fragment paska. */

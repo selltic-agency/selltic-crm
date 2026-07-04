@@ -6,7 +6,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus, X, KanbanSquare, Table } from "lucide-react";
+import {
+  Plus,
+  X,
+  KanbanSquare,
+  Table,
+  Phone,
+  Mail,
+  Clock,
+  CalendarClock,
+  type LucideIcon,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   tokens,
@@ -47,13 +57,20 @@ const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
 
 const DEFAULT_TABLE_SORT: SortConfig = { key: "opened_at", direction: "desc" };
 
+// Deal + metadane aktywności dociągane razem z listą (osadzone zasoby
+// PostgREST): ostatnia aktywność i najbliższe otwarte zadanie z terminem.
+type DealRow = Deal & {
+  activities?: { created_at: string }[] | null;
+  tasks?: { due_at: string | null }[] | null;
+};
+
 export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { stages } = useStages();
-  const [deals, setDeals] = useState<Deal[]>([]);
+  const { stages, loading: stagesLoading } = useStages();
+  const [deals, setDeals] = useState<DealRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
@@ -92,16 +109,19 @@ export default function PipelinePage() {
     ];
   }, [stages]);
 
+  // Zasiew domyślnych widoków czeka na etapy lejka (klucze wygrane/przegrane).
   const {
     views,
     activeId,
     activeView,
     loading: viewsLoading,
+    storage: viewsStorage,
+    error: viewsError,
     selectView,
     createView,
     updateView,
     deleteView,
-  } = useSavedViews("deals", seedDefaults);
+  } = useSavedViews("deals", seedDefaults, !stagesLoading);
 
   // Zastosuj widok (zakładkę) do filtrów/trybu/sortu.
   const applyView = useCallback((filters_: Filter[], mode: "kanban" | "table", sort: Sort | null) => {
@@ -165,15 +185,23 @@ export default function PipelinePage() {
 
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
+    // Osadzone zasoby: najnowsza aktywność (oś czasu deala) i najbliższe
+    // otwarte zadanie z terminem — po 1 rekordzie na deal, na potrzeby kart.
     let query = supabase
       .from("deals")
-      .select("*")
-      .order("opened_at", { ascending: false });
+      .select("*, activities(created_at), tasks(due_at)")
+      .eq("tasks.done", false)
+      .not("tasks.due_at", "is", null)
+      .order("opened_at", { ascending: false })
+      .order("created_at", { referencedTable: "activities", ascending: false })
+      .limit(1, { referencedTable: "activities" })
+      .order("due_at", { referencedTable: "tasks", ascending: true })
+      .limit(1, { referencedTable: "tasks" });
 
     query = buildFilterQuery(query, activeFilters);
 
     const { data } = await query;
-    setDeals((data as Deal[]) ?? []);
+    setDeals((data as DealRow[]) ?? []);
     setLoading(false);
   }, [supabase]);
 
@@ -184,7 +212,7 @@ export default function PipelinePage() {
   const openDeal = (id: string) => router.push(`/admin/leads/${id}`);
 
   const byStage = useMemo(() => {
-    const map: Record<Stage, Deal[]> = {};
+    const map: Record<Stage, DealRow[]> = {};
     for (const s of stages) map[s.key] = [];
     for (const d of deals) {
       if (!map[d.stage]) map[d.stage] = [];
@@ -194,13 +222,16 @@ export default function PipelinePage() {
   }, [deals, stages]);
 
   return (
-    <div>
+    // Kanban wypełnia całą wysokość okna (przewijanie żyje wewnątrz kolumn
+    // etapów, nie na stronie); tabela zachowuje zwykły przepływ dokumentu.
+    <div className={viewMode === "kanban" ? "selltic-page-fill" : undefined}>
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           marginBottom: 20,
+          flexShrink: 0,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -254,6 +285,8 @@ export default function PipelinePage() {
         activeId={activeId}
         loading={viewsLoading}
         isDirty={isDirty}
+        storage={viewsStorage}
+        error={viewsError}
         onSelect={handleSelectView}
         onCreate={(name) => createView(name, { filters, sort: currentSort, view_mode: viewMode })}
         onRename={(id, name) => updateView(id, { name })}
@@ -269,25 +302,43 @@ export default function PipelinePage() {
         <div
           className="selltic-scroll-x"
           style={{
+            flex: 1,
+            minHeight: 0,
             display: "grid",
-            gridTemplateColumns: `repeat(${stages.length}, minmax(200px, 1fr))`,
-            gap: 14,
+            gridTemplateColumns: `repeat(${stages.length}, minmax(250px, 1fr))`,
+            gap: 12,
             overflowX: "auto",
-            paddingBottom: 8,
+            paddingBottom: 4,
           }}
         >
           {stages.map((s) => {
             const list = byStage[s.key] ?? [];
             const total = list.reduce((sum, d) => sum + Number(d.value || 0), 0);
             return (
-              <div key={s.key} style={{ minWidth: 220 }}>
+              // Kolumna etapu = wyraźnie wydzielona „komórka": przyciemnione
+              // tło, obrys i cień; nagłówek stoi w miejscu, przewija się
+              // wyłącznie lista kart poniżej.
+              <div
+                key={s.key}
+                style={{
+                  minWidth: 250,
+                  minHeight: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  background: "#EDEFF4",
+                  border: "1px solid #E2E5EC",
+                  borderRadius: 14,
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7), 0 1px 3px rgba(15,18,28,0.05)",
+                }}
+              >
                 <div
                   style={{
+                    flexShrink: 0,
                     display: "flex",
                     flexDirection: "column",
                     gap: 6,
-                    marginBottom: 10,
-                    padding: "0 2px",
+                    padding: "12px 12px 10px",
+                    borderBottom: "1px solid #E2E5EC",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
@@ -330,13 +381,15 @@ export default function PipelinePage() {
                 </div>
 
                 <div
+                  className="selltic-scroll-y"
                   style={{
+                    flex: 1,
+                    minHeight: 60,
+                    overflowY: "auto",
                     display: "grid",
                     gap: 8,
-                    background: tokens.bg,
-                    borderRadius: 12,
-                    minHeight: 60,
-                    padding: 4,
+                    padding: 8,
+                    alignContent: "start",
                   }}
                 >
                   {list.length === 0 ? (
@@ -346,46 +399,7 @@ export default function PipelinePage() {
                   ) : (
                     <AnimatePresence initial={false}>
                       {list.map((d) => (
-                        <motion.button
-                          key={d.id}
-                          layout={!reduce}
-                          onClick={() => openDeal(d.id)}
-                          initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
-                          whileHover={reduce ? undefined : { scale: 1.02, y: -2 }}
-                          transition={
-                            reduce ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 32 }
-                          }
-                          style={{
-                            textAlign: "left",
-                            background: tokens.card,
-                            border: `1px solid ${tokens.border}`,
-                            borderRadius: 12,
-                            padding: "12px 13px",
-                            cursor: "pointer",
-                            display: "grid",
-                            gap: 6,
-                          }}
-                        >
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>
-                            {d.name || "Bez nazwy"}
-                          </div>
-                          {d.company && (
-                            <div style={{ fontSize: 12.5, color: tokens.muted }}>{d.company}</div>
-                          )}
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                            <span style={{ fontSize: 11.5, color: tokens.muted }}>
-                              {d.source ? `📋 ${d.source}` : "ręcznie"}
-                            </span>
-                            {Number(d.value) > 0 && (
-                              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(d.value)}</span>
-                            )}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                            <OwnerAvatar assignee={d.assignee} size={22} showName />
-                          </div>
-                        </motion.button>
+                        <DealCard key={d.id} deal={d} reduce={!!reduce} onOpen={openDeal} />
                       ))}
                     </AnimatePresence>
                   )}
@@ -411,6 +425,139 @@ export default function PipelinePage() {
       )}
     </div>
   );
+}
+
+// Karta deala na kanbanie (układ HubSpot-style): tytuł do 2 linii, telefon,
+// e-mail, ostatnia/następna aktywność (przeterminowana → czerwona), owner.
+function DealCard({
+  deal: d,
+  reduce,
+  onOpen,
+}: {
+  deal: DealRow;
+  reduce: boolean;
+  onOpen: (id: string) => void;
+}) {
+  const lastActivityAt = d.activities?.[0]?.created_at ?? null;
+  const nextDueAt = d.tasks?.[0]?.due_at ?? null;
+  const isOverdue = !!nextDueAt && new Date(nextDueAt).getTime() < Date.now();
+
+  return (
+    <motion.button
+      layout={!reduce}
+      onClick={() => onOpen(d.id)}
+      initial={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: reduce ? 1 : 0.95 }}
+      whileHover={reduce ? undefined : { scale: 1.02, y: -2 }}
+      transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 400, damping: 32 }}
+      style={{
+        textAlign: "left",
+        background: tokens.card,
+        border: `1px solid ${tokens.border}`,
+        borderRadius: 12,
+        padding: "12px 13px",
+        cursor: "pointer",
+        display: "grid",
+        gap: 8,
+        boxShadow: "0 1px 2px rgba(15,18,28,0.05)",
+      }}
+    >
+      <div
+        title={d.name ?? undefined}
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          lineHeight: 1.35,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          wordBreak: "break-word",
+        }}
+      >
+        {d.name || "Bez nazwy"}
+      </div>
+
+      <div style={{ display: "grid", gap: 5 }}>
+        {d.phone && <CardMetaRow icon={Phone} text={d.phone} />}
+        {d.email && <CardMetaRow icon={Mail} text={d.email} />}
+        <CardMetaRow
+          icon={Clock}
+          muted
+          text={
+            lastActivityAt
+              ? `Ostatnia aktywność: ${formatRelativeDate(lastActivityAt)}`
+              : "Brak aktywności"
+          }
+        />
+        {nextDueAt ? (
+          <CardMetaRow
+            icon={CalendarClock}
+            danger={isOverdue}
+            text={`${isOverdue ? "Po terminie" : "Następna aktywność"}: ${formatRelativeDate(nextDueAt)}`}
+          />
+        ) : (
+          <CardMetaRow icon={CalendarClock} muted text="Brak zaplanowanych działań" />
+        )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <OwnerAvatar assignee={d.assignee} size={22} />
+        {Number(d.value) > 0 && (
+          <span style={{ fontSize: 12.5, fontWeight: 700 }}>{formatPLN(d.value)}</span>
+        )}
+      </div>
+    </motion.button>
+  );
+}
+
+// Wiersz metadanych karty: ikona + tekst w jednej, uciętej linii.
+function CardMetaRow({
+  icon: Icon,
+  text,
+  muted = false,
+  danger = false,
+}: {
+  icon: LucideIcon;
+  text: string;
+  muted?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <span
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        minWidth: 0,
+        fontSize: 12,
+        fontWeight: danger ? 700 : 500,
+        color: danger ? tokens.danger : muted ? tokens.muted : tokens.text,
+        ...(danger
+          ? { background: "rgba(229,72,77,0.10)", borderRadius: 6, padding: "3px 6px", margin: "-1px -4px" }
+          : {}),
+      }}
+    >
+      <Icon size={13} style={{ flexShrink: 0 }} />
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
+    </span>
+  );
+}
+
+// Data względna po polsku: „dzisiaj"/„wczoraj"/„jutro", „za N dni"/„N dni
+// temu" do miesiąca, dalej zwykła data.
+function formatRelativeDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((dayStart(d) - dayStart(new Date())) / 86_400_000);
+  if (diffDays === 0) return "dzisiaj";
+  if (diffDays === -1) return "wczoraj";
+  if (diffDays === 1) return "jutro";
+  if (diffDays < 0 && diffDays > -30) return `${-diffDays} dni temu`;
+  if (diffDays > 1 && diffDays < 30) return `za ${diffDays} dni`;
+  return d.toLocaleDateString("pl-PL", { day: "numeric", month: "short", year: "numeric" });
 }
 
 // Ręczne dodanie deala: jeden samodzielny rekord (tożsamość + szansa sprzedaży).

@@ -4,15 +4,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { AlertTriangle, MoreHorizontal, Plus } from "lucide-react";
 import { tokens, inputStyle, ghostButton, primaryButton } from "@/lib/ui";
-import type { SavedView } from "@/lib/savedViews";
+import type { SavedView, SavedViewStorage } from "@/lib/savedViews";
 
 export default function SavedViewTabs({
   views,
   activeId,
   loading,
   isDirty,
+  storage = "db",
+  error = null,
   onSelect,
   onCreate,
   onRename,
@@ -23,6 +25,10 @@ export default function SavedViewTabs({
   activeId: string | null;
   loading: boolean;
   isDirty: boolean;
+  /** 'local' = fallback localStorage (tabela saved_views niedostępna w bazie). */
+  storage?: SavedViewStorage;
+  /** Ostatni błąd zapisu/odczytu widoków — pokazywany zamiast cichego niepowodzenia. */
+  error?: string | null;
   onSelect: (id: string) => void;
   onCreate: (name: string) => void;
   onRename: (id: string, name: string) => void;
@@ -201,6 +207,26 @@ export default function SavedViewTabs({
         >
           Zapisz zmiany w „{activeView.name}"
         </button>
+      )}
+
+      {(error || storage === "local") && (
+        <div
+          style={{
+            flexBasis: "100%",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            color: error ? tokens.danger : tokens.warning,
+          }}
+        >
+          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>
+            {error ??
+              "Widoki zapisują się tylko w tej przeglądarce — tabela saved_views nie istnieje w bazie. Uruchom migration_saved_views.sql (Supabase → SQL Editor), aby zapisywać je na stałe."}
+          </span>
+        </div>
       )}
     </div>
   );

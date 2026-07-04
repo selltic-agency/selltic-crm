@@ -149,6 +149,8 @@ export default function ProspectingPage() {
     activeId,
     activeView,
     loading: viewsLoading,
+    storage: viewsStorage,
+    error: viewsError,
     selectView,
     createView,
     updateView,
@@ -440,6 +442,8 @@ export default function ProspectingPage() {
             activeId={activeId}
             loading={viewsLoading}
             isDirty={isDirty}
+            storage={viewsStorage}
+            error={viewsError}
             onSelect={handleSelectView}
             onCreate={(name) => createView(name, { filters, sort, view_mode: "table" })}
             onRename={(id, name) => updateView(id, { name })}
