@@ -2,14 +2,15 @@
 //
 // Podział na dwa wizualnie oddzielone panele wypełniające 100vh:
 //   • LEWY  — tożsamość deala (nazwa, kontakt), przyciski akcji (notatka /
-//             zadanie / telefon aktywne; e-mail / kalendarz wyłączone,
-//             pod przyszłą integrację Google), etap oraz konfigurowalne
-//             właściwości. Kolejność właściwości jest WSPÓLNA dla wszystkich
-//             deali (zapis do property_defs.position) — zmiana tutaj zmienia
-//             widok każdego deala, nie tylko bieżącego.
+//             zadanie otwierają popup nad osią czasu; e-mail / kalendarz
+//             wyłączone, pod przyszłą integrację Google), etap oraz
+//             konfigurowalne właściwości. Kolejność właściwości jest WSPÓLNA
+//             dla wszystkich deali (zapis do property_defs.position) — zmiana
+//             tutaj zmienia widok każdego deala, nie tylko bieżącego.
 //   • PRAWY — kanał aktywności (notatki, telefony, e-maile, zadania, zmiany
 //             etapu). Kolory sygnalizują status: czerwony = zaległe zadanie,
-//             zielony = wykonane, pomarańczowy = nadchodzące.
+//             zielony = wykonane, pomarańczowy = nadchodzące. Wpisy można
+//             edytować i usuwać, a zadania odhaczać wprost na osi czasu.
 // Każdy panel przewija się niezależnie; cała strona mieści się w 100vh.
 // Na wąskich ekranach panele układają się jeden pod drugim (responsywność).
 "use client";
@@ -39,9 +40,19 @@ import {
   Circle,
   GripVertical,
   GitBranch,
+  Pencil,
+  Trash2,
+  X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, inputStyle, primaryButton, formatDateTime } from "@/lib/ui";
+import {
+  tokens,
+  inputStyle,
+  primaryButton,
+  ghostButton,
+  formatDateTime,
+  toDatetimeLocal,
+} from "@/lib/ui";
 import {
   type Activity,
   type ActivityType,
@@ -64,7 +75,18 @@ const DESKTOP_PAGE_H = "calc(100vh - 120px)";
 // Poniżej tej szerokości panele układają się pionowo (kolumny są za ciasne).
 const STACK_BREAKPOINT = 1024;
 
-type ComposerTab = "note" | "call" | "task";
+// Stan modala kompozytora: tworzenie notatki/zadania lub edycja istniejącego
+// wpisu osi czasu. Popup otwiera się nad kanałem aktywności.
+type Composer =
+  | { open: false }
+  | { open: true; editor: "text"; mode: "create" }
+  | { open: true; editor: "text"; mode: "edit"; activity: Activity }
+  | { open: true; editor: "task"; mode: "create" }
+  | { open: true; editor: "task"; mode: "edit"; task: Task };
+
+// Typy aktywności, których treść można edytować. Systemowe (stage/submission)
+// wolno tylko usuwać.
+const EDITABLE_ACTIVITY_TYPES = new Set<string>(["note", "call", "email"]);
 
 const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
   note: StickyNote,
@@ -118,11 +140,7 @@ export default function DealPage() {
   const [propertyDefs, setPropertyDefs] = useState<PropertyDef[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [tab, setTab] = useState<ComposerTab>("note");
-  const [body, setBody] = useState("");
-  const [taskTitle, setTaskTitle] = useState("");
-  const [taskDue, setTaskDue] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [composer, setComposer] = useState<Composer>({ open: false });
 
   const propTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -257,54 +275,98 @@ export default function DealPage() {
     }
   }
 
-  async function saveActivity() {
-    if (!deal || saving) return;
-
-    if (tab === "task") {
-      if (!taskTitle.trim()) return;
-      setSaving(true);
-      const due = taskDue ? new Date(taskDue).toISOString() : null;
-      const { error } = await supabase.from("tasks").insert({
-        owner: deal.owner,
-        deal_id: deal.id,
-        title: taskTitle.trim(),
-        due_at: due,
-      });
-      if (!error) {
-        await supabase.from("activities").insert({
-          owner: deal.owner,
-          deal_id: deal.id,
-          type: "task",
-          body: taskTitle.trim(),
-          meta: due ? { due_at: due } : null,
-        });
-        setTaskTitle("");
-        setTaskDue("");
-        await reloadFeed();
-        toast.success("Zadanie dodane.");
-      } else {
-        toast.error("Nie udało się dodać zadania.");
-      }
-      setSaving(false);
-      return;
-    }
-
-    if (!body.trim()) return;
-    setSaving(true);
+  // ── Kompozytor / edycja / usuwanie wpisów osi czasu ────────────────────
+  async function createNote(text: string) {
+    if (!deal) return;
     const { error } = await supabase.from("activities").insert({
       owner: deal.owner,
       deal_id: deal.id,
-      type: tab as ActivityType,
-      body: body.trim(),
+      type: "note" as ActivityType,
+      body: text,
     });
-    if (!error) {
-      setBody("");
-      await reloadFeed();
-      toast.success("Aktywność dodana.");
-    } else {
-      toast.error("Nie udało się zapisać aktywności.");
+    if (error) {
+      toast.error("Nie udało się zapisać notatki.");
+      return;
     }
-    setSaving(false);
+    await reloadFeed();
+    toast.success("Notatka dodana.");
+  }
+
+  async function updateActivity(id: string, text: string) {
+    const { error } = await supabase.from("activities").update({ body: text }).eq("id", id);
+    if (error) {
+      toast.error("Nie udało się zapisać zmian.");
+      return;
+    }
+    await reloadFeed();
+    toast.success("Zapisano zmiany.");
+  }
+
+  async function createTask(title: string, due_at: string | null) {
+    if (!deal) return;
+    const { error } = await supabase.from("tasks").insert({
+      owner: deal.owner,
+      deal_id: deal.id,
+      title,
+      due_at,
+    });
+    if (error) {
+      toast.error("Nie udało się dodać zadania.");
+      return;
+    }
+    await supabase.from("activities").insert({
+      owner: deal.owner,
+      deal_id: deal.id,
+      type: "task",
+      body: title,
+      meta: due_at ? { due_at } : null,
+    });
+    await reloadFeed();
+    toast.success("Zadanie dodane.");
+  }
+
+  async function updateTask(
+    id: string,
+    patch: { title: string; due_at: string | null; done: boolean }
+  ) {
+    // Optymistyczna aktualizacja, żeby oś czasu odświeżyła się natychmiast.
+    setTasks((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+    const { error } = await supabase.from("tasks").update(patch).eq("id", id);
+    if (error) {
+      toast.error("Nie udało się zapisać zmian.");
+      await reloadFeed();
+      return;
+    }
+    toast.success("Zapisano zmiany.");
+  }
+
+  function editItem(item: FeedItem) {
+    if (item.kind === "task") setComposer({ open: true, editor: "task", mode: "edit", task: item.task });
+    else setComposer({ open: true, editor: "text", mode: "edit", activity: item.activity });
+  }
+
+  async function deleteItem(item: FeedItem) {
+    if (item.kind === "task") {
+      if (!window.confirm("Usunąć to zadanie?")) return;
+      setTasks((list) => list.filter((x) => x.id !== item.task.id));
+      const { error } = await supabase.from("tasks").delete().eq("id", item.task.id);
+      if (error) {
+        toast.error("Nie udało się usunąć zadania.");
+        await reloadFeed();
+        return;
+      }
+      toast.success("Zadanie usunięte.");
+    } else {
+      if (!window.confirm("Usunąć ten wpis z osi czasu?")) return;
+      setActivities((list) => list.filter((x) => x.id !== item.activity.id));
+      const { error } = await supabase.from("activities").delete().eq("id", item.activity.id);
+      if (error) {
+        toast.error("Nie udało się usunąć wpisu.");
+        await reloadFeed();
+        return;
+      }
+      toast.success("Wpis usunięty.");
+    }
   }
 
   if (loading) {
@@ -401,49 +463,21 @@ export default function DealPage() {
 
         {/* Treść przewijalna */}
         <div className="selltic-scroll-y" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 18 }}>
-          {/* Przyciski akcji */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-            <ActionButton icon={StickyNote} label="Notatka" active={tab === "note"} onClick={() => setTab("note")} />
-            <ActionButton icon={Phone} label="Telefon" active={tab === "call"} onClick={() => setTab("call")} />
-            <ActionButton icon={CheckSquare} label="Zadanie" active={tab === "task"} onClick={() => setTab("task")} />
+          {/* Przyciski akcji — Notatka / Zadanie otwierają popup nad osią czasu.
+              E-mail / Kalendarz wyłączone (pod przyszłą integrację Google). */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 22 }}>
+            <ActionButton
+              icon={StickyNote}
+              label="Notatka"
+              onClick={() => setComposer({ open: true, editor: "text", mode: "create" })}
+            />
+            <ActionButton
+              icon={CheckSquare}
+              label="Zadanie"
+              onClick={() => setComposer({ open: true, editor: "task", mode: "create" })}
+            />
             <ActionButton icon={Mail} label="E-mail" disabled title="Wkrótce — integracja Google" />
             <ActionButton icon={Calendar} label="Kalendarz" disabled title="Wkrótce — integracja Google" />
-          </div>
-
-          {/* Kompozytor dla aktywnej zakładki */}
-          <div style={{ marginBottom: 22 }}>
-            {tab === "task" ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <input
-                  placeholder="Tytuł zadania"
-                  value={taskTitle}
-                  onChange={(e) => setTaskTitle(e.target.value)}
-                  style={inputStyle}
-                />
-                <input
-                  type="datetime-local"
-                  value={taskDue}
-                  onChange={(e) => setTaskDue(e.target.value)}
-                  style={inputStyle}
-                />
-                <button onClick={saveActivity} disabled={saving} style={primaryButton}>
-                  {saving ? "Zapisywanie…" : "Dodaj zadanie"}
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: "grid", gap: 10 }}>
-                <textarea
-                  placeholder={tab === "call" ? "Podsumowanie rozmowy…" : "Treść notatki…"}
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  rows={3}
-                  style={{ ...inputStyle, resize: "vertical" }}
-                />
-                <button onClick={saveActivity} disabled={saving} style={primaryButton}>
-                  {saving ? "Zapisywanie…" : "Zapisz"}
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Kontakt / tożsamość */}
@@ -577,9 +611,21 @@ export default function DealPage() {
             activities={activities}
             tasks={tasks}
             onToggleTask={toggleTask}
+            onEdit={editItem}
+            onDelete={deleteItem}
           />
         </div>
       </Panel>
+
+      {/* Popup kompozytora / edycji, wyśrodkowany nad osią czasu */}
+      {composer.open && (
+        <ComposerModal
+          key={composerKey(composer)}
+          composer={composer}
+          onClose={() => setComposer({ open: false })}
+          handlers={{ createNote, updateActivity, createTask, updateTask }}
+        />
+      )}
     </div>
   );
 }
@@ -607,7 +653,7 @@ function Panel({ fill, children }: { fill: boolean; children: React.ReactNode })
   );
 }
 
-/* ── Przycisk akcji (Notatka / Telefon / Zadanie / …) ───────────────────── */
+/* ── Przycisk akcji (Notatka / Zadanie / E-mail / Kalendarz) ────────────── */
 function ActionButton({
   icon: Icon,
   label,
@@ -732,10 +778,14 @@ function ActivityFeed({
   activities,
   tasks,
   onToggleTask,
+  onEdit,
+  onDelete,
 }: {
   activities: Activity[];
   tasks: Task[];
   onToggleTask: (t: Task) => void;
+  onEdit: (item: FeedItem) => void;
+  onDelete: (item: FeedItem) => void;
 }) {
   const now = Date.now();
 
@@ -784,14 +834,14 @@ function ActivityFeed({
       {overdue.length > 0 && (
         <FeedGroup label="Zaległe" danger>
           {overdue.map((it) => (
-            <FeedRow key={it.id} item={it} now={now} onToggleTask={onToggleTask} />
+            <FeedRow key={it.id} item={it} now={now} onToggleTask={onToggleTask} onEdit={onEdit} onDelete={onDelete} />
           ))}
         </FeedGroup>
       )}
       {groups.map((g) => (
         <FeedGroup key={g.label} label={g.label}>
           {g.items.map((it) => (
-            <FeedRow key={it.id} item={it} now={now} onToggleTask={onToggleTask} />
+            <FeedRow key={it.id} item={it} now={now} onToggleTask={onToggleTask} onEdit={onEdit} onDelete={onDelete} />
           ))}
         </FeedGroup>
       ))}
@@ -832,10 +882,14 @@ function FeedRow({
   item,
   now,
   onToggleTask,
+  onEdit,
+  onDelete,
 }: {
   item: FeedItem;
   now: number;
   onToggleTask: (t: Task) => void;
+  onEdit: (item: FeedItem) => void;
+  onDelete: (item: FeedItem) => void;
 }) {
   if (item.kind === "task") {
     const t = item.task;
@@ -890,6 +944,7 @@ function FeedRow({
             </div>
           )}
         </div>
+        <RowActions onEdit={() => onEdit(item)} onDelete={() => onDelete(item)} editLabel="Edytuj zadanie" />
       </Row>
     );
   }
@@ -897,6 +952,7 @@ function FeedRow({
   const a = item.activity;
   const Icon = ACTIVITY_ICON[a.type] ?? CircleDot;
   const color = ACTIVITY_COLOR[a.type] ?? tokens.accent;
+  const editable = EDITABLE_ACTIVITY_TYPES.has(a.type);
 
   return (
     <Row stripe={color}>
@@ -925,7 +981,202 @@ function FeedRow({
           <div style={{ fontSize: 14, marginTop: 2, whiteSpace: "pre-wrap", color: tokens.text }}>{a.body}</div>
         )}
       </div>
+      <RowActions onEdit={editable ? () => onEdit(item) : undefined} onDelete={() => onDelete(item)} />
     </Row>
+  );
+}
+
+// Przyciski edycji / usuwania po prawej stronie wpisu osi czasu.
+function RowActions({
+  onEdit,
+  onDelete,
+  editLabel = "Edytuj",
+}: {
+  onEdit?: () => void;
+  onDelete: () => void;
+  editLabel?: string;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+      {onEdit && <IconAction icon={Pencil} label={editLabel} onClick={onEdit} />}
+      <IconAction icon={Trash2} label="Usuń" danger onClick={onDelete} />
+    </div>
+  );
+}
+
+function IconAction({
+  icon: Icon,
+  label,
+  danger = false,
+  onClick,
+}: {
+  icon: typeof Pencil;
+  label: string;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 7,
+        flexShrink: 0,
+        border: `1px solid ${tokens.border}`,
+        background: "#fff",
+        display: "grid",
+        placeItems: "center",
+        cursor: "pointer",
+        color: danger ? tokens.danger : tokens.muted,
+      }}
+    >
+      <Icon size={14} />
+    </button>
+  );
+}
+
+/* ── Popup kompozytora / edycji ─────────────────────────────────────────
+   Jeden modal obsługuje: nową notatkę, edycję notatki/telefonu/e-maila,
+   nowe zadanie oraz edycję zadania (tytuł, termin, wykonane). */
+type ComposerOpen = Extract<Composer, { open: true }>;
+
+function composerKey(c: ComposerOpen): string {
+  if (c.mode === "create") return `${c.editor}-create`;
+  return c.editor === "task" ? `task-${c.task.id}` : `text-${c.activity.id}`;
+}
+
+function ComposerModal({
+  composer,
+  onClose,
+  handlers,
+}: {
+  composer: ComposerOpen;
+  onClose: () => void;
+  handlers: {
+    createNote: (text: string) => Promise<void>;
+    updateActivity: (id: string, text: string) => Promise<void>;
+    createTask: (title: string, dueAt: string | null) => Promise<void>;
+    updateTask: (id: string, patch: { title: string; due_at: string | null; done: boolean }) => Promise<void>;
+  };
+}) {
+  const isTask = composer.editor === "task";
+  const [saving, setSaving] = useState(false);
+  const [body, setBody] = useState(
+    composer.editor === "text" && composer.mode === "edit" ? composer.activity.body ?? "" : ""
+  );
+  const [title, setTitle] = useState(
+    composer.editor === "task" && composer.mode === "edit" ? composer.task.title : ""
+  );
+  const [due, setDue] = useState(
+    composer.editor === "task" && composer.mode === "edit" ? toDatetimeLocal(composer.task.due_at) : ""
+  );
+  const [done, setDone] = useState(
+    composer.editor === "task" && composer.mode === "edit" ? composer.task.done : false
+  );
+
+  const heading =
+    composer.editor === "task"
+      ? composer.mode === "edit"
+        ? "Edytuj zadanie"
+        : "Nowe zadanie"
+      : composer.mode === "edit"
+      ? `Edytuj: ${ACTIVITY_LABEL[composer.activity.type] ?? "wpis"}`
+      : "Nowa notatka";
+
+  async function submit() {
+    if (saving) return;
+    if (composer.editor === "task") {
+      if (!title.trim()) return;
+      setSaving(true);
+      const dueAt = due ? new Date(due).toISOString() : null;
+      if (composer.mode === "create") await handlers.createTask(title.trim(), dueAt);
+      else await handlers.updateTask(composer.task.id, { title: title.trim(), due_at: dueAt, done });
+    } else {
+      if (!body.trim()) return;
+      setSaving(true);
+      if (composer.mode === "create") await handlers.createNote(body.trim());
+      else await handlers.updateActivity(composer.activity.id, body.trim());
+    }
+    setSaving(false);
+    onClose();
+  }
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,18,28,0.40)", zIndex: 40 }} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: "fixed",
+          top: "14%",
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: "min(520px, calc(100vw - 32px))",
+          maxHeight: "min(76vh, calc(100vh - 120px))",
+          overflowY: "auto",
+          background: tokens.card,
+          borderRadius: tokens.radius,
+          border: `1px solid ${tokens.border}`,
+          boxShadow: "0 24px 60px rgba(15,18,28,0.18)",
+          zIndex: 41,
+          padding: 22,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{heading}</h2>
+          <button
+            onClick={onClose}
+            aria-label="Zamknij"
+            style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
+          >
+            <X size={15} color={tokens.muted} />
+          </button>
+        </div>
+
+        {isTask ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <FieldLabel label="Tytuł zadania">
+              <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+            </FieldLabel>
+            <FieldLabel label="Termin">
+              <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} style={inputStyle} />
+            </FieldLabel>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: tokens.text }}>
+              <input
+                type="checkbox"
+                checked={done}
+                onChange={(e) => setDone(e.target.checked)}
+                style={{ accentColor: tokens.success, width: 16, height: 16 }}
+              />
+              Oznacz jako wykonane
+            </label>
+          </div>
+        ) : (
+          <FieldLabel label="Treść">
+            <textarea
+              autoFocus
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={5}
+              style={{ ...inputStyle, resize: "vertical" }}
+            />
+          </FieldLabel>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+          <button onClick={onClose} style={ghostButton}>
+            Anuluj
+          </button>
+          <button onClick={submit} disabled={saving} style={primaryButton}>
+            {saving ? "Zapisywanie…" : composer.mode === "edit" ? "Zapisz zmiany" : "Dodaj"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
