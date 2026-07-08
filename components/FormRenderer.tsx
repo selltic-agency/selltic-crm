@@ -16,15 +16,16 @@ import {
   type FormSchema,
   type Step,
   NEXT,
-  SUBMIT,
   googleFontHref,
   isTextInput,
   validateStepValue,
+  resolveNextAction,
 } from "@/lib/forms";
 import {
   COUNTRY_PREFIXES,
   DEFAULT_PHONE_PREFIX,
   splitPhone,
+  formatPhoneValue,
 } from "@/lib/phone";
 import { useIsMobile } from "@/lib/responsive";
 
@@ -120,32 +121,42 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   const submit = useCallback(() => {
     if (!submittedRef.current) {
       submittedRef.current = true;
-      onSubmit?.(answers);
+      const result = onSubmit?.(answers);
+
+      // Przekierowanie po wysłaniu (opcjonalne, ustawiane w kreatorze).
+      // Czekamy aż zgłoszenie zostanie wysłane (best-effort), po czym
+      // przekierowujemy zamiast pokazywać ekran „dziękujemy”.
+      const redirectUrl = (form.settings?.redirectUrl || "").trim();
+      if (redirectUrl && !preview) {
+        Promise.resolve(result)
+          .catch(() => {})
+          .finally(() => {
+            try {
+              // W trybie embed przekieruj stronę nadrzędną, jeśli to możliwe.
+              (window.top ?? window).location.href = redirectUrl;
+            } catch {
+              window.location.href = redirectUrl;
+            }
+          });
+        return;
+      }
     }
     const end = steps.find((s) => s.type === "end");
     if (end) {
       setDir("fwd");
       setCurrentId(end.id);
     }
-  }, [answers, onSubmit, steps]);
+  }, [answers, onSubmit, steps, form.settings, preview]);
 
   const resolveTarget = useCallback(
     (target: string) => {
-      if (target === SUBMIT) return submit();
-      if (!target || target === NEXT) {
-        const next = steps[currentIndex + 1];
-        if (!next) return submit();
-        setHistory((h) => [...h, current.id]);
-        setDir("fwd");
-        setCurrentId(next.id);
-        setError(null);
-        return;
-      }
-      const next = steps.find((s) => s.id === target);
-      if (!next) return submit();
+      // Rozstrzygnięcie routingu jest współdzielone i testowane w lib/forms.ts.
+      // Dotarcie do kroku „end” = wysyłka formularza (naprawa: zgłoszenia znikały).
+      const action = resolveNextAction(steps, currentIndex, target);
+      if (action.kind === "submit") return submit();
       setHistory((h) => [...h, current.id]);
       setDir("fwd");
-      setCurrentId(next.id);
+      setCurrentId(action.id);
       setError(null);
     },
     [steps, currentIndex, current, submit]
@@ -419,7 +430,15 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
                       const local = e.target.value;
                       setAnswer(local.trim() ? `${phonePrefix} ${local}` : "");
                     }}
-                    onBlur={() => validateCurrent(false)}
+                    onBlur={() => {
+                      // Sprowadź numer do spójnego formatu (np. „+48 XXX XXX XXX”),
+                      // o ile jest poprawny — nie przeszkadzając w pisaniu.
+                      const local = splitPhone((answers[current.id] as string) || "", phonePrefix).local;
+                      if (local.trim() && !validateStepValue(current, `${phonePrefix} ${local}`)) {
+                        setAnswer(formatPhoneValue(phonePrefix, local));
+                      }
+                      validateCurrent(false);
+                    }}
                     placeholder={current.placeholder}
                     style={fieldStyle(text, !!error)}
                   />

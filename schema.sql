@@ -13,9 +13,12 @@ create table if not exists forms (
   schema      jsonb not null default '{"steps":[],"theme":{}}',  -- WERSJA ROBOCZA
   published   jsonb,                                              -- WERSJA LIVE (zamrożona)
   status      text not null default 'draft',                      -- draft | published
+  published_at timestamptz,                                       -- kiedy opublikowano (przycisk „Publikuj”)
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+-- Obrazki wgrywane w kreatorze trafiają do bucketa Storage „form-assets”
+-- (publiczny odczyt). Patrz migration_form_assets_bucket.sql.
 
 -- ── ZGŁOSZENIA (surowe) ─────────────────────────────────────────────────
 create table if not exists submissions (
@@ -59,7 +62,9 @@ create table if not exists deals (
   city                 text,
   website_status       text check (website_status is null or website_status in ('none', 'active', 'broken', 'slow')),
   lead_score           int check (lead_score is null or (lead_score >= 0 and lead_score <= 100)),
-  lead_score_breakdown jsonb
+  lead_score_breakdown jsonb,
+  -- Denormalizowany numer (same cyfry) do wyszukiwania odpornego na format.
+  phone_digits         text generated always as (regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g')) stored
 );
 
 -- ── PROSPEKTY (CRM) — zimne leady z Google Maps, zanim wykażą zainteresowanie ──
@@ -91,6 +96,8 @@ create table if not exists prospects (
   converted_deal_id        uuid references deals on delete set null,
   archived_at              timestamptz,                    -- miękkie usunięcie: !null = w Archiwum
   props                    jsonb not null default '{}',    -- google_maps_url, priority_label, score_reasons...
+  -- Denormalizowany numer (same cyfry) do wyszukiwania odpornego na format.
+  phone_digits             text generated always as (regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g')) stored,
   unique (place_id)
 );
 
@@ -208,8 +215,12 @@ create table if not exists app_settings (
 );
 
 -- ── INDEKSY ─────────────────────────────────────────────────────────────
+-- Trigramy do szybkiego wyszukiwania po numerze (LIKE %digits%).
+create extension if not exists pg_trgm;
 create index if not exists idx_deals_owner_stage    on deals (owner, stage);
 create index if not exists idx_deals_email          on deals (owner, email);
+create index if not exists idx_deals_phone_digits_trgm     on deals using gin (phone_digits gin_trgm_ops);
+create index if not exists idx_prospects_phone_digits_trgm on prospects using gin (phone_digits gin_trgm_ops);
 create unique index if not exists idx_prospects_place_id        on prospects (place_id);
 create index if not exists idx_prospects_status     on prospects (prospecting_status);
 create index if not exists idx_prospects_industry   on prospects (industry);

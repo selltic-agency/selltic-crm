@@ -71,6 +71,52 @@ export function isValidPhoneLocal(local: string): boolean {
   return PHONE_LOCAL_RE.test(digits);
 }
 
+// Zostawia same cyfry (usuwa spacje, myślniki, nawiasy, plus). Używane przez
+// walidację telefonu oraz wyszukiwarkę (porównywanie numerów niezależnie od
+// formatowania).
+export function digitsOnly(value: string): string {
+  return (value ?? "").replace(/\D/g, "");
+}
+
+// Dozwolone dwucyfrowe prefiksy polskich numerów komórkowych (część po +48).
+// Wzorce operatorów: 45x, 50x, 51x, 53x, 57x, 60x, 66x, 69x, 72x, 73x, 78x, 79x, 88x.
+export const PL_MOBILE_PREFIXES = [
+  "45", "50", "51", "53", "57", "60", "66", "69", "72", "73", "78", "79", "88",
+];
+
+// Waliduje część lokalną numeru (bez prefiksu kraju) w kontekście danego
+// prefiksu. Dla Polski (+48): dokładnie 9 cyfr + poprawny prefiks operatora.
+// Dla pozostałych krajów: łagodna walidacja 6–12 cyfr (bez zmiany zachowania).
+// Zwraca komunikat błędu (PL) lub null gdy numer jest poprawny.
+export function phoneLocalError(prefix: string, local: string): string | null {
+  const digits = digitsOnly(local);
+  if (prefix === "+48") {
+    if (digits.length !== 9) {
+      return "Nieprawidłowy numer telefonu — sprawdź liczbę cyfr (wymagane 9 po +48).";
+    }
+    if (!PL_MOBILE_PREFIXES.includes(digits.slice(0, 2))) {
+      return "Nieprawidłowy numer telefonu — sprawdź prefiks operatora.";
+    }
+    return null;
+  }
+  // Inne kraje — dotychczasowa, łagodniejsza reguła.
+  if (digits.length < 6 || digits.length > 12) {
+    return "Podaj poprawny numer telefonu.";
+  }
+  return null;
+}
+
+// Sprowadza numer do jednego, spójnego formatu do zapisu/wyświetlenia.
+// PL: "+48 XXX XXX XXX". Inne kraje: "<prefiks> <cyfry>".
+export function formatPhoneValue(prefix: string, local: string): string {
+  const digits = digitsOnly(local);
+  if (!digits) return "";
+  if (prefix === "+48" && digits.length === 9) {
+    return `+48 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+  }
+  return `${prefix} ${digits}`;
+}
+
 // Rozdziela zapisaną wartość ("+48 123 456 789") na prefiks i część lokalną.
 // Dopasowuje najdłuższy znany prefiks; w razie braku używa `fallback`.
 export function splitPhone(

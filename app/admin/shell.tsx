@@ -58,6 +58,9 @@ export default function Shell({
   // Faza 9.3/10: klik w deal (wyszukiwarka, dzwonek) prowadzi na stronę
   // deala zamiast otwierać dawny wszystko-w-jednym panel.
   const openContact = (id: string) => router.push(`/admin/leads/${id}`);
+  // Klik w prospekt z globalnej wyszukiwarki — otwórz szufladę na liście
+  // prospektów (obsługa parametru ?prospect= w /admin/prospecting).
+  const openProspect = (id: string) => router.push(`/admin/prospecting?prospect=${id}`);
 
   // Load sidebar state from localStorage
   useEffect(() => {
@@ -301,11 +304,11 @@ export default function Shell({
               >
                 S
               </span>
-              <GlobalSearch onOpenContact={openContact} fullWidth />
+              <GlobalSearch onOpenContact={openContact} onOpenProspect={openProspect} fullWidth />
             </>
           ) : (
             <>
-              <GlobalSearch onOpenContact={openContact} />
+              <GlobalSearch onOpenContact={openContact} onOpenProspect={openProspect} />
               <div style={{ flex: 1 }} />
             </>
           )}

@@ -112,6 +112,9 @@ export default function ProspectingPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [callingMode, setCallingMode] = useState(false);
+  // Prospekt otwarty z globalnej wyszukiwarki (?prospect=), pobrany osobno na
+  // wypadek, gdyby nie mieścił się w bieżącym filtrze/zakładce.
+  const [focusProspect, setFocusProspect] = useState<Prospect | null>(null);
 
   const showingArchive = statusFilter === "archived";
 
@@ -285,8 +288,26 @@ export default function ProspectingPage() {
     window.history.replaceState(null, "", "/admin/prospecting");
   }, [searchParams, loading, callableQueue.length]);
 
+  // Otwórz szufladę prospektu wskazanego w URL (?prospect=<id>) z globalnej
+  // wyszukiwarki. Pobieramy rekord osobno, bo mógł zostać odfiltrowany.
+  const focusedOnce = useRef(false);
+  useEffect(() => {
+    if (focusedOnce.current) return;
+    const pid = searchParams.get("prospect");
+    if (!pid) return;
+    focusedOnce.current = true;
+    setSelectedId(pid);
+    (async () => {
+      const { data } = await supabase.from("prospects").select("*").eq("id", pid).maybeSingle();
+      if (data) setFocusProspect(data as Prospect);
+    })();
+    window.history.replaceState(null, "", "/admin/prospecting");
+  }, [searchParams, supabase]);
+
   const selected = selectedId
-    ? prospects.find((p) => p.id === selectedId) ?? archivedProspects.find((p) => p.id === selectedId) ?? null
+    ? prospects.find((p) => p.id === selectedId) ??
+      archivedProspects.find((p) => p.id === selectedId) ??
+      (focusProspect?.id === selectedId ? focusProspect : null)
     : null;
 
   async function setStatus(p: Prospect, status: WritableDisplayStatus): Promise<boolean> {
