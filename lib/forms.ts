@@ -1,5 +1,6 @@
 // lib/forms.ts — typy schematu formularza, stałe routingu i helpery kreatora.
-import { DEFAULT_PHONE_PREFIX } from "@/lib/phone";
+import { DEFAULT_PHONE_PREFIX, phoneLocalError, splitPhone } from "@/lib/phone";
+import { NEXT, SUBMIT, resolveNextAction, type NextAction } from "./formsRouting";
 
 export type StepType =
   | "welcome"
@@ -13,8 +14,10 @@ export type StepType =
   | "end";
 
 // Cele routingu: __next__ (liniowo), __submit__ (wyślij) lub id kroku.
-export const NEXT = "__next__";
-export const SUBMIT = "__submit__";
+// Zdefiniowane w leaf-module lib/formsRouting.ts (bez zależności — testowalne
+// bezpośrednio przez node). Re-eksport zachowuje istniejące importy z @/lib/forms.
+export { NEXT, SUBMIT, resolveNextAction };
+export type { NextAction };
 
 export type StepOption = {
   id: string;
@@ -58,10 +61,27 @@ export type FormTheme = {
   layout: FormLayout;
 };
 
+// Treść automatycznego maila „dziękujemy” (Faza: e-mail po zgłoszeniu).
+// Edytowalna w kreatorze. Placeholdery: {{extra_link}}, {{name}}.
+export type ThankYouEmail = {
+  enabled: boolean;
+  subject: string;
+  html: string;
+};
+
+// Ustawienia formularza (poza motywem i krokami) — przekierowanie po wysłaniu
+// oraz automatyczny mail z podziękowaniem.
+export type FormSettings = {
+  redirectUrl?: string; // pusty = domyślny ekran „dziękujemy”
+  extraLink?: string; // np. link do konsultacji / VSL, wstawiany przez {{extra_link}}
+  thankYouEmail?: ThankYouEmail;
+};
+
 export type FormSchema = {
   title: string;
   theme: FormTheme;
   steps: Step[];
+  settings?: FormSettings;
 };
 
 export type FormStatus = "draft" | "published";
@@ -176,12 +196,12 @@ export function validateStepValue(step: Step, raw: string): string | null {
     return step.validation?.customMessage || "Podaj poprawny adres e-mail.";
   }
 
-  // Wbudowana walidacja telefonu: 8–15 cyfr (z prefiksem kraju).
+  // Walidacja telefonu. Dla Polski (+48) egzekwuje 9 cyfr i poprawny prefiks
+  // operatora; dla innych krajów pozostaje łagodna reguła (patrz lib/phone.ts).
   if (step.type === "phone") {
-    const digits = value.replace(/\D/g, "");
-    if (digits.length < 8 || digits.length > 15) {
-      return step.validation?.customMessage || "Podaj poprawny numer telefonu.";
-    }
+    const { prefix, local } = splitPhone(value, step.phonePrefix || DEFAULT_PHONE_PREFIX);
+    const msg = phoneLocalError(prefix, local);
+    if (msg) return step.validation?.customMessage || msg;
     return null;
   }
 
@@ -310,4 +330,37 @@ export function randomSlug(): string {
 
 export function newStepId(): string {
   return uid();
+}
+
+// ── Automatyczny mail „dziękujemy” ────────────────────────────────────────
+// Domyślny szablon (dopóki użytkownik go nie zmieni). Zawiera podziękowanie,
+// link do strony Selltic oraz placeholder {{extra_link}} na dodatkowy link
+// (konsultacja / VSL), konfigurowalny w ustawieniach formularza.
+export const DEFAULT_THANK_YOU_SUBJECT = "Dziękujemy za wypełnienie formularza 🙌";
+
+export const DEFAULT_THANK_YOU_HTML = `<p>Cześć {{name}},</p>
+<p>dziękujemy za wypełnienie formularza! Wkrótce się z Tobą skontaktujemy.</p>
+<p>W międzyczasie zajrzyj na naszą stronę: <a href="https://selltic-agency.pl">selltic-agency.pl</a>.</p>
+<p>👉 <a href="{{extra_link}}">Umów bezpłatną konsultację</a></p>
+<p>Pozdrawiamy,<br/>Zespół Selltic</p>`;
+
+export function defaultThankYouEmail(): ThankYouEmail {
+  return {
+    enabled: true,
+    subject: DEFAULT_THANK_YOU_SUBJECT,
+    html: DEFAULT_THANK_YOU_HTML,
+  };
+}
+
+// Podstawia placeholdery w treści maila. {{extra_link}} → skonfigurowany URL
+// (fallback: strona Selltic), {{name}} → imię/nazwa leada.
+export function renderThankYouHtml(
+  html: string,
+  vars: { extraLink?: string; name?: string }
+): string {
+  const extra = (vars.extraLink || "").trim() || "https://selltic-agency.pl";
+  const name = (vars.name || "").trim() || "";
+  return (html || "")
+    .replace(/\{\{\s*extra_link\s*\}\}/g, extra)
+    .replace(/\{\{\s*name\s*\}\}/g, name);
 }

@@ -4,8 +4,32 @@
 // Działa na service_role (omija RLS), więc trzyma się WYŁĄCZNIE serwera.
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
+import { DEFAULT_PHONE_PREFIX, phoneLocalError, splitPhone } from "@/lib/phone";
+import {
+  renderThankYouHtml,
+  DEFAULT_THANK_YOU_SUBJECT,
+  DEFAULT_THANK_YOU_HTML,
+  type FormSettings,
+} from "@/lib/forms";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Walidacja telefonu po stronie serwera (nie do obejścia bezpośrednim POST-em).
+// Zwraca komunikat błędu lub null. Sprawdza wszystkie kroki typu „phone”.
+function validatePhones(answers: Record<string, any>, steps: any[]): string | null {
+  for (const step of steps ?? []) {
+    if (step?.type !== "phone") continue;
+    const raw = answers[step.id];
+    if (raw == null || raw === "") {
+      if (step.required) return "Numer telefonu jest wymagany.";
+      continue;
+    }
+    const { prefix, local } = splitPhone(String(raw), step.phonePrefix || DEFAULT_PHONE_PREFIX);
+    const msg = phoneLocalError(prefix, local);
+    if (msg) return msg;
+  }
+  return null;
+}
 
 // ── Prosty limiter w pamięci: max 10 zgłoszeń / IP / minutę. ───────────────
 // Uwaga: w środowisku serverless pamięć jest per-instancja — to ochrona przed
@@ -73,6 +97,11 @@ export async function POST(req: Request) {
     if (form.status !== "published") return NextResponse.json({ error: "Formularz nieopublikowany" }, { status: 403 });
 
     const steps = form.published?.steps ?? [];
+
+    // Walidacja telefonu po stronie serwera (item 5) — spójna z frontendem.
+    const phoneError = validatePhones(answers, steps);
+    if (phoneError) return NextResponse.json({ error: phoneError }, { status: 400 });
+
     const { email, name, phone } = extract(answers, steps);
 
     // 2. zapis surowego zgłoszenia (id potrzebne, by potem dopisać
@@ -156,11 +185,18 @@ export async function POST(req: Request) {
       body: `${leadKind}: ${name}`,
     });
 
-    // 8. powiadomienie mailowe (jeśli włączone w ustawieniach)
+    // 8. powiadomienie mailowe DO WŁAŚCICIELA (jeśli włączone w ustawieniach)
     const { data: settings } = await db.from("app_settings")
       .select("email_new_lead, notify_email").eq("owner", form.owner).maybeSingle();
     if (settings?.email_new_lead && settings.notify_email) {
       await notifyNewLead(settings.notify_email, { name, email, phone, returning: dealExisted });
+    }
+
+    // 9. automatyczny mail „dziękujemy” DO ZGŁASZAJĄCEGO (item 8).
+    //    Wysyłka jest odporna na błędy — nigdy nie blokuje zapisu zgłoszenia.
+    const formSettings = (form.published?.settings ?? {}) as FormSettings;
+    if (email) {
+      await sendThankYouEmail(email, name, formSettings);
     }
 
     return NextResponse.json({ ok: true });
@@ -195,5 +231,34 @@ async function notifyNewLead(
     });
   } catch (e) {
     console.error("[notifyNewLead]", e);
+  }
+}
+
+// Automatyczny mail z podziękowaniem do osoby, która wypełniła formularz.
+// Treść pochodzi z ustawień formularza (edytowalna w kreatorze) lub z domyślnego
+// szablonu. Błędy są logowane i połykane — zapis zgłoszenia jest już zakończony.
+async function sendThankYouEmail(to: string, name: string, settings: FormSettings) {
+  try {
+    if (!process.env.RESEND_API_KEY) return;
+    const cfg = settings.thankYouEmail;
+    // Domyślnie włączone — wyłączamy tylko gdy jawnie ustawiono enabled=false.
+    if (cfg && cfg.enabled === false) return;
+
+    const subject = (cfg?.subject || DEFAULT_THANK_YOU_SUBJECT).trim() || DEFAULT_THANK_YOU_SUBJECT;
+    const rawHtml = cfg?.html || DEFAULT_THANK_YOU_HTML;
+    const html = renderThankYouHtml(rawHtml, { extraLink: settings.extraLink, name });
+
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>",
+        to,
+        subject,
+        html,
+      }),
+    });
+  } catch (e) {
+    console.error("[sendThankYouEmail]", e);
   }
 }
