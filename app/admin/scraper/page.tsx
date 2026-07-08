@@ -349,7 +349,7 @@ export default function ScraperPage() {
       {tab === "leads" ? (
         <LeadsTab leads={newLeads} onMoved={loadLeads} />
       ) : tab === "duplicates" ? (
-        <DuplicatesTab leads={duplicateLeads} supabase={supabase} />
+        <DuplicatesTab leads={duplicateLeads} supabase={supabase} onChanged={loadLeads} />
       ) : (
         <ArchiveTab leads={archivedLeads} supabase={supabase} onChanged={loadLeads} />
       )}
@@ -604,9 +604,18 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
       }
       toast.success(
         `Przeniesiono ${data.moved} do Prospectingu` +
+          (data.restored > 0 ? ` (w tym ${data.restored} przywrócono z Archiwum Prospectingu)` : "") +
           (data.duplicates > 0 ? `, ${data.duplicates} oznaczono jako duplikaty` : "") +
           "."
       );
+      // Błędy pojedynczych wierszy nie mogą przepadać po cichu — bez tego
+      // "Przeniesiono 0" wygląda jak sukces, a leady zostają w miejscu.
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        toast.error(
+          `Nie udało się przenieść ${data.errors.length} ${data.errors.length === 1 ? "leada" : "leadów"}: ` +
+            data.errors[0].error
+        );
+      }
       setSelected(new Set());
       onMoved();
     } catch {
@@ -846,8 +855,37 @@ function ArchiveTab({
   );
 }
 
-function DuplicatesTab({ leads, supabase }: { leads: ScrapedLead[]; supabase: ReturnType<typeof createClient> }) {
+function DuplicatesTab({
+  leads,
+  supabase,
+  onChanged,
+}: {
+  leads: ScrapedLead[];
+  supabase: ReturnType<typeof createClient>;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
   const [prospectsById, setProspectsById] = useState<Record<string, Prospect>>({});
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  // Cofnięcie flagi duplikatu: lead wraca do listy „Leady”, skąd można znów
+  // spróbować przenieść go do Prospectingu (np. po zarchiwizowaniu/usunięciu
+  // istniejącego prospekta).
+  async function restore(id: string) {
+    setRestoringId(id);
+    const { error } = await supabase
+      .from("scraped_leads")
+      .update({ status: "new" })
+      .eq("id", id)
+      .eq("status", "duplicate");
+    setRestoringId(null);
+    if (error) {
+      toast.error("Nie udało się przywrócić leada.");
+      return;
+    }
+    toast.success("Lead wrócił do listy „Leady”.");
+    onChanged();
+  }
 
   useEffect(() => {
     const placeIds = [...new Set(leads.map((l) => l.place_id))];
@@ -875,17 +913,31 @@ function DuplicatesTab({ leads, supabase }: { leads: ScrapedLead[]; supabase: Re
     <div style={{ display: "grid", gap: 12 }}>
       <p style={{ fontSize: 13, color: tokens.muted, margin: 0 }}>
         Te firmy już istnieją w Prospectingu (ten sam place_id) — nie zostały nadpisane
-        automatycznie. Porównaj dane i zaktualizuj prospekt ręcznie, jeśli chcesz.
+        automatycznie. Porównaj dane i zaktualizuj prospekt ręcznie, jeśli chcesz. Jeśli
+        istniejący prospekt jest w Archiwum, kliknij „Wróć do Leadów” i przenieś ponownie —
+        prospekt zostanie przywrócony i odświeżony nowymi danymi.
       </p>
       {leads.map((l) => {
         const p = prospectsById[l.place_id];
         return (
           <section key={l.id} style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{l.business_name}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, flex: 1, minWidth: 0 }}>{l.business_name}</div>
+              <button
+                onClick={() => restore(l.id)}
+                disabled={restoringId !== null}
+                title="Cofnij flagę duplikatu — lead wróci do listy „Leady”"
+                style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", flexShrink: 0, opacity: restoringId === l.id ? 0.5 : 1 }}
+              >
+                {restoringId === l.id ? <Loader2 size={14} className="selltic-spin" /> : <RotateCcw size={14} />}
+                Wróć do Leadów
+              </button>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, marginBottom: 6, textTransform: "uppercase" }}>
                   Istniejący prospekt
+                  {p?.archived_at ? <span style={{ color: tokens.danger }}> · w Archiwum</span> : null}
                 </div>
                 {p ? (
                   <CompareFields
