@@ -1,20 +1,32 @@
-// components/GlobalSearch.tsx — wyszukiwarka deali w topbarze.
-// Szuka po nazwie / e-mailu / firmie; wynik otwiera stronę deala.
+// components/GlobalSearch.tsx — globalna wyszukiwarka w topbarze.
+// Szuka JEDNOCZEŚNIE po dealach i prospektach (po nazwie / e-mailu / firmie /
+// mieście) oraz po numerze telefonu odpornym na formatowanie (porównanie na
+// cyfrach: „500 123 456”, „500123456”, „+48500123456”, „48 500 123 456” dają
+// ten sam wynik). Wynik jest wyraźnie oznaczony jako Deal lub Prospekt.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
-import { type Deal } from "@/lib/types";
+import { digitsOnly } from "@/lib/phone";
 
-type Hit = Pick<Deal, "id" | "name" | "email" | "company">;
+type Kind = "deal" | "prospect";
+
+type Hit = {
+  kind: Kind;
+  id: string;
+  title: string;
+  subtitle: string;
+};
 
 export default function GlobalSearch({
   onOpenContact,
+  onOpenProspect,
   fullWidth,
 }: {
   onOpenContact: (contactId: string) => void;
+  onOpenProspect?: (prospectId: string) => void;
   fullWidth?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
@@ -34,14 +46,54 @@ export default function GlobalSearch({
     }
     setLoading(true);
     const t = setTimeout(async () => {
-      const esc = term.replace(/[%,]/g, " ");
-      const { data } = await supabase
-        .from("deals")
-        .select("id, name, email, company")
-        .or(`name.ilike.%${esc}%,email.ilike.%${esc}%,company.ilike.%${esc}%`)
-        .order("updated_at", { ascending: false })
-        .limit(8);
-      setHits((data as Hit[]) ?? []);
+      // Escape znaków specjalnych PostgREST-owego `or`.
+      const esc = term.replace(/[%,()]/g, " ").trim();
+      const digits = digitsOnly(term);
+      const hasDigits = digits.length >= 3;
+
+      // Warunki tekstowe + (opcjonalnie) telefon po cyfrach (kolumna generowana).
+      const dealOr = [
+        `name.ilike.%${esc}%`,
+        `email.ilike.%${esc}%`,
+        `company.ilike.%${esc}%`,
+        ...(hasDigits ? [`phone_digits.ilike.%${digits}%`] : []),
+      ].join(",");
+      const prospectOr = [
+        `name.ilike.%${esc}%`,
+        `city.ilike.%${esc}%`,
+        ...(hasDigits ? [`phone_digits.ilike.%${digits}%`] : []),
+      ].join(",");
+
+      const [dealsRes, prospectsRes] = await Promise.all([
+        supabase
+          .from("deals")
+          .select("id, name, email, company, phone")
+          .or(dealOr)
+          .order("updated_at", { ascending: false })
+          .limit(6),
+        supabase
+          .from("prospects")
+          .select("id, name, phone, city")
+          .is("archived_at", null)
+          .or(prospectOr)
+          .order("created_at", { ascending: false })
+          .limit(6),
+      ]);
+
+      const dealHits: Hit[] = (dealsRes.data ?? []).map((d: any) => ({
+        kind: "deal",
+        id: d.id,
+        title: d.name || "Bez nazwy",
+        subtitle: d.email || d.company || d.phone || "—",
+      }));
+      const prospectHits: Hit[] = (prospectsRes.data ?? []).map((p: any) => ({
+        kind: "prospect",
+        id: p.id,
+        title: p.name || "Bez nazwy",
+        subtitle: [p.city, p.phone].filter(Boolean).join(" · ") || "—",
+      }));
+
+      setHits([...dealHits, ...prospectHits]);
       setLoading(false);
     }, 250);
     return () => clearTimeout(t);
@@ -56,8 +108,9 @@ export default function GlobalSearch({
     return () => window.removeEventListener("mousedown", onDown);
   }, []);
 
-  function pick(id: string) {
-    onOpenContact(id);
+  function pick(hit: Hit) {
+    if (hit.kind === "deal") onOpenContact(hit.id);
+    else onOpenProspect?.(hit.id);
     setOpen(false);
     setQ("");
     setHits([]);
@@ -83,7 +136,7 @@ export default function GlobalSearch({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="Szukaj deali…"
+          placeholder="Szukaj deali i prospektów…"
           style={{
             border: "none",
             outline: "none",
@@ -131,8 +184,8 @@ export default function GlobalSearch({
           ) : (
             hits.map((h) => (
               <button
-                key={h.id}
-                onClick={() => pick(h.id)}
+                key={`${h.kind}-${h.id}`}
+                onClick={() => pick(h)}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -146,10 +199,11 @@ export default function GlobalSearch({
                   cursor: "pointer",
                 }}
               >
+                <KindBadge kind={h.kind} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{h.name || "Bez nazwy"}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{h.title}</div>
                   <div style={{ fontSize: 12, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {h.email || h.company || "—"}
+                    {h.subtitle}
                   </div>
                 </div>
               </button>
@@ -158,5 +212,26 @@ export default function GlobalSearch({
         </div>
       )}
     </div>
+  );
+}
+
+function KindBadge({ kind }: { kind: Kind }) {
+  const isDeal = kind === "deal";
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        fontSize: 10.5,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: 0.3,
+        padding: "3px 7px",
+        borderRadius: 6,
+        background: isDeal ? tokens.accentSoft : "rgba(26,115,231,0.10)",
+        color: isDeal ? tokens.accent : "#1A73E7",
+      }}
+    >
+      {isDeal ? "Deal" : "Prospekt"}
+    </span>
   );
 }
