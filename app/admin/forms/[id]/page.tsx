@@ -20,6 +20,13 @@ import {
   ListChecks,
   MessageSquare,
   Flag,
+  Upload,
+  Link2,
+  ImageIcon,
+  X,
+  Bold,
+  Italic,
+  Mail,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
@@ -30,6 +37,8 @@ import {
   type StepType,
   type FormStatus,
   type FieldValidation,
+  type FormSettings,
+  type ThankYouEmail,
   NEXT,
   SUBMIT,
   STEP_TYPES,
@@ -42,10 +51,18 @@ import {
   stepTypeLabel,
   detectPreset,
   hasValidationRules,
+  defaultThankYouEmail,
+  randomSlug,
 } from "@/lib/forms";
 import { COUNTRY_PREFIXES, DEFAULT_PHONE_PREFIX } from "@/lib/phone";
 import FormRenderer from "@/components/FormRenderer";
+import ShareModal from "../share-modal";
 import { useToast } from "@/components/Toast";
+
+// ── Upload obrazków (bucket Supabase Storage) ────────────────────────────
+const IMAGE_BUCKET = "form-assets";
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 const TYPE_ICON: Record<StepType, typeof Type> = {
   welcome: Hand,
@@ -75,11 +92,13 @@ export default function FormEditorPage() {
   const [schema, setSchema] = useState<FormSchema | null>(null);
   const [published, setPublished] = useState<FormSchema | null>(null);
   const [status, setStatus] = useState<FormStatus>("draft");
+  const [slug, setSlug] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [addOpen, setAddOpen] = useState(false);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const loadedRef = useRef(false);
 
@@ -88,7 +107,7 @@ export default function FormEditorPage() {
     (async () => {
       const { data } = await supabase
         .from("forms")
-        .select("schema, published, status")
+        .select("schema, published, status, slug")
         .eq("id", id)
         .single();
       if (data) {
@@ -96,6 +115,7 @@ export default function FormEditorPage() {
         setSchema(s);
         setPublished((data.published as FormSchema) ?? null);
         setStatus((data.status as FormStatus) ?? "draft");
+        setSlug((data.slug as string | null) ?? null);
         setActiveId(s.steps[0]?.id ?? "");
       }
       setLoading(false);
@@ -175,19 +195,62 @@ export default function FormEditorPage() {
     });
   }
 
-  async function publish() {
+  // Ręczny zapis wersji roboczej (przycisk „Zapisz zmiany”). Autozapis i tak
+  // działa w tle — ten przycisk daje pewność i natychmiastowy feedback.
+  async function saveChanges() {
     if (!schema) return;
-    const wasPublished = status === "published";
+    setSaveState("saving");
     const { error } = await supabase
       .from("forms")
-      .update({ published: schema, status: "published" })
+      .update({ schema, title: schema.title })
       .eq("id", id);
     if (error) {
+      toast.error("Nie udało się zapisać zmian.");
+      setSaveState("idle");
+      return;
+    }
+    setSaveState("saved");
+    toast.success("Zapisano zmiany.");
+  }
+
+  async function publish() {
+    if (!schema || publishing) return;
+    setPublishing(true);
+    const wasPublished = status === "published";
+
+    // Wygeneruj slug, jeśli formularz jeszcze go nie ma (nowa publikacja).
+    let effectiveSlug = slug;
+    if (!effectiveSlug) {
+      effectiveSlug = randomSlug();
+    }
+
+    const { error } = await supabase
+      .from("forms")
+      .update({
+        schema, // upewnij się, że robocza wersja też jest zapisana
+        title: schema.title,
+        published: schema,
+        status: "published",
+        slug: effectiveSlug,
+      })
+      .eq("id", id);
+    if (error) {
+      setPublishing(false);
       toast.error("Nie udało się opublikować formularza.");
       return;
     }
+    // Znacznik czasu publikacji — best-effort (nie blokuje publikacji, gdyby
+    // migracja published_at nie była jeszcze zastosowana).
+    await supabase
+      .from("forms")
+      .update({ published_at: new Date().toISOString() })
+      .eq("id", id)
+      .then(undefined, () => {});
+    setPublishing(false);
     setPublished(JSON.parse(JSON.stringify(schema)));
     setStatus("published");
+    setSlug(effectiveSlug);
+    setShareOpen(true);
     toast.success(wasPublished ? "Formularz zaktualizowany." : "Formularz opublikowany.");
   }
 
@@ -250,8 +313,16 @@ export default function FormEditorPage() {
           {saveState === "saving" ? "Zapisywanie…" : saveState === "saved" ? "Zapisano ✓" : ""}
         </span>
         <div style={{ flex: 1 }} />
-        <button onClick={publish} style={primaryButton}>
-          {status === "published" ? "Aktualizuj" : "Publikuj"}
+        <button onClick={saveChanges} style={ghostButton}>
+          Zapisz zmiany
+        </button>
+        {status === "published" && slug && (
+          <button onClick={() => setShareOpen(true)} style={ghostButton}>
+            Udostępnij
+          </button>
+        )}
+        <button onClick={publish} disabled={publishing} style={primaryButton}>
+          {publishing ? "Publikowanie…" : status === "published" ? "Opublikuj zmiany" : "Publikuj"}
         </button>
       </div>
 
@@ -363,30 +434,34 @@ export default function FormEditorPage() {
             </div>
           )}
 
+          {/* Lista kroków — responsywna: tekst zawija się (bez ucinania), a
+              przyciski (przenieś w górę/dół, usuń) są ZAWSZE widoczne i klikalne
+              niezależnie od długości treści i szerokości ekranu. */}
           <div style={{ display: "grid", gap: 6 }}>
             {schema.steps.map((st, i) => {
               const Icon = TYPE_ICON[st.type];
               const on = st.id === active.id;
-              const hovered = hoveredId === st.id;
+              const isLast = i === schema.steps.length - 1;
               return (
                 <div
                   key={st.id}
                   onClick={() => setActiveId(st.id)}
-                  onMouseEnter={() => setHoveredId(st.id)}
-                  onMouseLeave={() => setHoveredId(null)}
                   style={{
                     display: "flex",
-                    alignItems: "center",
+                    alignItems: "flex-start",
                     gap: 8,
                     padding: "9px 10px",
                     borderRadius: 10,
                     cursor: "pointer",
                     border: `1px solid ${on ? tokens.accent : tokens.border}`,
                     background: on ? tokens.accentSoft : "#fff",
-                    position: "relative",
                   }}
                 >
-                  <Icon size={15} color={on ? tokens.accent : tokens.muted} style={{ flexShrink: 0 }} />
+                  <Icon
+                    size={15}
+                    color={on ? tokens.accent : tokens.muted}
+                    style={{ flexShrink: 0, marginTop: 3 }}
+                  />
                   <span
                     style={{
                       flex: 1,
@@ -394,11 +469,10 @@ export default function FormEditorPage() {
                       fontSize: 13,
                       fontWeight: 600,
                       color: on ? tokens.accent : tokens.text,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      marginRight: (on || hovered) && !isMobile ? 70 : 0,
-                      transition: "margin-right 0.2s ease",
+                      whiteSpace: "normal",
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                      lineHeight: 1.35,
                     }}
                   >
                     {st.question || stepTypeLabel(st.type)}
@@ -407,19 +481,14 @@ export default function FormEditorPage() {
                     style={{
                       display: "flex",
                       gap: 2,
-                      position: "absolute",
-                      right: 8,
-                      opacity: on || hovered || isMobile ? 1 : 0,
-                      pointerEvents: on || hovered || isMobile ? "auto" : "none",
-                      transition: "opacity 0.2s ease",
-                      background: on ? tokens.accentSoft : "#fff",
-                      paddingLeft: 4,
+                      flexShrink: 0,
+                      alignItems: "center",
                     }}
                   >
                     <button onClick={(e) => { e.stopPropagation(); moveStep(st.id, -1); }} disabled={i === 0} style={miniBtn} aria-label="W górę">
                       <ChevronUp size={13} />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); moveStep(st.id, 1); }} disabled={i === schema.steps.length - 1} style={miniBtn} aria-label="W dół">
+                    <button onClick={(e) => { e.stopPropagation(); moveStep(st.id, 1); }} disabled={isLast} style={miniBtn} aria-label="W dół">
                       <ChevronDown size={13} />
                     </button>
                     <button onClick={(e) => { e.stopPropagation(); deleteStep(st.id); }} style={miniBtn} aria-label="Usuń">
@@ -446,9 +515,12 @@ export default function FormEditorPage() {
             step={active}
             steps={schema.steps}
             onPatch={(patch) => patchStep(active.id, patch)}
+            formId={id}
           />
           <hr style={{ border: "none", borderTop: `1px solid ${tokens.border}`, margin: "22px 0" }} />
           <ThemePanel schema={schema} onPatch={patchSchema} />
+          <hr style={{ border: "none", borderTop: `1px solid ${tokens.border}`, margin: "22px 0" }} />
+          <SettingsPanel schema={schema} onPatch={patchSchema} />
         </div>
 
         {/* Prawy: podgląd */}
@@ -470,6 +542,10 @@ export default function FormEditorPage() {
           </div>
         </div>
       </div>
+
+      {shareOpen && slug && (
+        <ShareModal slug={slug} title={schema.title} onClose={() => setShareOpen(false)} />
+      )}
     </div>
   );
 }
@@ -479,10 +555,12 @@ function StepEditor({
   step,
   steps,
   onPatch,
+  formId,
 }: {
   step: Step;
   steps: Step[];
   onPatch: (patch: Partial<Step>) => void;
+  formId: string;
 }) {
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -514,14 +592,11 @@ function StepEditor({
       )}
 
       {step.type !== "end" && (
-        <Field label="URL obrazka (opcjonalnie)">
-          <input
-            value={step.image ?? ""}
-            onChange={(e) => onPatch({ image: e.target.value })}
-            placeholder="https://…"
-            style={inputStyle}
-          />
-        </Field>
+        <ImageField
+          value={step.image ?? ""}
+          onChange={(url) => onPatch({ image: url })}
+          formId={formId}
+        />
       )}
 
       {isTextInput(step.type) && (
@@ -599,6 +674,156 @@ function StepEditor({
   );
 }
 
+/* ── Pole obrazka: URL LUB upload do Supabase Storage + podgląd ─────────── */
+function ImageField({
+  value,
+  onChange,
+  formId,
+}: {
+  value: string;
+  onChange: (url: string) => void;
+  formId: string;
+}) {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [broken, setBroken] = useState(false);
+
+  async function handleFile(file: File) {
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      toast.error("Dozwolone formaty: JPEG, PNG, WEBP lub GIF.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast.error("Plik jest za duży — maksymalny rozmiar to 5 MB.");
+      return;
+    }
+    setUploading(true);
+    const ext = (file.name.split(".").pop() || "png").toLowerCase();
+    const path = `${formId}/${newStepId()}.${ext}`;
+    const { error } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type });
+    setUploading(false);
+    if (error) {
+      toast.error("Nie udało się wgrać pliku. " + (error.message || ""));
+      return;
+    }
+    const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+    setBroken(false);
+    onChange(data.publicUrl);
+    toast.success("Obraz wgrany.");
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <span style={{ fontSize: 13, fontWeight: 600 }}>Obraz (opcjonalnie)</span>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flex: 1,
+            minWidth: 0,
+            border: `1px solid ${tokens.border}`,
+            borderRadius: 10,
+            padding: "0 10px",
+            background: "#fff",
+          }}
+        >
+          <Link2 size={14} color={tokens.muted} style={{ flexShrink: 0 }} />
+          <input
+            value={value}
+            onChange={(e) => {
+              setBroken(false);
+              onChange(e.target.value);
+            }}
+            placeholder="Wklej URL lub wgraj plik…"
+            style={{
+              border: "none",
+              outline: "none",
+              fontSize: 14,
+              width: "100%",
+              padding: "10px 0",
+              color: tokens.text,
+              background: "transparent",
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0 }}
+        >
+          <Upload size={14} /> {uploading ? "Wgrywanie…" : "Wgraj"}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ALLOWED_IMAGE_TYPES.join(",")}
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+            e.target.value = "";
+          }}
+        />
+      </div>
+
+      {value && !broken ? (
+        <div style={{ position: "relative", width: "fit-content" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={value}
+            alt="Podgląd obrazka"
+            onError={() => setBroken(true)}
+            style={{
+              maxWidth: 180,
+              maxHeight: 120,
+              borderRadius: 10,
+              border: `1px solid ${tokens.border}`,
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            aria-label="Usuń obraz"
+            style={{
+              position: "absolute",
+              top: -8,
+              right: -8,
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              border: `1px solid ${tokens.border}`,
+              background: "#fff",
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+              boxShadow: "0 2px 6px rgba(15,18,28,0.12)",
+            }}
+          >
+            <X size={12} color={tokens.muted} />
+          </button>
+        </div>
+      ) : value && broken ? (
+        <p style={{ fontSize: 12, color: tokens.danger, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+          <ImageIcon size={13} /> Nie można wczytać obrazka z tego adresu.
+        </p>
+      ) : (
+        <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
+          JPEG, PNG, WEBP lub GIF, maks. 5 MB. Możesz też wkleić gotowy adres URL.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ── Edytor opcji (kroki wyboru) ────────────────────────────── */
 function OptionsEditor({
   step,
@@ -622,18 +847,36 @@ function OptionsEditor({
   function remove(id: string) {
     onPatch({ options: options.filter((o) => o.id !== id) });
   }
+  // Zmiana kolejności opcji (przenieś w górę/dół). Utrwalane natychmiast w
+  // schemacie kroku, więc podgląd i wysłany formularz zachowują kolejność.
+  function move(id: string, dir: -1 | 1) {
+    const i = options.findIndex((o) => o.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= options.length) return;
+    const next = [...options];
+    [next[i], next[j]] = [next[j], next[i]];
+    onPatch({ options: next });
+  }
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <span style={{ fontSize: 13, fontWeight: 600 }}>Opcje</span>
-      {options.map((o) => (
+      {options.map((o, i) => (
         <div key={o.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+            <button onClick={() => move(o.id, -1)} disabled={i === 0} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w górę">
+              <ChevronUp size={12} />
+            </button>
+            <button onClick={() => move(o.id, 1)} disabled={i === options.length - 1} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w dół">
+              <ChevronDown size={12} />
+            </button>
+          </div>
           <input
             value={o.label}
             onChange={(e) => update(o.id, { label: e.target.value })}
-            style={{ ...inputStyle, flex: "1 1 100px" }}
+            style={{ ...inputStyle, flex: "1 1 100px", minWidth: 0 }}
           />
-          <div style={{ flex: "1 1 130px" }}>
+          <div style={{ flex: "1 1 130px", minWidth: 0 }}>
             <NextSelect value={o.next} steps={steps} selfId={step.id} onChange={(v) => update(o.id, { next: v })} />
           </div>
           <button onClick={() => remove(o.id)} style={miniBtn} aria-label="Usuń opcję">
@@ -828,6 +1071,165 @@ function ThemePanel({
   );
 }
 
+/* ── Panel ustawień: przekierowanie + mail „dziękujemy” ─────────────────── */
+function isValidUrl(value: string): boolean {
+  try {
+    const u = new URL(value.trim());
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function SettingsPanel({
+  schema,
+  onPatch,
+}: {
+  schema: FormSchema;
+  onPatch: (patch: Partial<FormSchema>) => void;
+}) {
+  const settings: FormSettings = schema.settings ?? {};
+  const setSettings = (patch: Partial<FormSettings>) =>
+    onPatch({ settings: { ...settings, ...patch } });
+
+  const email: ThankYouEmail = settings.thankYouEmail ?? defaultThankYouEmail();
+  const setEmail = (patch: Partial<ThankYouEmail>) =>
+    setSettings({ thankYouEmail: { ...email, ...patch } });
+
+  const redirect = settings.redirectUrl ?? "";
+  const redirectInvalid = redirect.trim() !== "" && !isValidUrl(redirect);
+  const extraLink = settings.extraLink ?? "";
+  const extraInvalid = extraLink.trim() !== "" && !isValidUrl(extraLink);
+
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  function applyWrap(before: string, after: string) {
+    const ta = bodyRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? 0;
+    const end = ta.selectionEnd ?? 0;
+    const val = email.html;
+    const selected = val.slice(start, end);
+    const next = val.slice(0, start) + before + selected + after + val.slice(end);
+    setEmail({ html: next });
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + before.length + selected.length + after.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  }
+
+  function insertLink() {
+    const url = window.prompt("Adres linku (https://…)", "https://");
+    if (!url) return;
+    applyWrap(`<a href="${url}">`, "</a>");
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <span style={paneTitle}>Ustawienia</span>
+
+      {/* Przekierowanie po wysłaniu (item 7) */}
+      <Field label="Przekierowanie po wysłaniu (URL, opcjonalnie)">
+        <input
+          value={redirect}
+          onChange={(e) => setSettings({ redirectUrl: e.target.value })}
+          placeholder="https://twoja-strona.pl/dziekujemy (np. VSL)"
+          style={{ ...inputStyle, ...(redirectInvalid ? { borderColor: tokens.danger } : {}) }}
+        />
+      </Field>
+      <p style={{ fontSize: 12, color: redirectInvalid ? tokens.danger : tokens.muted, margin: "-6px 0 0" }}>
+        {redirectInvalid
+          ? "Podaj poprawny adres URL (http:// lub https://)."
+          : "Po wysłaniu formularza klient zostanie przeniesiony pod ten adres. Puste = domyślny ekran „dziękujemy”."}
+      </p>
+
+      {/* Dodatkowy link do wstawienia w mailu (item 8) */}
+      <Field label="Dodatkowy link (np. konsultacja / VSL)">
+        <input
+          value={extraLink}
+          onChange={(e) => setSettings({ extraLink: e.target.value })}
+          placeholder="https://cal.com/selltic/konsultacja"
+          style={{ ...inputStyle, ...(extraInvalid ? { borderColor: tokens.danger } : {}) }}
+        />
+      </Field>
+      <p style={{ fontSize: 12, color: extraInvalid ? tokens.danger : tokens.muted, margin: "-6px 0 0" }}>
+        {extraInvalid
+          ? "Podaj poprawny adres URL (http:// lub https://)."
+          : "Wstawiany w mailu przez placeholder {{extra_link}}."}
+      </p>
+
+      {/* Automatyczny mail „dziękujemy” (item 8) */}
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          padding: 12,
+          borderRadius: 12,
+          border: `1px solid ${tokens.border}`,
+          background: tokens.bg,
+        }}
+      >
+        <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, fontWeight: 700 }}>
+          <Mail size={15} color={tokens.accent} />
+          <input
+            type="checkbox"
+            checked={email.enabled}
+            onChange={(e) => setEmail({ enabled: e.target.checked })}
+            style={{ width: 16, height: 16, accentColor: tokens.accent }}
+          />
+          Wyślij automatyczny mail „dziękujemy”
+        </label>
+
+        {email.enabled && (
+          <>
+            <Field label="Temat">
+              <input
+                value={email.subject}
+                onChange={(e) => setEmail({ subject: e.target.value })}
+                style={inputStyle}
+              />
+            </Field>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Treść (HTML)</span>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button type="button" onClick={() => applyWrap("<b>", "</b>")} style={fmtBtn} aria-label="Pogrubienie" title="Pogrubienie">
+                  <Bold size={13} />
+                </button>
+                <button type="button" onClick={() => applyWrap("<i>", "</i>")} style={fmtBtn} aria-label="Kursywa" title="Kursywa">
+                  <Italic size={13} />
+                </button>
+                <button type="button" onClick={insertLink} style={{ ...fmtBtn, width: "auto", padding: "0 10px", gap: 6, display: "inline-flex", alignItems: "center" }} title="Wstaw link">
+                  <Link2 size={13} /> Link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEmail(defaultThankYouEmail())}
+                  style={{ ...ghostButton, padding: "6px 10px", fontSize: 12.5, marginLeft: "auto" }}
+                >
+                  Domyślny szablon
+                </button>
+              </div>
+              <textarea
+                ref={bodyRef}
+                value={email.html}
+                onChange={(e) => setEmail({ html: e.target.value })}
+                rows={8}
+                style={{ ...inputStyle, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5, lineHeight: 1.5 }}
+              />
+              <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
+                Placeholdery: <code>{"{{name}}"}</code> (imię/nazwa), <code>{"{{extra_link}}"}</code> (dodatkowy link powyżej).
+                Wysyłany, gdy formularz zbiera adres e-mail.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label style={{ display: "grid", gap: 5, flex: 1 }}>
@@ -896,4 +1298,16 @@ const miniBtn: React.CSSProperties = {
   placeItems: "center",
   cursor: "pointer",
   color: tokens.muted,
+};
+
+const fmtBtn: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  borderRadius: 8,
+  border: `1px solid ${tokens.border}`,
+  background: "#fff",
+  display: "grid",
+  placeItems: "center",
+  cursor: "pointer",
+  color: tokens.text,
 };
