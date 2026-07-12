@@ -2,8 +2,18 @@
 import { DEFAULT_PHONE_PREFIX, phoneLocalError, splitPhone } from "@/lib/phone";
 import { NEXT, SUBMIT, resolveNextAction, type NextAction } from "./formsRouting";
 
+// Typy pól wejściowych (mogą występować wielokrotnie w jednym kroku).
+export type FieldType =
+  | "short_text"
+  | "long_text"
+  | "email"
+  | "phone"
+  | "single_choice"
+  | "multi_choice";
+
 export type StepType =
   | "welcome"
+  | "question" // kontener wielu pól (nowy model — item 6)
   | "short_text"
   | "long_text"
   | "email"
@@ -12,6 +22,20 @@ export type StepType =
   | "multi_choice"
   | "statement"
   | "end";
+
+const FIELD_TYPE_SET = new Set<string>([
+  "short_text",
+  "long_text",
+  "email",
+  "phone",
+  "single_choice",
+  "multi_choice",
+]);
+
+// Czy dany typ (string) jest typem pola wejściowego.
+export function isInputType(type: string): type is FieldType {
+  return FIELD_TYPE_SET.has(type);
+}
 
 // Cele routingu: __next__ (liniowo), __submit__ (wyślij) lub id kroku.
 // Zdefiniowane w leaf-module lib/formsRouting.ts (bez zależności — testowalne
@@ -35,6 +59,23 @@ export type FieldValidation = {
   customMessage?: string; // komunikat przy niepowodzeniu
 };
 
+// Pojedyncze pole wejściowe (item 6 — krok może zawierać ich wiele).
+// Odpowiedzi w formularzu są kluczowane po `id` pola. Dla starych, jedno-
+// polowych kroków syntetyzujemy pole o `id === step.id` (patrz stepFields),
+// dzięki czemu istniejące, opublikowane formularze działają bez migracji.
+export type FormField = {
+  id: string;
+  type: FieldType;
+  question: string; // etykieta pola
+  description?: string;
+  placeholder?: string;
+  required?: boolean;
+  validation?: FieldValidation;
+  phonePrefix?: string; // domyślny prefiks kraju dla pola „phone”
+  options?: StepOption[];
+  map?: "name" | "email" | "phone"; // mapowanie odpowiedzi → kontakt (Faza 5)
+};
+
 export type Step = {
   id: string;
   type: StepType;
@@ -42,6 +83,10 @@ export type Step = {
   description?: string;
   image?: string;
   next: string; // domyślny cel (NEXT | SUBMIT | stepId)
+  // Nowy model (item 6): kroki typu „question” trzymają uporządkowaną listę pól.
+  fields?: FormField[];
+  // ── Pola LEGACY (kroki jedno-polowe sprzed item 6). Zachowane dla zgodności
+  //    wstecznej — normalizowane przez stepFields(). Nowe kroki używają fields[].
   options?: StepOption[];
   placeholder?: string;
   required?: boolean;
@@ -119,8 +164,94 @@ export function isChoice(type: StepType): boolean {
   return type === "single_choice" || type === "multi_choice";
 }
 
-export function isTextInput(type: StepType): boolean {
+export function isTextInput(type: string): boolean {
   return type === "short_text" || type === "long_text" || type === "email";
+}
+
+// ── Normalizacja kroków → pola (item 6) ───────────────────────────────────
+// Zwraca listę pól kroku. Nowe kroki mają `fields[]`. Stare, jedno-polowe kroki
+// (typ = typ pola, bez `fields`) są syntetyzowane w POJEDYNCZE pole o
+// `id === step.id`, więc odpowiedzi i ekstrakcja działają jak dawniej.
+export function stepFields(step: Step): FormField[] {
+  if (step.fields && step.fields.length) return step.fields;
+  if (isInputType(step.type)) {
+    return [
+      {
+        id: step.id,
+        type: step.type as FieldType,
+        question: step.question,
+        description: step.description,
+        placeholder: step.placeholder,
+        required: step.required,
+        validation: step.validation,
+        phonePrefix: step.phonePrefix,
+        options: step.options,
+        map: step.map,
+      },
+    ];
+  }
+  return [];
+}
+
+// Czy krok zbiera odpowiedzi (kontener pól lub stary krok jedno-polowy).
+export function isInputStep(step: Step): boolean {
+  return step.type === "question" || isInputType(step.type);
+}
+
+// Czy krok jest już kontenerem z jawną listą pól (nowy model).
+export function isContainerStep(step: Step): boolean {
+  return step.type === "question" || (!!step.fields && step.fields.length > 0);
+}
+
+// Pole rozgałęziające krok — pierwsze pole „single_choice”. Jego wybór (opcja
+// → next) steruje routingiem kroku (item 7 — rozgałęzienia warunkowe).
+export function branchingField(step: Step): FormField | undefined {
+  return stepFields(step).find((f) => f.type === "single_choice");
+}
+
+// Walidacja spójności kroku w edytorze (item 7 — walidacja inline). Zwraca
+// listę problemów blokujących sensowną publikację (pusty tekst, wybór bez opcji).
+export function stepIssues(step: Step): string[] {
+  const issues: string[] = [];
+  if (isInputStep(step)) {
+    const fields = stepFields(step);
+    if (fields.length === 0) {
+      issues.push("Krok nie ma żadnych pól.");
+      return issues;
+    }
+    for (const f of fields) {
+      if (!f.question.trim()) issues.push("Pole bez treści pytania.");
+      if (isChoice(f.type)) {
+        const opts = f.options ?? [];
+        if (opts.length < 1) issues.push("Pole wyboru bez żadnej opcji.");
+        else if (opts.some((o) => !o.label.trim())) issues.push("Pusta etykieta opcji.");
+      }
+    }
+  } else if (!step.question.trim()) {
+    issues.push("Brak treści nagłówka.");
+  }
+  return issues;
+}
+
+// Konwersja starego, jedno-polowego kroku na kontener `question` z jednym
+// polem — używane w edytorze, gdy dodajemy drugie pole do starego kroku.
+export function toContainerStep(step: Step): Step {
+  if (isContainerStep(step)) {
+    return { ...step, type: "question", fields: stepFields(step) };
+  }
+  if (isInputType(step.type)) {
+    const field = stepFields(step)[0];
+    return {
+      id: step.id,
+      type: "question",
+      question: "",
+      description: step.description,
+      image: step.image,
+      next: step.next,
+      fields: [field],
+    };
+  }
+  return step;
 }
 
 // ── Walidacja pól (Faza 8.1) ──────────────────────────────────────────────
@@ -183,29 +314,29 @@ export function hasValidationRules(v?: FieldValidation): boolean {
   );
 }
 
-// Główna walidacja wartości kroku. Zwraca komunikat błędu lub null gdy OK.
-export function validateStepValue(step: Step, raw: string): string | null {
+// Walidacja wartości pojedynczego pola. Zwraca komunikat błędu lub null gdy OK.
+export function validateFieldValue(field: FormField, raw: string): string | null {
   const value = (raw ?? "").trim();
 
-  if (step.required && !value) return "To pole jest wymagane.";
+  if (field.required && !value) return "To pole jest wymagane.";
   // Puste, ale nieobowiązkowe — brak dalszej walidacji.
   if (!value) return null;
 
   // Wbudowany format e-mail dla typu „email”.
-  if (step.type === "email" && !EMAIL_RE.test(value)) {
-    return step.validation?.customMessage || "Podaj poprawny adres e-mail.";
+  if (field.type === "email" && !EMAIL_RE.test(value)) {
+    return field.validation?.customMessage || "Podaj poprawny adres e-mail.";
   }
 
   // Walidacja telefonu. Dla Polski (+48) egzekwuje 9 cyfr i poprawny prefiks
   // operatora; dla innych krajów pozostaje łagodna reguła (patrz lib/phone.ts).
-  if (step.type === "phone") {
-    const { prefix, local } = splitPhone(value, step.phonePrefix || DEFAULT_PHONE_PREFIX);
+  if (field.type === "phone") {
+    const { prefix, local } = splitPhone(value, field.phonePrefix || DEFAULT_PHONE_PREFIX);
     const msg = phoneLocalError(prefix, local);
-    if (msg) return step.validation?.customMessage || msg;
+    if (msg) return field.validation?.customMessage || msg;
     return null;
   }
 
-  const v = step.validation;
+  const v = field.validation;
   if (!v) return null;
 
   if (v.minLength != null && value.length < v.minLength) {
@@ -262,11 +393,10 @@ function uid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-export function blankStep(type: StepType): Step {
-  const base: Step = { id: uid(), type, question: "", next: NEXT };
+// Fabryka pojedynczego pola (item 6).
+export function blankField(type: FieldType): FormField {
+  const base: FormField = { id: uid(), type, question: "" };
   switch (type) {
-    case "welcome":
-      return { ...base, question: "Witaj 👋", description: "Wypełnij krótki formularz.", cta: "Zaczynamy" };
     case "short_text":
       return { ...base, question: "Twoje pytanie", placeholder: "Wpisz odpowiedź…", required: true };
     case "long_text":
@@ -300,10 +430,28 @@ export function blankStep(type: StepType): Step {
           { id: uid(), label: "Opcja B", next: NEXT },
         ],
       };
+  }
+}
+
+// Fabryka kroku-kontenera (item 6) z jednym polem danego typu.
+export function blankFieldStep(fieldType: FieldType): Step {
+  return { id: uid(), type: "question", question: "", next: NEXT, fields: [blankField(fieldType)] };
+}
+
+export function blankStep(type: StepType): Step {
+  const base: Step = { id: uid(), type, question: "", next: NEXT };
+  switch (type) {
+    case "welcome":
+      return { ...base, question: "Witaj 👋", description: "Wypełnij krótki formularz.", cta: "Zaczynamy" };
     case "statement":
       return { ...base, question: "Ważna informacja", description: "Treść komunikatu." };
     case "end":
       return { ...base, question: "Dziękujemy! 🎉", description: "Odezwiemy się wkrótce.", next: SUBMIT };
+    case "question":
+      return blankFieldStep("short_text");
+    default:
+      // Typy pól tworzą krok-kontener z jednym polem tego typu.
+      return blankFieldStep(type as FieldType);
   }
 }
 

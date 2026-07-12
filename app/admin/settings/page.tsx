@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Reorder } from "framer-motion";
-import { Plus, Trash2, GripVertical, X, Check } from "lucide-react";
+import { Plus, Trash2, GripVertical, X, Check, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import type {
@@ -17,7 +17,7 @@ import type {
 import { useStages } from "@/lib/stages";
 import { useToast } from "@/components/Toast";
 
-type Tab = "properties" | "stages" | "notifications" | "scraper";
+type Tab = "properties" | "stages" | "notifications" | "integrations" | "scraper";
 
 const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
   google_places_api_key: "",
@@ -61,6 +61,7 @@ export default function SettingsPage() {
             ["properties", "Właściwości"],
             ["stages", "Etapy lejka"],
             ["notifications", "Powiadomienia"],
+            ["integrations", "Integracje"],
             ["scraper", "Scraper"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
@@ -89,6 +90,8 @@ export default function SettingsPage() {
         <StagesTab />
       ) : tab === "notifications" ? (
         <NotificationsTab />
+      ) : tab === "integrations" ? (
+        <IntegrationsTab />
       ) : (
         <ScraperTab />
       )}
@@ -829,6 +832,191 @@ function ToggleRow({
         />
       </button>
     </div>
+  );
+}
+
+/* ── Integracje → Wysyłka e-mail (Resend) — item 9 ───────────────────────
+   Klucz API trzymany server-side (app_settings), czytany tylko przez backend
+   (/api/submit, /api/email/test). GET nie zwraca klucza — jedynie informację,
+   czy jest ustawiony. Zapis i test idą przez dedykowane API. */
+function IntegrationsTab() {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [configured, setConfigured] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [from, setFrom] = useState("");
+  const [testTo, setTestTo] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user?.email) setTestTo(user.email);
+      try {
+        const res = await fetch("/api/settings/email");
+        if (res.ok) {
+          const body = await res.json();
+          setConfigured(!!body.configured);
+          setFrom(body.from || "");
+        }
+      } catch {
+        /* offline — pozostaw pola puste */
+      }
+      setLoading(false);
+    })();
+  }, [supabase]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: apiKey || undefined, from }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => null);
+        toast.error(b?.error || "Nie udało się zapisać.");
+      } else {
+        if (apiKey.trim()) setConfigured(true);
+        setApiKey("");
+        toast.success("Zapisano ustawienia e-mail.");
+      }
+    } catch {
+      toast.error("Błąd sieci przy zapisie.");
+    }
+    setSaving(false);
+  }
+
+  async function clearKey() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clear: true }),
+      });
+      if (res.ok) {
+        setConfigured(false);
+        setApiKey("");
+        toast.success("Klucz usunięty.");
+      }
+    } catch {
+      toast.error("Błąd sieci.");
+    }
+    setSaving(false);
+  }
+
+  // Test połączenia (item 9): wysyła testowy e-mail używając klucza wpisanego
+  // (jeśli podano) lub zapisanego, na wskazany adres.
+  async function testConnection() {
+    const to = testTo.trim();
+    if (!to) {
+      toast.error("Podaj adres, na który wysłać test.");
+      return;
+    }
+    setTesting(true);
+    try {
+      const res = await fetch("/api/email/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, apiKey: apiKey || undefined, from: from || undefined }),
+      });
+      const b = await res.json().catch(() => null);
+      if (!res.ok) toast.error(b?.error || "Test nie powiódł się.");
+      else toast.success("Test wysłany — sprawdź skrzynkę.");
+    } catch {
+      toast.error("Błąd sieci przy teście.");
+    }
+    setTesting(false);
+  }
+
+  if (loading) {
+    return (
+      <Section>
+        <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <Mail size={16} color={tokens.accent} />
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Wysyłka e-mail (Resend)</h3>
+      </div>
+      <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px" }}>
+        Automatyczne maile „dziękujemy” oraz powiadomienia o leadach wysyłamy przez{" "}
+        <a href="https://resend.com" target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
+          Resend
+        </a>
+        . Klucz jest przechowywany po stronie serwera i nigdy nie wraca do przeglądarki.
+      </p>
+
+      <div style={{ display: "grid", gap: 16, maxWidth: 460 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>
+            Klucz API Resend {configured && <span style={{ color: tokens.success, fontWeight: 600 }}>· zapisany ✓</span>}
+          </span>
+          <input
+            type="password"
+            placeholder={configured ? "•••••••••• (zostaw puste, aby nie zmieniać)" : "re_..."}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            style={inputStyle}
+          />
+        </label>
+
+        <label style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Adres nadawcy</span>
+          <input
+            placeholder="Selltic Team <contact@selltic-agency.pl>"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            style={inputStyle}
+          />
+          <span style={{ fontSize: 12, color: tokens.muted }}>
+            Domena musi być zweryfikowana w Resend (SPF/DKIM). Odpowiedzi możesz kierować na Gmaila przez „reply_to”.
+          </span>
+        </label>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={save} disabled={saving} style={primaryButton}>
+            {saving ? "Zapisywanie…" : "Zapisz"}
+          </button>
+          {configured && (
+            <button onClick={clearKey} disabled={saving} style={{ ...ghostButton, color: tokens.danger }}>
+              Usuń klucz
+            </button>
+          )}
+        </div>
+
+        <div style={{ height: 1, background: tokens.border }} />
+
+        <label style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Test połączenia</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              type="email"
+              placeholder="adres@do-testu.pl"
+              value={testTo}
+              onChange={(e) => setTestTo(e.target.value)}
+              style={{ ...inputStyle, flex: "1 1 200px", minWidth: 0 }}
+            />
+            <button onClick={testConnection} disabled={testing} style={{ ...ghostButton, whiteSpace: "nowrap" }}>
+              {testing ? "Wysyłanie…" : "Wyślij test"}
+            </button>
+          </div>
+          <span style={{ fontSize: 12, color: tokens.muted }}>
+            Wyśle przykładowy e-mail, aby potwierdzić, że klucz i domena działają.
+          </span>
+        </label>
+      </div>
+    </Section>
   );
 }
 
