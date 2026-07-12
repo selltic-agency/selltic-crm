@@ -9,24 +9,29 @@ import {
   renderThankYouHtml,
   DEFAULT_THANK_YOU_SUBJECT,
   DEFAULT_THANK_YOU_HTML,
+  stepFields,
   type FormSettings,
+  type Step,
 } from "@/lib/forms";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Walidacja telefonu po stronie serwera (nie do obejścia bezpośrednim POST-em).
-// Zwraca komunikat błędu lub null. Sprawdza wszystkie kroki typu „phone”.
-function validatePhones(answers: Record<string, any>, steps: any[]): string | null {
+// Zwraca komunikat błędu lub null. Sprawdza wszystkie pola typu „phone”
+// (item 6 — krok może zawierać wiele pól).
+function validatePhones(answers: Record<string, any>, steps: Step[]): string | null {
   for (const step of steps ?? []) {
-    if (step?.type !== "phone") continue;
-    const raw = answers[step.id];
-    if (raw == null || raw === "") {
-      if (step.required) return "Numer telefonu jest wymagany.";
-      continue;
+    for (const field of stepFields(step)) {
+      if (field.type !== "phone") continue;
+      const raw = answers[field.id];
+      if (raw == null || raw === "") {
+        if (field.required) return "Numer telefonu jest wymagany.";
+        continue;
+      }
+      const { prefix, local } = splitPhone(String(raw), field.phonePrefix || DEFAULT_PHONE_PREFIX);
+      const msg = phoneLocalError(prefix, local);
+      if (msg) return msg;
     }
-    const { prefix, local } = splitPhone(String(raw), step.phonePrefix || DEFAULT_PHONE_PREFIX);
-    const msg = phoneLocalError(prefix, local);
-    if (msg) return msg;
   }
   return null;
 }
@@ -62,14 +67,16 @@ function clientIp(req: Request): string {
 // Wyciąga email/imię/telefon z odpowiedzi.
 // Najpewniejsze: oznacz pola w schemacie formularza polem `map: 'email'|'name'|'phone'`.
 // Tu jest fallback heurystyczny, gdyby mapowania zabrakło.
-function extract(answers: Record<string, any>, steps: any[]) {
+function extract(answers: Record<string, any>, steps: Step[]) {
   let email = "", name = "", phone = "";
   for (const step of steps ?? []) {
-    const v = answers[step.id];
-    if (v == null || v === "") continue;
-    if (step.map === "email" || (step.type === "email" && !email)) email = String(v);
-    else if (step.map === "name") name = String(v);
-    else if (step.map === "phone") phone = String(v);
+    for (const field of stepFields(step)) {
+      const v = answers[field.id];
+      if (v == null || v === "") continue;
+      if (field.map === "email" || (field.type === "email" && !email)) email = String(v);
+      else if (field.map === "name") name = String(v);
+      else if (field.map === "phone") phone = String(v);
+    }
   }
   if (!email) for (const v of Object.values(answers)) if (typeof v === "string" && EMAIL_RE.test(v)) { email = v; break; }
   if (!name) name = Object.values(answers).find((v) => typeof v === "string" && v.length < 40 && !EMAIL_RE.test(v)) as string ?? "Nowy lead";
@@ -146,10 +153,19 @@ export async function POST(req: Request) {
     //     do dealu, które utworzyło.
     await db.from("submissions").update({ deal_id: dealId }).eq("id", submission.id);
 
-    // 5. aktywność „zgłoszenie” — oś czasu tego deala.
-    const summary = steps
-      .filter((s: any) => answers[s.id] != null && answers[s.id] !== "" && s.type !== "welcome" && s.type !== "end")
-      .map((s: any) => `${s.question}: ${answers[s.id]}`).join("\n");
+    // 5. aktywność „zgłoszenie” — oś czasu tego deala. Iterujemy po polach
+    //    (item 6 — krok może zawierać wiele pól).
+    const summary = (steps as Step[])
+      .flatMap((s) => stepFields(s))
+      .filter((f) => {
+        const v = answers[f.id];
+        return v != null && v !== "" && !(Array.isArray(v) && v.length === 0);
+      })
+      .map((f) => {
+        const v = answers[f.id];
+        return `${f.question}: ${Array.isArray(v) ? v.join(", ") : v}`;
+      })
+      .join("\n");
     await db.from("activities").insert({
       owner: form.owner, deal_id: dealId, type: "submission",
       body: summary || "Wypełnił formularz", meta: { formId: form.id },
@@ -185,18 +201,27 @@ export async function POST(req: Request) {
       body: `${leadKind}: ${name}`,
     });
 
-    // 8. powiadomienie mailowe DO WŁAŚCICIELA (jeśli włączone w ustawieniach)
+    // 8. Konfiguracja e-mail właściciela: klucz Resend (item 9 — trzymany
+    //    server-side w app_settings) + adres nadawcy + adres powiadomień.
     const { data: settings } = await db.from("app_settings")
-      .select("email_new_lead, notify_email").eq("owner", form.owner).maybeSingle();
+      .select("email_new_lead, notify_email, resend_api_key, resend_from")
+      .eq("owner", form.owner)
+      .maybeSingle();
+    const mail: MailConfig = {
+      apiKey: settings?.resend_api_key || process.env.RESEND_API_KEY || "",
+      from: settings?.resend_from || process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>",
+    };
+
+    // Powiadomienie mailowe DO WŁAŚCICIELA (jeśli włączone w ustawieniach).
     if (settings?.email_new_lead && settings.notify_email) {
-      await notifyNewLead(settings.notify_email, { name, email, phone, returning: dealExisted });
+      await notifyNewLead(mail, settings.notify_email, { name, email, phone, returning: dealExisted });
     }
 
     // 9. automatyczny mail „dziękujemy” DO ZGŁASZAJĄCEGO (item 8).
     //    Wysyłka jest odporna na błędy — nigdy nie blokuje zapisu zgłoszenia.
     const formSettings = (form.published?.settings ?? {}) as FormSettings;
     if (email) {
-      await sendThankYouEmail(email, name, formSettings);
+      await sendThankYouEmail(mail, email, name, formSettings);
     }
 
     return NextResponse.json({ ok: true });
@@ -206,20 +231,24 @@ export async function POST(req: Request) {
   }
 }
 
-// Wyślij maila przez Resend (https://resend.com). Działa tylko gdy ustawisz RESEND_API_KEY.
-// Alternatywa: zamiast tego POST do webhooka Make, który wyśle Gmaila.
+// Konfiguracja wysyłki e-mail (item 9). Klucz preferencyjnie z app_settings
+// (ustawiany w Ustawienia → Integracje), z fallbackiem do zmiennej środowiskowej.
+type MailConfig = { apiKey: string; from: string };
+
+// Wyślij maila przez Resend (https://resend.com). Działa tylko gdy jest klucz.
 async function notifyNewLead(
+  mail: MailConfig,
   to: string,
   lead: { name: string; email: string; phone: string; returning: boolean }
 ) {
-  if (!process.env.RESEND_API_KEY) return;
+  if (!mail.apiKey) return;
   const kind = lead.returning ? "Powracający e-mail — nowy lead" : "Nowy lead";
   try {
     await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${mail.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>",
+        from: mail.from,
         to,
         subject: `🎯 ${kind}: ${lead.name}`,
         html: `<h2>${kind}</h2>
@@ -237,9 +266,9 @@ async function notifyNewLead(
 // Automatyczny mail z podziękowaniem do osoby, która wypełniła formularz.
 // Treść pochodzi z ustawień formularza (edytowalna w kreatorze) lub z domyślnego
 // szablonu. Błędy są logowane i połykane — zapis zgłoszenia jest już zakończony.
-async function sendThankYouEmail(to: string, name: string, settings: FormSettings) {
+async function sendThankYouEmail(mail: MailConfig, to: string, name: string, settings: FormSettings) {
   try {
-    if (!process.env.RESEND_API_KEY) return;
+    if (!mail.apiKey) return;
     const cfg = settings.thankYouEmail;
     // Domyślnie włączone — wyłączamy tylko gdy jawnie ustawiono enabled=false.
     if (cfg && cfg.enabled === false) return;
@@ -250,13 +279,8 @@ async function sendThankYouEmail(to: string, name: string, settings: FormSetting
 
     await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>",
-        to,
-        subject,
-        html,
-      }),
+      headers: { Authorization: `Bearer ${mail.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: mail.from, to, subject, html }),
     });
   } catch (e) {
     console.error("[sendThankYouEmail]", e);

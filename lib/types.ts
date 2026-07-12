@@ -160,6 +160,10 @@ export type AppSettings = {
   email_new_lead: boolean;
   email_task_due: boolean;
   notify_email: string | null;
+  // Integracje → wysyłka e-mail (item 9). Klucz trzymany server-side; do
+  // klienta wraca tylko zamaskowany (patrz zakładka Integracje).
+  resend_api_key?: string | null;
+  resend_from?: string | null;
 };
 
 // ── Scraper headless (zakładka "Scraper") ───────────────────────────────

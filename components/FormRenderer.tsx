@@ -1,7 +1,8 @@
 // components/FormRenderer.tsx — współdzielony renderer formularza.
 // Używany w podglądzie edytora ORAZ na publicznej stronie /f/[slug].
 // Obsługuje routing, historię (przycisk wstecz), pasek postępu,
-// nawigację klawiaturą (Enter, A/B/C) i animacje slajdów.
+// nawigację klawiaturą (Enter, A/B/C), animacje slajdów oraz — od item 6 —
+// wiele pól na jednym kroku (krok = kontener pól).
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,11 +15,15 @@ import {
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import {
   type FormSchema,
-  type Step,
+  type FormField,
   NEXT,
   googleFontHref,
-  isTextInput,
-  validateStepValue,
+  isChoice,
+  branchingField,
+  stepFields,
+  isInputStep,
+  isContainerStep,
+  validateFieldValue,
   resolveNextAction,
 } from "@/lib/forms";
 import {
@@ -41,12 +46,15 @@ type Props = {
   onSubmit?: (answers: Answers) => void;
   // Tryb podglądu — nie wykonuje realnego wysłania.
   preview?: boolean;
+  // Wymuszony układ mobilny (podgląd „telefon” w edytorze).
+  forceMobile?: boolean;
 };
 
-export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Props) {
+export default function FormRenderer({ form, gotoStepId, onSubmit, preview, forceMobile }: Props) {
   const steps = form.steps ?? [];
   const theme = form.theme;
-  const isMobile = useIsMobile(680);
+  const autoMobile = useIsMobile(680);
+  const isMobile = forceMobile || autoMobile;
   const reduce = useReducedMotion();
   const shake = useAnimationControls();
 
@@ -59,8 +67,10 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   const [history, setHistory] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Answers>({});
   const [dir, setDir] = useState<"fwd" | "back">("fwd");
-  const [error, setError] = useState<string | null>(null);
-  const [phonePrefix, setPhonePrefix] = useState<string>(DEFAULT_PHONE_PREFIX);
+  // Błędy walidacji kluczowane po id pola.
+  const [errors, setErrors] = useState<Record<string, string | null>>({});
+  // Prefiks kraju per pole telefonu.
+  const [phonePrefixes, setPhonePrefixes] = useState<Record<string, string>>({});
   const submittedRef = useRef(false);
 
   // Wstrzyknij arkusz Google Fonts dla wybranej czcionki.
@@ -81,7 +91,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
     if (gotoStepId && steps.some((s) => s.id === gotoStepId)) {
       setDir("fwd");
       setCurrentId(gotoStepId);
-      setError(null);
+      setErrors({});
     }
   }, [gotoStepId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -99,24 +109,31 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
   const currentIndex = steps.findIndex((s) => s.id === current?.id);
   const progress = steps.length > 1 ? (currentIndex / (steps.length - 1)) * 100 : 0;
 
-  // Inicjalizuj prefiks telefonu przy wejściu na krok „phone”
-  // (z zapisanej odpowiedzi lub domyślnego prefiksu kroku).
+  const fields = useMemo(() => (current ? stepFields(current) : []), [current]);
+  const container = current ? isContainerStep(current) : false;
+  // Auto-przejście (styl Typeform) tylko, gdy krok ma DOKŁADNIE jedno pole
+  // wyboru jednokrotnego — inaczej użytkownik musi wypełnić pozostałe pola.
+  const autoAdvanceChoice = fields.length === 1 && fields[0].type === "single_choice";
+
+  // Inicjalizuj prefiksy telefonu przy wejściu na krok (z zapisanych odpowiedzi
+  // lub domyślnego prefiksu pola).
   useEffect(() => {
-    if (current?.type === "phone") {
-      const stored = (answers[current.id] as string) || "";
-      const { prefix } = splitPhone(stored, current.phonePrefix || DEFAULT_PHONE_PREFIX);
-      setPhonePrefix(prefix);
-    }
+    if (!current) return;
+    setPhonePrefixes((prev) => {
+      const next = { ...prev };
+      for (const f of stepFields(current)) {
+        if (f.type !== "phone") continue;
+        const stored = (answers[f.id] as string) || "";
+        next[f.id] = splitPhone(stored, f.phonePrefix || DEFAULT_PHONE_PREFIX).prefix;
+      }
+      return next;
+    });
   }, [current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setAnswer = useCallback(
-    (val: string | string[]) => {
-      if (!current) return;
-      setAnswers((a) => ({ ...a, [current.id]: val }));
-      setError(null);
-    },
-    [current]
-  );
+  const setFieldAnswer = useCallback((fieldId: string, val: string | string[]) => {
+    setAnswers((a) => ({ ...a, [fieldId]: val }));
+    setErrors((e) => (e[fieldId] ? { ...e, [fieldId]: null } : e));
+  }, []);
 
   const submit = useCallback(() => {
     if (!submittedRef.current) {
@@ -124,15 +141,12 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
       const result = onSubmit?.(answers);
 
       // Przekierowanie po wysłaniu (opcjonalne, ustawiane w kreatorze).
-      // Czekamy aż zgłoszenie zostanie wysłane (best-effort), po czym
-      // przekierowujemy zamiast pokazywać ekran „dziękujemy”.
       const redirectUrl = (form.settings?.redirectUrl || "").trim();
       if (redirectUrl && !preview) {
         Promise.resolve(result)
           .catch(() => {})
           .finally(() => {
             try {
-              // W trybie embed przekieruj stronę nadrzędną, jeśli to możliwe.
               (window.top ?? window).location.href = redirectUrl;
             } catch {
               window.location.href = redirectUrl;
@@ -150,47 +164,64 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
 
   const resolveTarget = useCallback(
     (target: string) => {
-      // Rozstrzygnięcie routingu jest współdzielone i testowane w lib/forms.ts.
-      // Dotarcie do kroku „end” = wysyłka formularza (naprawa: zgłoszenia znikały).
       const action = resolveNextAction(steps, currentIndex, target);
       if (action.kind === "submit") return submit();
       setHistory((h) => [...h, current.id]);
       setDir("fwd");
       setCurrentId(action.id);
-      setError(null);
+      setErrors({});
     },
     [steps, currentIndex, current, submit]
   );
 
-  // Waliduje bieżące pole tekstowe. Ustawia komunikat błędu i (opcjonalnie)
-  // uruchamia animację „shake”. Zwraca true gdy pole jest poprawne.
+  // Waliduje wszystkie pola wejściowe bieżącego kroku. Ustawia błędy i
+  // (opcjonalnie) animację „shake”. Zwraca true, gdy wszystkie pola OK.
   const validateCurrent = useCallback(
     (withShake: boolean) => {
-      if (!current || (!isTextInput(current.type) && current.type !== "phone")) return true;
-      const v = (answers[current.id] as string) || "";
-      const msg = validateStepValue(current, v);
-      setError(msg);
-      if (msg && withShake && !reduce) {
-        shake.start({
-          x: [0, -8, 8, -6, 6, -3, 3, 0],
-          transition: { duration: 0.4 },
-        });
+      if (!current || !isInputStep(current)) return true;
+      const next: Record<string, string | null> = {};
+      let ok = true;
+      for (const f of stepFields(current)) {
+        const raw = f.type === "multi_choice" ? "" : ((answers[f.id] as string) || "");
+        // Wielokrotny wybór: „wymagane” = min. jedna zaznaczona opcja.
+        if (f.type === "multi_choice") {
+          const sel = (answers[f.id] as string[]) || [];
+          const msg = f.required && sel.length === 0 ? "Zaznacz co najmniej jedną opcję." : null;
+          next[f.id] = msg;
+          if (msg) ok = false;
+          continue;
+        }
+        if (isChoice(f.type)) {
+          const sel = (answers[f.id] as string) || "";
+          const msg = f.required && !sel ? "Wybierz opcję." : null;
+          next[f.id] = msg;
+          if (msg) ok = false;
+          continue;
+        }
+        const msg = validateFieldValue(f, raw);
+        next[f.id] = msg;
+        if (msg) ok = false;
       }
-      return !msg;
+      setErrors(next);
+      if (!ok && withShake && !reduce) {
+        shake.start({ x: [0, -8, 8, -6, 6, -3, 3, 0], transition: { duration: 0.4 } });
+      }
+      return ok;
     },
     [current, answers, reduce, shake]
   );
 
   const advance = useCallback(() => {
     if (!current) return;
-    // Walidacja (blokuje dalsze przejście dla pól tekstowych).
     if (!validateCurrent(true)) return;
 
-    // Routing
+    // Routing: domyślny cel kroku, ewentualnie nadpisany przez pole
+    // rozgałęziające (pierwsze single_choice).
     let target = current.next || NEXT;
-    if (current.type === "single_choice") {
-      const sel = answers[current.id] as string | undefined;
-      const opt = current.options?.find((o) => o.label === sel);
+    const bf = branchingField(current);
+    if (bf) {
+      const sel = answers[bf.id] as string | undefined;
+      const opt = bf.options?.find((o) => o.label === sel);
       if (opt) target = opt.next || NEXT;
     }
     resolveTarget(target);
@@ -203,57 +234,58 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
       const prev = copy.pop()!;
       setDir("back");
       setCurrentId(prev);
-      setError(null);
+      setErrors({});
       return copy;
     });
   }, []);
 
-  function chooseSingle(label: string, next: string) {
-    setAnswers((a) => ({ ...a, [current.id]: label }));
-    setError(null);
+  // Wybór jednokrotny z auto-przejściem (krok jedno-polowy).
+  function chooseSingleAuto(field: FormField, label: string, next: string) {
+    setAnswers((a) => ({ ...a, [field.id]: label }));
+    setErrors({});
     resolveTarget(next || current.next || NEXT);
   }
 
-  // Klawiatura
+  function toggleMulti(fieldId: string, label: string) {
+    const cur = (answers[fieldId] as string[]) || [];
+    const nextVal = cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label];
+    setFieldAnswer(fieldId, nextVal);
+  }
+
+  // Klawiatura (na poziomie kroku).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!current) return;
       const tag = (e.target as HTMLElement)?.tagName;
-      const typing = tag === "INPUT" || tag === "TEXTAREA";
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 
       if (e.key === "Enter") {
-        if (current.type === "long_text" && !e.metaKey && !e.ctrlKey) return; // Enter = nowa linia
-        if (current.type !== "single_choice") {
+        // W polu długiego tekstu Enter = nowa linia (chyba że z modyfikatorem).
+        const inLongText = tag === "TEXTAREA";
+        if (inLongText && !e.metaKey && !e.ctrlKey) return;
+        if (!autoAdvanceChoice) {
           e.preventDefault();
           advance();
         }
         return;
       }
-      // A/B/C wybór opcji (poza polami tekstowymi)
-      if (!typing && current.options && /^[a-zA-Z]$/.test(e.key)) {
+      // A/B/C — skróty tylko dla kroku z jednym polem wyboru.
+      if (!typing && autoAdvanceChoice && /^[a-zA-Z]$/.test(e.key)) {
+        const field = fields[0];
         const idx = e.key.toLowerCase().charCodeAt(0) - 97;
-        const opt = current.options[idx];
-        if (opt) {
-          if (current.type === "single_choice") chooseSingle(opt.label, opt.next);
-          else toggleMulti(opt.label);
-        }
+        const opt = field.options?.[idx];
+        if (opt) chooseSingleAuto(field, opt.label, opt.next);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }); // bez deps — zawsze aktualne domknięcie
 
-  function toggleMulti(label: string) {
-    const cur = (answers[current.id] as string[]) || [];
-    const next = cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label];
-    setAnswer(next);
-  }
-
   if (!current) {
     return <div style={{ padding: 40, color: "#8A92A6" }}>Brak kroków.</div>;
   }
 
-  // Na wąskim ekranie układ „split” składamy do jednej kolumny (obraz nad treścią).
+  // Na wąskim ekranie układ „split” składamy do jednej kolumny.
   const isSplit = theme.layout === "split" && !!current.image && !isMobile;
   const align = theme.layout === "left" ? "left" : isSplit ? "left" : "center";
 
@@ -276,6 +308,9 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
     gap: 8,
   };
 
+  // Nagłówek kroku: dla kontenera pokazujemy tylko, gdy podano tekst.
+  const heading = current.question || (container ? "" : "—");
+
   return (
     <div
       style={{
@@ -290,15 +325,12 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
         overflow: "hidden",
       }}
     >
-      {/* Pasek postępu */}
+      {/* Pasek postępu + „Krok X z Y” (item 7) */}
       <div style={{ height: 4, background: "rgba(0,0,0,0.06)", flexShrink: 0 }}>
         <motion.div
           animate={{ width: `${progress}%` }}
           transition={spring}
-          style={{
-            height: "100%",
-            background: accent,
-          }}
+          style={{ height: "100%", background: accent }}
         />
       </div>
 
@@ -327,6 +359,23 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
         </button>
       )}
 
+      {/* Wskaźnik postępu tekstowy — dyskretnie w prawym górnym rogu. */}
+      {current.type !== "end" && current.type !== "welcome" && steps.length > 2 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 18,
+            right: 18,
+            zIndex: 2,
+            fontSize: 12,
+            fontWeight: 600,
+            opacity: 0.55,
+          }}
+        >
+          Krok {Math.min(currentIndex + 1, steps.length)} z {steps.length}
+        </div>
+      )}
+
       <div
         style={{
           flex: 1,
@@ -347,196 +396,269 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview }: Pr
         )}
 
         <AnimatePresence mode="wait" custom={dir}>
-        <motion.div
-          key={current.id}
-          custom={dir}
-          variants={{
-            enter: (d: "fwd" | "back") => ({
-              opacity: 0,
-              y: reduce ? 0 : d === "fwd" ? 28 : -28,
-            }),
-            center: { opacity: 1, y: 0 },
-            exit: (d: "fwd" | "back") => ({
-              opacity: 0,
-              y: reduce ? 0 : d === "fwd" ? -28 : 28,
-            }),
-          }}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={spring}
-          style={{
-            width: "100%",
-            maxWidth: 520,
-            margin: isSplit ? 0 : "0 auto",
-            padding: isMobile ? "32px 18px" : "48px 32px",
-            textAlign: align as React.CSSProperties["textAlign"],
-          }}
-        >
-          {!isSplit && current.image && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={current.image}
-              alt=""
-              style={{
-                maxWidth: "100%",
-                maxHeight: 200,
-                borderRadius: 12,
-                marginBottom: 20,
-                objectFit: "cover",
-                margin: align === "center" ? "0 auto 20px" : "0 0 20px",
-                display: "block",
-              }}
-            />
-          )}
+          <motion.div
+            key={current.id}
+            custom={dir}
+            variants={{
+              enter: (d: "fwd" | "back") => ({ opacity: 0, y: reduce ? 0 : d === "fwd" ? 28 : -28 }),
+              center: { opacity: 1, y: 0 },
+              exit: (d: "fwd" | "back") => ({ opacity: 0, y: reduce ? 0 : d === "fwd" ? -28 : 28 }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={spring}
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              margin: isSplit ? 0 : "0 auto",
+              padding: isMobile ? "32px 18px" : "48px 32px",
+              textAlign: align as React.CSSProperties["textAlign"],
+            }}
+          >
+            {!isSplit && current.image && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={current.image}
+                alt=""
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: 200,
+                  borderRadius: 12,
+                  marginBottom: 20,
+                  objectFit: "cover",
+                  margin: align === "center" ? "0 auto 20px" : "0 0 20px",
+                  display: "block",
+                }}
+              />
+            )}
 
-          <h2 style={{ fontSize: isMobile ? 23 : 28, fontWeight: 700, margin: "0 0 10px", lineHeight: 1.2 }}>
-            {current.question || "—"}
-          </h2>
-          {current.description && (
-            <p style={{ fontSize: 16, opacity: 0.7, margin: "0 0 22px" }}>{current.description}</p>
-          )}
+            {heading && (
+              <h2 style={{ fontSize: isMobile ? 23 : 28, fontWeight: 700, margin: "0 0 10px", lineHeight: 1.2 }}>
+                {heading}
+              </h2>
+            )}
+            {current.description && (
+              <p style={{ fontSize: 16, opacity: 0.7, margin: "0 0 22px" }}>{current.description}</p>
+            )}
 
-          {/* Pola wg typu */}
-          {(isTextInput(current.type) || current.type === "phone") && (
-            <motion.div animate={shake}>
-              {current.type === "phone" && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <select
-                    value={phonePrefix}
-                    onChange={(e) => {
-                      const prefix = e.target.value;
-                      setPhonePrefix(prefix);
-                      const local = splitPhone(
-                        (answers[current.id] as string) || "",
-                        prefix
-                      ).local;
-                      setAnswer(local.trim() ? `${prefix} ${local}` : "");
+            {/* Pola wejściowe (jedno lub wiele — item 6). */}
+            {isInputStep(current) && (
+              <motion.div animate={shake} style={{ display: "grid", gap: 22 }}>
+                {fields.map((f) => (
+                  <FieldControl
+                    key={f.id}
+                    field={f}
+                    showLabel={container}
+                    value={answers[f.id]}
+                    error={errors[f.id] ?? null}
+                    accent={accent}
+                    text={text}
+                    align={align}
+                    autoFocusFirst={fields[0]?.id === f.id}
+                    phonePrefix={phonePrefixes[f.id] || f.phonePrefix || DEFAULT_PHONE_PREFIX}
+                    onPhonePrefix={(prefix) => {
+                      setPhonePrefixes((p) => ({ ...p, [f.id]: prefix }));
+                      const local = splitPhone((answers[f.id] as string) || "", prefix).local;
+                      setFieldAnswer(f.id, local.trim() ? `${prefix} ${local}` : "");
                     }}
-                    aria-label="Prefiks kraju"
-                    style={{ ...fieldStyle(text, !!error), width: "auto", flexShrink: 0 }}
-                  >
-                    {COUNTRY_PREFIXES.map((p) => (
-                      <option key={p.iso} value={p.code}>
-                        {p.flag} {p.code}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    autoFocus
-                    type="tel"
-                    value={splitPhone((answers[current.id] as string) || "", phonePrefix).local}
-                    onChange={(e) => {
-                      const local = e.target.value;
-                      setAnswer(local.trim() ? `${phonePrefix} ${local}` : "");
-                    }}
-                    onBlur={() => {
-                      // Sprowadź numer do spójnego formatu (np. „+48 XXX XXX XXX”),
-                      // o ile jest poprawny — nie przeszkadzając w pisaniu.
-                      const local = splitPhone((answers[current.id] as string) || "", phonePrefix).local;
-                      if (local.trim() && !validateStepValue(current, `${phonePrefix} ${local}`)) {
-                        setAnswer(formatPhoneValue(phonePrefix, local));
+                    onChange={(val) => setFieldAnswer(f.id, val)}
+                    onBlurValidate={() => {
+                      if (isChoice(f.type)) return;
+                      const raw = (answers[f.id] as string) || "";
+                      // Domknij format telefonu, jeśli poprawny.
+                      if (f.type === "phone") {
+                        const prefix = phonePrefixes[f.id] || f.phonePrefix || DEFAULT_PHONE_PREFIX;
+                        const local = splitPhone(raw, prefix).local;
+                        if (local.trim() && !validateFieldValue(f, `${prefix} ${local}`)) {
+                          setFieldAnswer(f.id, formatPhoneValue(prefix, local));
+                        }
                       }
-                      validateCurrent(false);
+                      setErrors((e) => ({ ...e, [f.id]: validateFieldValue(f, raw) }));
                     }}
-                    placeholder={current.placeholder}
-                    style={fieldStyle(text, !!error)}
+                    onChooseSingle={
+                      autoAdvanceChoice
+                        ? (label, next) => chooseSingleAuto(f, label, next)
+                        : undefined
+                    }
+                    onToggleMulti={(label) => toggleMulti(f.id, label)}
+                    reduce={!!reduce}
+                    spring={spring}
                   />
-                </div>
-              )}
-              {current.type === "short_text" && (
-                <input
-                  autoFocus
-                  value={(answers[current.id] as string) || ""}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  onBlur={() => validateCurrent(false)}
-                  placeholder={current.placeholder}
-                  style={fieldStyle(text, !!error)}
-                />
-              )}
-              {current.type === "email" && (
-                <input
-                  autoFocus
-                  type="email"
-                  value={(answers[current.id] as string) || ""}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  onBlur={() => validateCurrent(false)}
-                  placeholder={current.placeholder}
-                  style={fieldStyle(text, !!error)}
-                />
-              )}
-              {current.type === "long_text" && (
-                <textarea
-                  autoFocus
-                  rows={4}
-                  value={(answers[current.id] as string) || ""}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  onBlur={() => validateCurrent(false)}
-                  placeholder={current.placeholder}
-                  style={{ ...fieldStyle(text, !!error), resize: "vertical" }}
-                />
-              )}
-            </motion.div>
-          )}
+                ))}
+              </motion.div>
+            )}
 
-          {current.type === "single_choice" && (
-            <div style={{ display: "grid", gap: 10, marginBottom: 8 }}>
-              {(current.options ?? []).map((o, i) => (
-                <motion.button
-                  key={o.id}
-                  onClick={() => chooseSingle(o.label, o.next)}
-                  initial={{ opacity: 0, y: reduce ? 0 : 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={reduce ? { duration: 0 } : { ...spring, delay: 0.08 + i * 0.06 }}
-                  style={optionStyle(accent, text, (answers[current.id] as string) === o.label)}
-                >
-                  <span style={keyBadge(accent)}>{String.fromCharCode(65 + i)}</span>
-                  {o.label}
-                </motion.button>
-              ))}
-            </div>
-          )}
+            {/* Przyciski akcji (nie dla auto-przejścia ani end). */}
+            {!autoAdvanceChoice && current.type !== "end" && (
+              <div style={{ marginTop: 24, display: "flex", justifyContent: align === "center" ? "center" : "flex-start" }}>
+                <button onClick={advance} style={btn}>
+                  {current.type === "welcome" ? current.cta || "Dalej" : "Dalej"}
+                  <ArrowRight size={18} />
+                </button>
+              </div>
+            )}
 
-          {current.type === "multi_choice" && (
-            <div style={{ display: "grid", gap: 10, marginBottom: 8 }}>
-              {(current.options ?? []).map((o, i) => {
-                const sel = ((answers[current.id] as string[]) || []).includes(o.label);
-                return (
-                  <button
-                    key={o.id}
-                    onClick={() => toggleMulti(o.label)}
-                    style={optionStyle(accent, text, sel)}
-                  >
-                    <span style={keyBadge(accent)}>{String.fromCharCode(65 + i)}</span>
-                    {o.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {error && (
-            <p style={{ color: ERROR_COLOR, fontSize: 14, margin: "10px 0 0" }}>{error}</p>
-          )}
-
-          {/* Przyciski akcji (nie dla single_choice ani end) */}
-          {current.type !== "single_choice" && current.type !== "end" && (
-            <div style={{ marginTop: 24, display: "flex", justifyContent: align === "center" ? "center" : "flex-start" }}>
-              <button onClick={advance} style={btn}>
-                {current.type === "welcome" ? current.cta || "Dalej" : "Dalej"}
-                <ArrowRight size={18} />
-              </button>
-            </div>
-          )}
-
-          {current.type === "end" && !preview && (
-            <p style={{ fontSize: 14, opacity: 0.6, marginTop: 18 }}>
-              Możesz zamknąć to okno.
-            </p>
-          )}
-        </motion.div>
+            {current.type === "end" && !preview && (
+              <p style={{ fontSize: 14, opacity: 0.6, marginTop: 18 }}>Możesz zamknąć to okno.</p>
+            )}
+          </motion.div>
         </AnimatePresence>
       </div>
+    </div>
+  );
+}
+
+/* ── Kontrolka pojedynczego pola ────────────────────────────── */
+function FieldControl({
+  field,
+  showLabel,
+  value,
+  error,
+  accent,
+  text,
+  align,
+  autoFocusFirst,
+  phonePrefix,
+  onPhonePrefix,
+  onChange,
+  onBlurValidate,
+  onChooseSingle,
+  onToggleMulti,
+  reduce,
+  spring,
+}: {
+  field: FormField;
+  showLabel: boolean;
+  value: string | string[] | undefined;
+  error: string | null;
+  accent: string;
+  text: string;
+  align: string;
+  autoFocusFirst: boolean;
+  phonePrefix: string;
+  onPhonePrefix: (prefix: string) => void;
+  onChange: (val: string | string[]) => void;
+  onBlurValidate: () => void;
+  onChooseSingle?: (label: string, next: string) => void;
+  onToggleMulti: (label: string) => void;
+  reduce: boolean;
+  spring: object;
+}) {
+  const strVal = (value as string) || "";
+  const arrVal = (value as string[]) || [];
+  const invalid = !!error;
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {showLabel && field.question && (
+        <div style={{ textAlign: align as React.CSSProperties["textAlign"] }}>
+          <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.3 }}>{field.question}</span>
+          {field.description && (
+            <div style={{ fontSize: 14, opacity: 0.65, marginTop: 2 }}>{field.description}</div>
+          )}
+        </div>
+      )}
+
+      {field.type === "phone" && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <select
+            value={phonePrefix}
+            onChange={(e) => onPhonePrefix(e.target.value)}
+            aria-label="Prefiks kraju"
+            style={{ ...fieldStyle(text, invalid), width: "auto", flexShrink: 0 }}
+          >
+            {COUNTRY_PREFIXES.map((p) => (
+              <option key={p.iso} value={p.code}>
+                {p.flag} {p.code}
+              </option>
+            ))}
+          </select>
+          <input
+            autoFocus={autoFocusFirst}
+            type="tel"
+            value={splitPhone(strVal, phonePrefix).local}
+            onChange={(e) => {
+              const local = e.target.value;
+              onChange(local.trim() ? `${phonePrefix} ${local}` : "");
+            }}
+            onBlur={onBlurValidate}
+            placeholder={field.placeholder}
+            style={fieldStyle(text, invalid)}
+          />
+        </div>
+      )}
+
+      {field.type === "short_text" && (
+        <input
+          autoFocus={autoFocusFirst}
+          value={strVal}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlurValidate}
+          placeholder={field.placeholder}
+          style={fieldStyle(text, invalid)}
+        />
+      )}
+
+      {field.type === "email" && (
+        <input
+          autoFocus={autoFocusFirst}
+          type="email"
+          value={strVal}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlurValidate}
+          placeholder={field.placeholder}
+          style={fieldStyle(text, invalid)}
+        />
+      )}
+
+      {field.type === "long_text" && (
+        <textarea
+          autoFocus={autoFocusFirst}
+          rows={4}
+          value={strVal}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlurValidate}
+          placeholder={field.placeholder}
+          style={{ ...fieldStyle(text, invalid), resize: "vertical" }}
+        />
+      )}
+
+      {field.type === "single_choice" && (
+        <div style={{ display: "grid", gap: 10 }}>
+          {(field.options ?? []).map((o, i) => (
+            <motion.button
+              key={o.id}
+              onClick={() =>
+                onChooseSingle ? onChooseSingle(o.label, o.next) : onChange(o.label)
+              }
+              initial={{ opacity: 0, y: reduce ? 0 : 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={reduce ? { duration: 0 } : { ...spring, delay: 0.08 + i * 0.06 }}
+              style={optionStyle(accent, text, strVal === o.label)}
+            >
+              <span style={keyBadge(accent)}>{String.fromCharCode(65 + i)}</span>
+              {o.label}
+            </motion.button>
+          ))}
+        </div>
+      )}
+
+      {field.type === "multi_choice" && (
+        <div style={{ display: "grid", gap: 10 }}>
+          {(field.options ?? []).map((o, i) => {
+            const sel = arrVal.includes(o.label);
+            return (
+              <button key={o.id} onClick={() => onToggleMulti(o.label)} style={optionStyle(accent, text, sel)}>
+                <span style={keyBadge(accent)}>{String.fromCharCode(65 + i)}</span>
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {error && <p style={{ color: ERROR_COLOR, fontSize: 14, margin: "2px 0 0" }}>{error}</p>}
     </div>
   );
 }
