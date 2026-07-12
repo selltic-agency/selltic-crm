@@ -40,6 +40,8 @@ import {
   SlidersHorizontal,
   Palette,
   Layers,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
@@ -150,6 +152,13 @@ export default function FormEditorPage() {
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
 
+  // Undo/redo (item 7): stosy migawek JSON schematu. Migawka jest robiona po
+  // krótkim debounce, więc jedna edycja = jeden krok cofnięcia (nie per znak).
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+  const [redoStack, setRedoStack] = useState<string[]>([]);
+  const lastSnapshot = useRef<string>("");
+  const skipSnapshot = useRef(false);
+
   const loadedRef = useRef(false);
 
   // ── Wczytanie ──────────────────────────────────────────────
@@ -167,11 +176,78 @@ export default function FormEditorPage() {
         setStatus((data.status as FormStatus) ?? "draft");
         setSlug((data.slug as string | null) ?? null);
         setActiveId(s.steps[0]?.id ?? "");
+        lastSnapshot.current = JSON.stringify(s);
       }
       setLoading(false);
       setTimeout(() => (loadedRef.current = true), 0);
     })();
   }, [id, supabase]);
+
+  // ── Historia (undo/redo) — migawka po debounce 400ms ───────
+  useEffect(() => {
+    if (!loadedRef.current || !schema) return;
+    const t = setTimeout(() => {
+      const snap = JSON.stringify(schema);
+      if (skipSnapshot.current) {
+        skipSnapshot.current = false;
+        lastSnapshot.current = snap;
+        return;
+      }
+      if (snap !== lastSnapshot.current) {
+        const prev = lastSnapshot.current;
+        lastSnapshot.current = snap;
+        if (prev) {
+          setUndoStack((u) => [...u.slice(-49), prev]);
+          setRedoStack([]);
+        }
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [schema]);
+
+  const applyHistory = useCallback((snapshot: string) => {
+    skipSnapshot.current = true;
+    lastSnapshot.current = snapshot;
+    const parsed = JSON.parse(snapshot) as FormSchema;
+    setSchema(parsed);
+    setActiveId((cur) => (parsed.steps.some((s) => s.id === cur) ? cur : parsed.steps[0]?.id ?? ""));
+  }, []);
+
+  const undo = useCallback(() => {
+    setUndoStack((u) => {
+      if (!u.length) return u;
+      const prev = u[u.length - 1];
+      setRedoStack((r) => [...r, lastSnapshot.current]);
+      applyHistory(prev);
+      return u.slice(0, -1);
+    });
+  }, [applyHistory]);
+
+  const redo = useCallback(() => {
+    setRedoStack((r) => {
+      if (!r.length) return r;
+      const next = r[r.length - 1];
+      setUndoStack((u) => [...u, lastSnapshot.current]);
+      applyHistory(next);
+      return r.slice(0, -1);
+    });
+  }, [applyHistory]);
+
+  // Skróty klawiszowe — tylko poza polami tekstowymi, by nie przechwytywać
+  // natywnego cofania w inputach.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.key.toLowerCase() !== "z") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
 
   // ── Autozapis (debounce 800ms) ─────────────────────────────
   useEffect(() => {
@@ -385,6 +461,24 @@ export default function FormEditorPage() {
           {saveState === "saving" ? "Zapisywanie…" : saveState === "saved" ? "Zapisano ✓" : ""}
         </span>
         <div style={{ flex: 1 }} />
+        <button
+          onClick={undo}
+          disabled={undoStack.length === 0}
+          style={{ ...iconBtn, opacity: undoStack.length ? 1 : 0.4, cursor: undoStack.length ? "pointer" : "not-allowed" }}
+          aria-label="Cofnij"
+          title="Cofnij (Ctrl+Z)"
+        >
+          <Undo2 size={17} color={tokens.muted} />
+        </button>
+        <button
+          onClick={redo}
+          disabled={redoStack.length === 0}
+          style={{ ...iconBtn, opacity: redoStack.length ? 1 : 0.4, cursor: redoStack.length ? "pointer" : "not-allowed" }}
+          aria-label="Ponów"
+          title="Ponów (Ctrl+Shift+Z)"
+        >
+          <Redo2 size={17} color={tokens.muted} />
+        </button>
         <button onClick={saveChanges} style={ghostButton}>
           Zapisz zmiany
         </button>
