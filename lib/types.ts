@@ -167,7 +167,22 @@ export type AppSettings = {
 };
 
 // ── Scraper headless (zakładka "Scraper") ───────────────────────────────
-export type ScrapeJobStatus = "pending" | "running" | "done" | "error";
+export type ScrapeJobStatus = "pending" | "running" | "done" | "error" | "canceled";
+
+// Status całej paczki (jedno kliknięcie "Rozpocznij scrapowanie"). Sterowany
+// przyciskami Pauza / Stop / Wznów; 'completed' ustawia backend po zakończeniu.
+export type ScrapeBatchStatus = "running" | "paused" | "stopped" | "completed";
+
+export type ScrapeBatch = {
+  id: string;
+  owner: string;
+  keywords: string[];
+  locations: string[];
+  total_jobs: number;
+  status: ScrapeBatchStatus;
+  created_at: string;
+  updated_at: string;
+};
 
 export type ScrapeJob = {
   id: string;
