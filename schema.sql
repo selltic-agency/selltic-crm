@@ -66,6 +66,8 @@ create table if not exists deals (
   -- migration_lead_scoring_optional.sql.
   lead_score           int check (lead_score is null or lead_score >= 0),
   lead_score_breakdown jsonb,
+  -- „Cel kontaktu" (multi-select) także na deals — patrz migration_properties_system.sql.
+  purposes             text[] not null default '{}',
   -- Denormalizowany numer (same cyfry) do wyszukiwania odpornego na format.
   phone_digits         text generated always as (regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g')) stored
 );
@@ -137,14 +139,20 @@ create table if not exists duplicate_flags (
   created_at  timestamptz not null default now()
 );
 
--- ── GLOBALNE DEFINICJE WŁAŚCIWOŚCI ──────────────────────────────────────
+-- ── GLOBALNE DEFINICJE WŁAŚCIWOŚCI (custom fields, HubSpot/Notion-style) ──
+-- `key` = stabilny slug trzymany w props jsonb; `label` = nazwa wyświetlana.
+-- `type` bez CHECK-a: text|number|date|select|multi_select|boolean|email.
+-- `options` (dla list): [{key,label,color?}] lub wstecznie ["opcja", ...].
+-- `archived_at` = miękkie usunięcie (danych właściwości nie kasujemy).
 create table if not exists property_defs (
   id          uuid primary key default gen_random_uuid(),
   owner       uuid not null references auth.users on delete cascade,
   key         text not null,
-  type        text not null default 'text',    -- text|number|date|select
+  label       text,
+  type        text not null default 'text',
   options     jsonb,
   position    int not null default 0,
+  archived_at timestamptz,
   unique (owner, key)
 );
 

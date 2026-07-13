@@ -16,7 +16,14 @@ export type PipelineStage = {
 
 export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | "task";
 
-export type PropertyType = "text" | "number" | "date" | "select";
+// Typy właściwości (custom fields). Rozszerzone o multi_select / boolean /
+// email; `type` w bazie nie ma CHECK-a, więc kolumna dopuszcza te wartości.
+export type PropertyType = "text" | "number" | "date" | "select" | "multi_select" | "boolean" | "email";
+
+// Opcja listy (select / multi_select). `key` jest stabilny (trzymany w props),
+// `label` edytowalny. Dane wstecznie mogą być zwykłym string[] — patrz
+// normalizeOptions() w lib/properties.ts.
+export type PropertyOption = { key: string; label: string; color?: string };
 
 // „Deal Owner” — prosty ręczny przydział (bez modelu workspace z Fazy 11).
 export type Assignee = "dominik" | "kuba";
@@ -31,7 +38,9 @@ export type Deal = {
   email: string | null;
   phone: string | null;
   company: string | null;
-  props: Record<string, string>;
+  // Wartości właściwości własnych (custom fields) — mieszane typy: string dla
+  // tekstu/daty/liczby, boolean, string[] dla multi_select, plus dane z konwersji.
+  props: Record<string, unknown>;
   stage: Stage;
   value: number;
   source: string | null;
@@ -39,6 +48,9 @@ export type Deal = {
   assignee: Assignee | null;
   // Kategoria branży (Feature 1) — przeniesiona z prospektu przy konwersji.
   category?: string | null;
+  // Cele kontaktu (Feature 2) — wielowartościowe; kopiowane z prospektu przy
+  // konwersji. Dedykowana kolumna (model hybrydowy), jak na prospektach.
+  purposes?: string[];
   opened_at: string;
   closed_at: string | null;
   created_at: string;
@@ -134,9 +146,15 @@ export type PropertyDef = {
   id: string;
   owner: string;
   key: string;
+  // Nazwa wyświetlana; gdy brak — używamy `key` (patrz propLabel()).
+  label?: string | null;
   type: PropertyType;
-  options: string[] | null;
+  // Dla list: PropertyOption[] lub (wstecznie) string[]. Normalizuj przez
+  // normalizeOptions() zanim użyjesz.
+  options: PropertyOption[] | string[] | null;
   position: number;
+  // Miękkie usunięcie — właściwość z danymi archiwizujemy, nie kasujemy.
+  archived_at?: string | null;
 };
 
 // Zgłoszenie (surowa odpowiedź formularza) — widok Inbox.

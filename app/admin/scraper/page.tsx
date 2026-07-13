@@ -20,6 +20,7 @@ import { useToast } from "@/components/Toast";
 import { humanizeScrapeError, ZERO_RESULTS_MESSAGE, formatFound } from "@/lib/scraperMessages";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
 import { useClassification } from "@/lib/classification";
+import { useIsMobile } from "@/lib/responsive";
 import type { LeadCategory, ScrapeJob, ScrapeBatch, ScrapeBatchStatus, ScrapedLead, Prospect } from "@/lib/types";
 
 type Tab = "leads" | "duplicates" | "archive";
@@ -708,7 +709,33 @@ function AssignCategoriesModal({
     Object.fromEntries(keywords.map((k) => [k, firstKey]))
   );
   const [saving, setSaving] = useState(false);
+  // Zaznaczenie do przypisania zbiorczego (checkboxy). Domyślnie nic.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkKey, setBulkKey] = useState<string>(firstKey);
+  const isMobile = useIsMobile(560);
   const allAssigned = keywords.every((k) => mapping[k]);
+  const allSelected = keywords.length > 0 && selected.size === keywords.length;
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(keywords));
+  }
+  function toggleOne(k: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
+  // Przypisz jedną kategorię wszystkim zaznaczonym słowom kluczowym naraz.
+  function applyBulk() {
+    if (!bulkKey || selected.size === 0) return;
+    setMapping((m) => {
+      const next = { ...m };
+      selected.forEach((k) => (next[k] = bulkKey));
+      return next;
+    });
+  }
 
   async function submit() {
     if (!allAssigned || saving) return;
@@ -728,55 +755,134 @@ function AssignCategoriesModal({
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
-          width: "min(520px, calc(100vw - 32px))",
-          maxHeight: "min(80vh, calc(100vh - 80px))",
-          overflowY: "auto",
+          width: "min(560px, calc(100vw - 24px))",
+          maxHeight: "min(85vh, calc(100vh - 48px))",
+          display: "flex",
+          flexDirection: "column",
           background: tokens.card,
           borderRadius: tokens.radius,
           border: `1px solid ${tokens.border}`,
           boxShadow: "0 24px 60px rgba(15,18,28,0.18)",
           zIndex: 41,
-          padding: 22,
+          padding: isMobile ? 16 : 22,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexShrink: 0 }}>
           <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Przypisz kategorie</h2>
           <button
             onClick={onCancel}
             aria-label="Zamknij"
-            style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
+            style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }}
           >
             <X size={15} color={tokens.muted} />
           </button>
         </div>
-        <p style={{ fontSize: 13.5, color: tokens.muted, margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13.5, color: tokens.muted, margin: "0 0 14px", flexShrink: 0 }}>
           {keywords.length === 1 ? "To słowo kluczowe nie ma jeszcze kategorii." : "Te słowa kluczowe nie mają jeszcze kategorii."}{" "}
           Wskaż kategorię — zapamiętamy przypisanie na przyszłość, więc następnym razem
           scrapowanie ruszy bez pytania.
         </p>
 
-        <div style={{ display: "grid", gap: 10 }}>
-          {keywords.map((k) => (
-            <div key={k} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {k}
-              </span>
-              <select
-                value={mapping[k] ?? ""}
-                onChange={(e) => setMapping((m) => ({ ...m, [k]: e.target.value }))}
-                style={{ ...inputStyle, width: 240, flexShrink: 0 }}
+        {/* Pasek akcji zbiorczej — pojawia się przy > 1 słowie kluczowym. */}
+        {keywords.length > 1 && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 12px",
+              marginBottom: 12,
+              borderRadius: 10,
+              border: `1px solid ${tokens.border}`,
+              background: tokens.bg,
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={toggleAll}
+              style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: tokens.text, padding: 0 }}
+            >
+              {allSelected ? <CheckSquare size={16} color={tokens.accent} /> : <Square size={16} color={tokens.muted} />}
+              Zaznacz wszystkie
+            </button>
+            <div style={{ flex: 1, minWidth: 8 }} />
+            <select
+              value={bulkKey}
+              onChange={(e) => setBulkKey(e.target.value)}
+              style={{ ...inputStyle, width: isMobile ? "100%" : 200, flex: isMobile ? "1 1 100%" : "0 0 auto" }}
+            >
+              {categories.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={applyBulk}
+              disabled={selected.size === 0 || !bulkKey}
+              style={{
+                ...ghostButton,
+                padding: "8px 12px",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: selected.size === 0 ? "default" : "pointer",
+                opacity: selected.size === 0 || !bulkKey ? 0.55 : 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Przypisz zaznaczonym{selected.size ? ` (${selected.size})` : ""}
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 10, overflowY: "auto", minHeight: 0, flex: 1, paddingRight: 2 }}>
+          {keywords.map((k) => {
+            const isSel = selected.has(k);
+            return (
+              <div
+                key={k}
+                style={{
+                  display: "flex",
+                  flexDirection: isMobile ? "column" : "row",
+                  alignItems: isMobile ? "stretch" : "center",
+                  gap: isMobile ? 6 : 12,
+                }}
               >
-                {categories.map((c) => (
-                  <option key={c.key} value={c.key}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                  {keywords.length > 1 && (
+                    <button
+                      onClick={() => toggleOne(k)}
+                      aria-label={isSel ? "Odznacz" : "Zaznacz"}
+                      style={{ background: "none", border: "none", cursor: "pointer", display: "grid", placeItems: "center", padding: 0, flexShrink: 0 }}
+                    >
+                      {isSel ? <CheckSquare size={16} color={tokens.accent} /> : <Square size={16} color={tokens.muted} />}
+                    </button>
+                  )}
+                  <span
+                    title={k}
+                    style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  >
+                    {k}
+                  </span>
+                </div>
+                <select
+                  value={mapping[k] ?? ""}
+                  onChange={(e) => setMapping((m) => ({ ...m, [k]: e.target.value }))}
+                  style={{ ...inputStyle, width: isMobile ? "100%" : 240, flexShrink: 0 }}
+                >
+                  {categories.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18, flexShrink: 0 }}>
           <button onClick={onCancel} style={ghostButton}>
             Anuluj
           </button>

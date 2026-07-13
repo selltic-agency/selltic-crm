@@ -3,13 +3,12 @@
 // niestandardowe (property_defs) dostarcza wywołujący przez `builtInFields`.
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Plus, X } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, ghostButton, primaryButton } from "@/lib/ui";
 import { useStages } from "@/lib/stages";
-import { PropertyDef, PropertyType } from "@/lib/types";
+import { PropertyType } from "@/lib/types";
 import { Filter, FilterOperator } from "@/lib/filters";
 
 export type FieldOption = string | { key: string; label: string };
@@ -39,36 +38,21 @@ export type FilterBarHandle = {
 const FilterBar = forwardRef<
   FilterBarHandle,
   {
-    builtInFields: FieldDef[];
+    /** Pełna lista pól filtrowalnych (wbudowane + właściwości) — buduje ją strona. */
+    fields: FieldDef[];
     onFilterChange: (filters: Filter[]) => void;
-    /** Dociągnij i domieszaj definicje właściwości własnych (tylko Leady). */
-    withCustomProperties?: boolean;
     /** Chipy-skróty (np. „Tylko bez strony”) — przełączają jeden zdefiniowany filtr. */
     quickFilters?: QuickFilter[];
   }
->(function FilterBar({ builtInFields, onFilterChange, withCustomProperties = false, quickFilters }, ref) {
+>(function FilterBar({ fields, onFilterChange, quickFilters }, ref) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const supabase = useMemo(() => createClient(), []);
   const { stages } = useStages();
 
-  const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
   const [filters, setFilters] = useState<Filter[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingFilter, setEditingFilter] = useState<Partial<Filter> | null>(null);
-
-  // Wczytaj definicje pól własnych (tylko gdy strona ich używa — Leady).
-  useEffect(() => {
-    if (!withCustomProperties) return;
-    (async () => {
-      const { data } = await supabase
-        .from("property_defs")
-        .select("*")
-        .order("position", { ascending: true });
-      if (data) setPropDefs(data as PropertyDef[]);
-    })();
-  }, [supabase, withCustomProperties]);
 
   // Synchronizacja z URL przy montowaniu.
   useEffect(() => {
@@ -108,17 +92,7 @@ const FilterBar = forwardRef<
     setFilters: (newFilters: Filter[]) => updateFilters(newFilters),
   }));
 
-  // Pola = wbudowane (dostarczone przez wywołującego) + właściwości własne.
-  const allFields = useMemo(() => {
-    if (!withCustomProperties) return builtInFields;
-    const custom: FieldDef[] = propDefs.map((p) => ({
-      key: p.key,
-      label: p.key,
-      type: p.type,
-      options: p.options || undefined,
-    }));
-    return [...builtInFields, ...custom];
-  }, [builtInFields, propDefs, withCustomProperties]);
+  const allFields = fields;
 
   const removeFilter = (index: number) => {
     updateFilters(filters.filter((_, i) => i !== index));

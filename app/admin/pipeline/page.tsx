@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   X,
@@ -30,10 +30,12 @@ import { useStages } from "@/lib/stages";
 import LeadTable, { type SortConfig } from "@/components/LeadTable";
 import OwnerAvatar from "@/components/OwnerAvatar";
 import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/FilterBar";
-import SavedViewTabs from "@/components/SavedViewTabs";
+import ViewTabs from "@/components/ViewTabs";
 import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
 import { loadViewPrefs, saveViewPrefs, planHydration, type ViewMode } from "@/lib/viewPrefs";
+import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, type PropertyView } from "@/lib/properties";
+import { useToast } from "@/components/Toast";
 
 const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
   { key: "stage", label: "Etap", type: "stage" },
@@ -68,8 +70,9 @@ export default function PipelinePage() {
   const supabase = useMemo(() => createClient(), []);
   const reduce = useReducedMotion();
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const toast = useToast();
   const { stages, loading: stagesLoading } = useStages();
+  const { views: properties } = useEntityProperties("deals");
   const [deals, setDeals] = useState<DealRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -77,6 +80,39 @@ export default function PipelinePage() {
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
   const [tableSort, setTableSort] = useState<SortConfig>(DEFAULT_TABLE_SORT);
   const filterBarRef = useRef<FilterBarHandle>(null);
+
+  // Pola filtrów = wbudowane + właściwości (kategoria/cel + własne). Resolver
+  // mapuje właściwości własne na ścieżkę props jsonb dla zapytania.
+  const filterFields = useMemo<FieldDef[]>(() => [...DEAL_BUILT_IN_FIELDS, ...properties.map(toFieldDef)], [properties]);
+  const resolveColumn = useMemo(() => makeColumnResolver(properties), [properties]);
+
+  // Zbiorcza edycja dowolnej właściwości dla zaznaczonych deali.
+  const handleBulkEdit = useCallback(
+    async (ids: string[], view: PropertyView, value: unknown, mode: "replace" | "add") => {
+      if (ids.length === 0) return;
+      const { error } = await applyBulkProperty(supabase, "deals", ids, view, value, mode);
+      if (error) {
+        toast.error("Nie udało się zapisać właściwości.");
+        return;
+      }
+      // Cel kontaktu: dopisz też historię (append-only), gdy dokładamy wartości.
+      if (view.key === "purposes" && mode === "add") {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const vals = Array.isArray(value) ? (value as string[]) : [];
+        if (user && vals.length) {
+          await supabase.from("deal_purposes").insert(
+            ids.flatMap((deal_id) => vals.map((purpose) => ({ owner: user.id, deal_id, purpose, source: "bulk" })))
+          );
+        }
+      }
+      toast.success(ids.length === 1 ? "Zapisano." : `Zaktualizowano ${ids.length} leadów.`);
+      load(filters);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [supabase, toast, filters]
+  );
 
   // ID zalogowanego użytkownika — do namespace'owania trwałego stanu widoku.
   // `undefined` = jeszcze nie wiadomo, `null` = brak sesji.
@@ -135,31 +171,31 @@ export default function PipelinePage() {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (hydrated || viewsLoading || userId === undefined) return;
-    // Filtry z URL (?f=…) obejmują zwykłe odświeżenie (FilterBar sam zapisuje je
-    // do URL) i udostępniony link — wtedy FilterBar odtwarza je sam z URL, więc
-    // ich nie nadpisujemy. Tryb widoku, sortowanie i aktywny widok odtwarzamy
-    // ZAWSZE z prefs (nie ma ich w URL), więc odświeżenie przywraca pełny stan.
-    const hasUrlFilters = !!searchParams.get("f");
+    // Stan początkowy to ZAWSZE „Wszystkie" (brak widoku, brak filtrów). Z prefs
+    // przywracamy wyłącznie preferencje prezentacji (tryb widoku + sortowanie);
+    // filtry z udostępnionego linku (?f=…) odtwarza sam FilterBar i pojawią się
+    // jako filtr tymczasowy, nie jako zapisany widok.
     const prefs = loadViewPrefs("deals", userId);
-    const plan = planHydration(prefs, hasUrlFilters);
-    if (plan.restoreFromPrefs && prefs) {
+    const plan = planHydration(prefs);
+    if (plan.restoreDisplayFromPrefs && prefs) {
       if (prefs.viewMode) setViewMode(prefs.viewMode);
       if (prefs.sort !== undefined) setTableSort(prefs.sort ? { key: prefs.sort.column, direction: prefs.sort.direction } : DEFAULT_TABLE_SORT);
-      if (prefs.activeViewId !== undefined) selectView(prefs.activeViewId);
-      if (plan.restoreFiltersFromPrefs) filterBarRef.current?.setFilters(prefs.filters ?? []);
-    } else if (plan.clearActiveView) {
-      selectView(null);
-    } else if (plan.applyDefaultView && activeView) {
-      applyView(activeView.filters, activeView.view_mode, activeView.sort);
     }
     setHydrated(true);
-  }, [hydrated, viewsLoading, userId, activeView, applyView, searchParams, selectView]);
+  }, [hydrated, viewsLoading, userId]);
 
   const handleSelectView = (id: string) => {
     selectView(id);
     const v = views.find((x) => x.id === id);
     if (v) applyView(v.filters, v.view_mode, v.sort);
   };
+
+  // „Wszystkie" — stan domyślny: brak aktywnego widoku i brak filtrów.
+  const handleSelectAll = useCallback(() => {
+    selectView(null);
+    filterBarRef.current?.setFilters([]);
+    setTableSort(DEFAULT_TABLE_SORT);
+  }, [selectView]);
 
   const currentSort: Sort | null = viewMode === "table" ? { column: tableSort.key, direction: tableSort.direction } : null;
 
@@ -172,16 +208,28 @@ export default function PipelinePage() {
     );
   }, [activeView, filters, viewMode, currentSort]);
 
-  // ── Zapis trwałego stanu widoku ───────────────────────────────────────
+  // Filtr tymczasowy (ad-hoc): bieżące filtry różnią się od aktywnej zakładki
+  // (albo od „Wszystkie", gdy żaden widok nie jest wybrany).
+  const adhoc = activeView ? isDirty : filters.length > 0;
+
+  // Wyczyść filtr tymczasowy — wróć do bazowej zakładki bez ruszania widoków.
+  const handleClearAdhoc = useCallback(() => {
+    if (activeView) applyView(activeView.filters, activeView.view_mode, activeView.sort);
+    else {
+      filterBarRef.current?.setFilters([]);
+      setTableSort(DEFAULT_TABLE_SORT);
+    }
+  }, [activeView, applyView]);
+
+  // ── Zapis preferencji prezentacji (tylko tryb widoku + sortowanie) ─────
+  // Filtry i aktywny widok NIE są utrwalane — każde wejście startuje z „Wszystkie".
   useEffect(() => {
     if (!hydrated) return;
     saveViewPrefs("deals", userId ?? null, {
-      activeViewId: activeId,
-      filters,
       sort: { column: tableSort.key, direction: tableSort.direction },
       viewMode: viewMode as ViewMode,
     });
-  }, [hydrated, userId, activeId, filters, tableSort, viewMode]);
+  }, [hydrated, userId, tableSort, viewMode]);
 
   const load = useCallback(async (activeFilters: Filter[]) => {
     setLoading(true);
@@ -198,12 +246,12 @@ export default function PipelinePage() {
       .order("due_at", { referencedTable: "tasks", ascending: true })
       .limit(1, { referencedTable: "tasks" });
 
-    query = buildFilterQuery(query, activeFilters);
+    query = buildFilterQuery(query, activeFilters, resolveColumn);
 
     const { data } = await query;
     setDeals((data as DealRow[]) ?? []);
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, resolveColumn]);
 
   useEffect(() => {
     load(filters);
@@ -280,21 +328,23 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      <SavedViewTabs
+      <ViewTabs
         views={views}
         activeId={activeId}
+        adhoc={adhoc}
         loading={viewsLoading}
-        isDirty={isDirty}
         storage={viewsStorage}
         error={viewsError}
-        onSelect={handleSelectView}
+        onSelectAll={handleSelectAll}
+        onSelectView={handleSelectView}
         onCreate={(name) => createView(name, { filters, sort: currentSort, view_mode: viewMode })}
         onRename={(id, name) => updateView(id, { name })}
         onDelete={deleteView}
         onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort: currentSort, view_mode: viewMode })}
+        onClearAdhoc={handleClearAdhoc}
       />
 
-      <FilterBar ref={filterBarRef} builtInFields={DEAL_BUILT_IN_FIELDS} withCustomProperties onFilterChange={setFilters} />
+      <FilterBar ref={filterBarRef} fields={filterFields} onFilterChange={setFilters} />
 
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
@@ -410,7 +460,7 @@ export default function PipelinePage() {
         </div>
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <LeadTable leads={deals} onRowClick={openDeal} sort={tableSort} onSortChange={setTableSort} />
+          <LeadTable leads={deals} onRowClick={openDeal} sort={tableSort} onSortChange={setTableSort} properties={properties} onBulkEdit={handleBulkEdit} />
         </div>
       )}
 
