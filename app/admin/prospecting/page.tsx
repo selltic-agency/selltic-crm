@@ -223,7 +223,9 @@ export default function ProspectingPage() {
     setLoading(true);
     let query = supabase.from("prospects").select("*").is("archived_at", null);
     query = buildFilterQuery(query, filters, columnForProspect);
-    if (sort) query = query.order(sort.column, { ascending: sort.direction === "asc" });
+    // nullsFirst:false → wiersze bez wartości (np. nieocenione leady) zawsze na
+    // dole, niezależnie od kierunku sortowania (spójne z sortowaniem tabeli).
+    if (sort) query = query.order(sort.column, { ascending: sort.direction === "asc", nullsFirst: false });
     else query = query.order("lead_score", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
 
     const { data } = await query;

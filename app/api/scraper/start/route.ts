@@ -24,7 +24,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Brak autoryzacji" }, { status: 401 });
   }
 
-  let body: { keywords?: string[]; locations?: string[]; contact_purpose?: string | null };
+  let body: {
+    keywords?: string[];
+    locations?: string[];
+    contact_purpose?: string | null;
+    scoring_enabled?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
@@ -42,6 +47,11 @@ export async function POST(req: Request) {
 
   // Cel kontaktu (Feature 2) — wybrany dla całej paczki, dziedziczą go leady.
   const contactPurpose = (body.contact_purpose ?? "").trim() || null;
+
+  // Scoring opcjonalny — przełącznik wybrany dla całej paczki i dziedziczony
+  // przez każde zadanie. Domyślnie włączony (brak pola = stare zachowanie).
+  // Wyłączony → backend scrapera nie liczy wyniku dla leadów z tej paczki.
+  const scoringEnabled = body.scoring_enabled !== false;
 
   // Kategoria (Feature 1) — rozstrzygamy każde słowo kluczowe z mapowania
   // category_keywords. UI wymusza zmapowanie wszystkich słów przed startem, ale
@@ -66,6 +76,7 @@ export async function POST(req: Request) {
       batch_id: batchId,
       category: categoryByKeyword.get(keyword.toLowerCase()) ?? null,
       contact_purpose: contactPurpose,
+      scoring_enabled: scoringEnabled,
     }))
   );
 
@@ -79,6 +90,7 @@ export async function POST(req: Request) {
     total_jobs: rows.length,
     status: "running",
     contact_purpose: contactPurpose,
+    scoring_enabled: scoringEnabled,
   });
   if (batchErr) {
     console.error("[scraper/start] Nie udało się utworzyć paczki", batchErr);

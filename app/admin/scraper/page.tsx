@@ -107,12 +107,15 @@ export default function ScraperPage() {
   const [keywordsText, setKeywordsText] = useState("");
   const [locationsText, setLocationsText] = useState("");
   const [contactPurpose, setContactPurpose] = useState("");
+  // Scoring opcjonalny — przełącznik per paczka (domyślnie włączony). Wyłączony
+  // → leady z tej paczki nie mają wyniku (brak sprawdzania stron, score = brak).
+  const [scoringEnabled, setScoringEnabled] = useState(true);
   const [starting, setStarting] = useState(false);
   // Modal przypisania niezmapowanych słów kluczowych do kategorii (Feature 1).
   // Trzyma też parametry oczekującego startu, by wznowić go po przypisaniu.
   const [assignModal, setAssignModal] = useState<{
     keywords: string[];
-    pending: { keywords: string[]; locations: string[]; contactPurpose: string };
+    pending: { keywords: string[]; locations: string[]; contactPurpose: string; scoringEnabled: boolean };
   } | null>(null);
 
   const [batches, setBatches] = useState<ScrapeBatch[]>([]);
@@ -369,21 +372,21 @@ export default function ScraperPage() {
     setStarting(false);
 
     if (unmapped.length > 0) {
-      setAssignModal({ keywords: unmapped, pending: { keywords, locations, contactPurpose } });
+      setAssignModal({ keywords: unmapped, pending: { keywords, locations, contactPurpose, scoringEnabled } });
       return;
     }
-    await doStart(keywords, locations, contactPurpose);
+    await doStart(keywords, locations, contactPurpose, scoringEnabled);
   }
 
   // Faktyczny start paczki — wołany bezpośrednio (wszystko zmapowane) albo po
   // przypisaniu niezmapowanych słów kluczowych w modalu.
-  async function doStart(keywords: string[], locations: string[], purpose: string) {
+  async function doStart(keywords: string[], locations: string[], purpose: string, scoring: boolean) {
     setStarting(true);
     try {
       const resp = await fetch("/api/scraper/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords, locations, contact_purpose: purpose || null }),
+        body: JSON.stringify({ keywords, locations, contact_purpose: purpose || null, scoring_enabled: scoring }),
       });
       const data = await resp.json();
       if (!resp.ok) {
@@ -420,7 +423,7 @@ export default function ScraperPage() {
     }
     const pending = assignModal?.pending;
     setAssignModal(null);
-    if (pending) await doStart(pending.keywords, pending.locations, pending.contactPurpose);
+    if (pending) await doStart(pending.keywords, pending.locations, pending.contactPurpose, pending.scoringEnabled);
   }
 
   // Sterowanie paczką: pauza / stop / wznów. Backend widzi zmianę statusu i
@@ -510,6 +513,26 @@ export default function ScraperPage() {
               </option>
             ))}
           </select>
+        </label>
+
+        {/* Scoring opcjonalny — decyzja per paczka. Wyłączony → scraper nie
+            sprawdza stron i nie liczy wyniku; leady mają „brak" zamiast score
+            (poprawny stan, nie błąd). */}
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginTop: 14, maxWidth: 460, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={scoringEnabled}
+            onChange={(e) => setScoringEnabled(e.target.checked)}
+            style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, cursor: "pointer" }}
+          />
+          <span style={{ display: "grid", gap: 2 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Włącz scoring stron WWW</span>
+            <span style={{ fontSize: 12, color: tokens.muted }}>
+              Sprawdza stronę firmy i liczy lead score (0–100). Wyłącz, gdy nie
+              potrzebujesz oceny (np. paczki „Ads") — leady zostaną bez wyniku, co
+              jest w porządku i nie blokuje przenoszenia do Prospectingu.
+            </span>
+          </span>
         </label>
 
         <button

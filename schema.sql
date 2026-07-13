@@ -61,7 +61,10 @@ create table if not exists deals (
   industry             text,
   city                 text,
   website_status       text check (website_status is null or website_status in ('none', 'active', 'broken', 'slow')),
-  lead_score           int check (lead_score is null or (lead_score >= 0 and lead_score <= 100)),
+  -- Scoring opcjonalny: brak wyniku (NULL) jest poprawny, a górnej granicy nie
+  -- narzucamy (wagi edytowalne z UI mogą dać sumę > 100). Patrz
+  -- migration_lead_scoring_optional.sql.
+  lead_score           int check (lead_score is null or lead_score >= 0),
   lead_score_breakdown jsonb,
   -- Denormalizowany numer (same cyfry) do wyszukiwania odpornego na format.
   phone_digits         text generated always as (regexp_replace(coalesce(phone, ''), '[^0-9]', '', 'g')) stored
@@ -91,7 +94,10 @@ create table if not exists prospects (
   note                     text,
   website_status           text check (website_status is null or website_status in ('none', 'active', 'broken', 'slow')),
   website_last_checked_at  timestamptz,
-  lead_score               int check (lead_score is null or (lead_score >= 0 and lead_score <= 100)),
+  -- Scoring opcjonalny: brak wyniku (NULL) jest poprawny, a górnej granicy nie
+  -- narzucamy (wagi edytowalne z UI mogą dać sumę > 100). Patrz
+  -- migration_lead_scoring_optional.sql.
+  lead_score               int check (lead_score is null or lead_score >= 0),
   lead_score_breakdown     jsonb,
   converted_deal_id        uuid references deals on delete set null,
   archived_at              timestamptz,                    -- miękkie usunięcie: !null = w Archiwum

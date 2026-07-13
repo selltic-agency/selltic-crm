@@ -191,6 +191,8 @@ export type ScrapeBatch = {
   updated_at: string;
   // Cel kontaktu wybrany dla całej paczki (Feature 2) — dziedziczą go leady.
   contact_purpose?: string | null;
+  // Scoring opcjonalny per paczka: wyłączony → leady bez wyniku (score = NULL).
+  scoring_enabled?: boolean;
 };
 
 export type ScrapeJob = {
@@ -212,6 +214,8 @@ export type ScrapeJob = {
   // kopiowana na scraped_leads triggerem, więc backend scrapera jej nie dotyka.
   category?: string | null;
   contact_purpose?: string | null;
+  // Scoring opcjonalny per paczka: wyłączony → to zadanie nie liczy wyniku.
+  scoring_enabled?: boolean;
 };
 
 export type ScrapedLeadStatus = "new" | "moved" | "duplicate" | "rejected";
