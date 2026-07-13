@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Brak autoryzacji" }, { status: 401 });
   }
 
-  let body: { keywords?: string[]; locations?: string[] };
+  let body: { keywords?: string[]; locations?: string[]; contact_purpose?: string | null };
   try {
     body = await req.json();
   } catch {
@@ -40,9 +40,33 @@ export async function POST(req: Request) {
     );
   }
 
+  // Cel kontaktu (Feature 2) — wybrany dla całej paczki, dziedziczą go leady.
+  const contactPurpose = (body.contact_purpose ?? "").trim() || null;
+
+  // Kategoria (Feature 1) — rozstrzygamy każde słowo kluczowe z mapowania
+  // category_keywords. UI wymusza zmapowanie wszystkich słów przed startem, ale
+  // gdyby jakieś było nieznane, zostaje null (widoczne jako „bez kategorii”).
+  // Mapowanie trzyma słowa kluczowe pisane małymi literami — dopasowujemy po
+  // wersji lowercase, zachowując oryginalną pisownię słowa dla samego scrapera.
+  const { data: mappings } = await supabase
+    .from("category_keywords")
+    .select("keyword, category_key")
+    .in("keyword", keywords.map((k) => k.toLowerCase()));
+  const categoryByKeyword = new Map<string, string>();
+  for (const m of (mappings as { keyword: string; category_key: string }[] | null) ?? []) {
+    categoryByKeyword.set(m.keyword, m.category_key);
+  }
+
   const batchId = crypto.randomUUID();
   const rows = keywords.flatMap((keyword) =>
-    locations.map((location) => ({ owner: user.id, keyword, location, batch_id: batchId }))
+    locations.map((location) => ({
+      owner: user.id,
+      keyword,
+      location,
+      batch_id: batchId,
+      category: categoryByKeyword.get(keyword.toLowerCase()) ?? null,
+      contact_purpose: contactPurpose,
+    }))
   );
 
   // Najpierw paczka — jej wiersz jest nośnikiem statusu (running/paused/stopped/
@@ -54,6 +78,7 @@ export async function POST(req: Request) {
     locations,
     total_jobs: rows.length,
     status: "running",
+    contact_purpose: contactPurpose,
   });
   if (batchErr) {
     console.error("[scraper/start] Nie udało się utworzyć paczki", batchErr);

@@ -50,6 +50,9 @@ function prospectFields(lead: ScrapedLead) {
     business_status: lead.business_status,
     industry: lead.source_keyword,
     city: lead.source_location,
+    // Kuratorowana kategoria branży (Feature 1) — jednowartościowa, więc
+    // przy przywróceniu z Archiwum odświeżamy ją danymi z nowego scrapowania.
+    category: lead.category ?? null,
     lead_score: lead.score,
     lead_score_breakdown: lead.score_breakdown,
     website_status: lead.website_status ? WEBSITE_STATUS_MAP[lead.website_status] ?? null : null,
@@ -190,6 +193,9 @@ export async function POST(req: Request) {
           place_id: lead.place_id,
           source: "google_maps_scraper",
           ...prospectFields(lead),
+          // Cel kontaktu (Feature 2): świeży prospekt startuje z celem paczki
+          // (jeśli wybrano). Zbiór wielowartościowy — historia w prospect_purposes.
+          purposes: lead.contact_purpose ? [lead.contact_purpose] : [],
         })),
         { onConflict: "place_id", ignoreDuplicates: true }
       )
@@ -226,6 +232,39 @@ export async function POST(req: Request) {
     } else {
       moved += part.length;
       restored += part.filter((r) => r.wasRestored).length;
+    }
+  }
+
+  // 7. Cele kontaktu (Feature 2): dopisz historię (append-only) i uzupełnij
+  //    zdenormalizowany zbiór na prospekcie. Nowo wstawione mają cel ustawiony
+  //    już przy insercie (krok 5); przywrócone z Archiwum mogły mieć wcześniejsze
+  //    cele — dokładamy nowy bez nadpisywania (wielowartościowość z historią).
+  const purposeRows = movedRows.filter((r) => !!r.lead.contact_purpose);
+  if (purposeRows.length > 0) {
+    for (const part of chunk(purposeRows)) {
+      const { error } = await supabase.from("prospect_purposes").insert(
+        part.map((r) => ({
+          owner: user.id,
+          prospect_id: r.prospectId,
+          purpose: r.lead.contact_purpose as string,
+          source: "job",
+        }))
+      );
+      if (error) console.error("[scraper/move-to-prospecting] purpose history", error);
+    }
+
+    const restoredWithPurpose = purposeRows.filter((r) => r.wasRestored);
+    for (const part of chunk(restoredWithPurpose, 10)) {
+      await Promise.all(
+        part.map(async (r) => {
+          const purpose = r.lead.contact_purpose as string;
+          const { data } = await supabase.from("prospects").select("purposes").eq("id", r.prospectId).maybeSingle();
+          const current: string[] = ((data?.purposes as string[] | null) ?? []).filter(Boolean);
+          if (!current.includes(purpose)) {
+            await supabase.from("prospects").update({ purposes: [...current, purpose] }).eq("id", r.prospectId);
+          }
+        })
+      );
     }
   }
 

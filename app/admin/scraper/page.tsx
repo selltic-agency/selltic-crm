@@ -12,14 +12,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2,
-  Archive, RotateCcw, Pause, Play, Ban, ChevronRight, ChevronDown,
+  Archive, RotateCcw, Pause, Play, Ban, ChevronRight, ChevronDown, X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import { humanizeScrapeError, ZERO_RESULTS_MESSAGE, formatFound } from "@/lib/scraperMessages";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
-import type { ScrapeJob, ScrapeBatch, ScrapeBatchStatus, ScrapedLead, Prospect } from "@/lib/types";
+import { useClassification } from "@/lib/classification";
+import type { LeadCategory, ScrapeJob, ScrapeBatch, ScrapeBatchStatus, ScrapedLead, Prospect } from "@/lib/types";
 
 type Tab = "leads" | "duplicates" | "archive";
 
@@ -101,10 +102,18 @@ function effectiveStatus(batch: ScrapeBatch, agg: BatchAgg): ScrapeBatchStatus {
 export default function ScraperPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
+  const { categories, purposes } = useClassification();
 
   const [keywordsText, setKeywordsText] = useState("");
   const [locationsText, setLocationsText] = useState("");
+  const [contactPurpose, setContactPurpose] = useState("");
   const [starting, setStarting] = useState(false);
+  // Modal przypisania niezmapowanych słów kluczowych do kategorii (Feature 1).
+  // Trzyma też parametry oczekującego startu, by wznowić go po przypisaniu.
+  const [assignModal, setAssignModal] = useState<{
+    keywords: string[];
+    pending: { keywords: string[]; locations: string[]; contactPurpose: string };
+  } | null>(null);
 
   const [batches, setBatches] = useState<ScrapeBatch[]>([]);
   const [jobs, setJobs] = useState<ScrapeJob[]>([]);
@@ -168,11 +177,17 @@ export default function ScraperPage() {
   }, [supabase]);
 
   useEffect(() => {
-    reapStaleJobs().finally(() => {
+    // Wczytaj historię NATYCHMIAST przy wejściu w zakładkę — nie czekając na
+    // watchdog reap-stale, którego zimny start na Vercel potrafi trwać
+    // kilkanaście sekund. Wcześniej blokowało to pokazanie historii aż do
+    // ręcznego „Odśwież”. Watchdog dociąga się w tle i odświeża listy.
+    loadBatches();
+    loadJobs();
+    loadLeads();
+    reapStaleJobs().then(() => {
       loadBatches();
       loadJobs();
     });
-    loadLeads();
 
     // Realtime: statusy paczek, statusy/kroki zadań i nowe leady — na żywo.
     const channel = supabase
@@ -339,12 +354,36 @@ export default function ScraperPage() {
       toast.error("Podaj co najmniej jedno słowo kluczowe i jedną lokalizację.");
       return;
     }
+
+    // Feature 1 (brama kategorii): żaden lead nie może wpaść bez kategorii —
+    // sprawdź, czy każde słowo kluczowe jest zmapowane. Niezmapowane słowa
+    // otwierają modal przypisania, a start rusza dopiero po przypisaniu.
+    setStarting(true);
+    const uniqueKeywords = [...new Set(keywords.map((k) => k.toLowerCase()))];
+    const { data: mapped } = await supabase
+      .from("category_keywords")
+      .select("keyword")
+      .in("keyword", uniqueKeywords);
+    const mappedSet = new Set(((mapped as { keyword: string }[] | null) ?? []).map((m) => m.keyword));
+    const unmapped = uniqueKeywords.filter((k) => !mappedSet.has(k));
+    setStarting(false);
+
+    if (unmapped.length > 0) {
+      setAssignModal({ keywords: unmapped, pending: { keywords, locations, contactPurpose } });
+      return;
+    }
+    await doStart(keywords, locations, contactPurpose);
+  }
+
+  // Faktyczny start paczki — wołany bezpośrednio (wszystko zmapowane) albo po
+  // przypisaniu niezmapowanych słów kluczowych w modalu.
+  async function doStart(keywords: string[], locations: string[], purpose: string) {
     setStarting(true);
     try {
       const resp = await fetch("/api/scraper/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords, locations }),
+        body: JSON.stringify({ keywords, locations, contact_purpose: purpose || null }),
       });
       const data = await resp.json();
       if (!resp.ok) {
@@ -361,6 +400,27 @@ export default function ScraperPage() {
     } finally {
       setStarting(false);
     }
+  }
+
+  // Zapisz przypisania z modalu (utrwala mapowanie na przyszłość) i wystartuj.
+  async function confirmAssignments(mapping: Record<string, string>) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const rows = Object.entries(mapping).map(([keyword, category_key]) => ({
+      owner: user.id,
+      keyword: keyword.toLowerCase(),
+      category_key,
+    }));
+    const { error } = await supabase.from("category_keywords").upsert(rows, { onConflict: "owner,keyword" });
+    if (error) {
+      toast.error("Nie udało się zapisać przypisań kategorii.");
+      return;
+    }
+    const pending = assignModal?.pending;
+    setAssignModal(null);
+    if (pending) await doStart(pending.keywords, pending.locations, pending.contactPurpose);
   }
 
   // Sterowanie paczką: pauza / stop / wznów. Backend widzi zmianę statusu i
@@ -434,6 +494,24 @@ export default function ScraperPage() {
             />
           </label>
         </div>
+        {/* Cel kontaktu (Feature 2) — wybrany dla całej paczki; każdy lead z
+            niej dziedziczy ten cel jako pierwszy wpis historii. */}
+        <label style={{ display: "grid", gap: 6, marginTop: 14, maxWidth: 320 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Cel kontaktu (opcjonalnie)</span>
+          <select
+            value={contactPurpose}
+            onChange={(e) => setContactPurpose(e.target.value)}
+            style={inputStyle}
+          >
+            <option value="">— brak —</option>
+            {purposes.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <button
           onClick={startScraping}
           disabled={starting}
@@ -576,7 +654,115 @@ export default function ScraperPage() {
       ) : (
         <ArchiveTab leads={archivedLeads} supabase={supabase} onChanged={loadLeads} />
       )}
+
+      {assignModal && (
+        <AssignCategoriesModal
+          keywords={assignModal.keywords}
+          categories={categories}
+          onCancel={() => setAssignModal(null)}
+          onConfirm={confirmAssignments}
+        />
+      )}
     </div>
+  );
+}
+
+// Modal przypisania niezmapowanych słów kluczowych do kategorii branży —
+// blokuje start scrapowania, dopóki każde słowo nie ma kategorii (Feature 1).
+function AssignCategoriesModal({
+  keywords,
+  categories,
+  onCancel,
+  onConfirm,
+}: {
+  keywords: string[];
+  categories: LeadCategory[];
+  onCancel: () => void;
+  onConfirm: (mapping: Record<string, string>) => Promise<void>;
+}) {
+  const firstKey = categories[0]?.key ?? "";
+  const [mapping, setMapping] = useState<Record<string, string>>(() =>
+    Object.fromEntries(keywords.map((k) => [k, firstKey]))
+  );
+  const [saving, setSaving] = useState(false);
+  const allAssigned = keywords.every((k) => mapping[k]);
+
+  async function submit() {
+    if (!allAssigned || saving) return;
+    setSaving(true);
+    await onConfirm(mapping);
+    setSaving(false);
+  }
+
+  return (
+    <>
+      <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: "rgba(15,18,28,0.40)", zIndex: 40 }} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "min(520px, calc(100vw - 32px))",
+          maxHeight: "min(80vh, calc(100vh - 80px))",
+          overflowY: "auto",
+          background: tokens.card,
+          borderRadius: tokens.radius,
+          border: `1px solid ${tokens.border}`,
+          boxShadow: "0 24px 60px rgba(15,18,28,0.18)",
+          zIndex: 41,
+          padding: 22,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Przypisz kategorie</h2>
+          <button
+            onClick={onCancel}
+            aria-label="Zamknij"
+            style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
+          >
+            <X size={15} color={tokens.muted} />
+          </button>
+        </div>
+        <p style={{ fontSize: 13.5, color: tokens.muted, margin: "0 0 16px" }}>
+          {keywords.length === 1 ? "To słowo kluczowe nie ma jeszcze kategorii." : "Te słowa kluczowe nie mają jeszcze kategorii."}{" "}
+          Wskaż kategorię — zapamiętamy przypisanie na przyszłość, więc następnym razem
+          scrapowanie ruszy bez pytania.
+        </p>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          {keywords.map((k) => (
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {k}
+              </span>
+              <select
+                value={mapping[k] ?? ""}
+                onChange={(e) => setMapping((m) => ({ ...m, [k]: e.target.value }))}
+                style={{ ...inputStyle, width: 240, flexShrink: 0 }}
+              >
+                {categories.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+          <button onClick={onCancel} style={ghostButton}>
+            Anuluj
+          </button>
+          <button onClick={submit} disabled={!allAssigned || saving} style={{ ...primaryButton, opacity: !allAssigned || saving ? 0.6 : 1 }}>
+            {saving ? "Uruchamianie…" : "Przypisz i scrapuj"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -709,10 +895,17 @@ function BatchCard({
           </span>
         </div>
 
-        {/* Meta: data · postęp · liczba leadów */}
+        {/* Meta: data · postęp · liczba leadów.
+            flexShrink:0 + whiteSpace:nowrap na wszystkich elementach sprawia,
+            że przy ciasnym wierszu licznik leadów zawija się do własnej linii
+            (marginLeft:auto trzyma go po prawej) zamiast być ucinany przez
+            overflow:hidden karty — dotąd długie „Leady: 979 (633 nowych…)”
+            wychodziło poza krawędź i się nie mieściło. */}
         <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, paddingLeft: 26 }}>
-          <span style={{ fontSize: 12.5, color: tokens.muted }}>{formatDateTime(batch.created_at)}</span>
-          <span style={{ fontSize: 12.5, color: tokens.muted }}>
+          <span style={{ fontSize: 12.5, color: tokens.muted, flexShrink: 0, whiteSpace: "nowrap" }}>
+            {formatDateTime(batch.created_at)}
+          </span>
+          <span style={{ fontSize: 12.5, color: tokens.muted, flexShrink: 0, whiteSpace: "nowrap" }}>
             {agg.finished}/{agg.total} zadań
             {agg.errored > 0 ? ` · ${agg.errored} ${agg.errored === 1 ? "błąd" : "błędów"}` : ""}
             {agg.canceled > 0 ? ` · ${agg.canceled} anul.` : ""}
@@ -724,6 +917,8 @@ function BatchCard({
               marginLeft: "auto",
               fontSize: 12,
               fontWeight: 700,
+              flexShrink: 0,
+              whiteSpace: "nowrap",
               color: agg.leads > 0 ? tokens.success : tokens.muted,
             }}
           >

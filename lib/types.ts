@@ -37,6 +37,8 @@ export type Deal = {
   source: string | null;
   form_id: string | null;
   assignee: Assignee | null;
+  // Kategoria branży (Feature 1) — przeniesiona z prospektu przy konwersji.
+  category?: string | null;
   opened_at: string;
   closed_at: string | null;
   created_at: string;
@@ -87,6 +89,11 @@ export type Prospect = {
   converted_deal_id: string | null;
   archived_at: string | null;
   props: Record<string, unknown>;
+  // Kategoria branży (Feature 1) — dziedziczona z zadania scrapowania.
+  category?: string | null;
+  // Cele kontaktu (Feature 2) — zdenormalizowany bieżący zbiór (pełna
+  // historia w tabeli prospect_purposes). Wielowartościowe, nienadpisywane.
+  purposes?: string[];
 };
 
 // Flaga potencjalnego duplikatu deala (Faza 9.2) — surfaced w UI w 9.3.
@@ -182,6 +189,8 @@ export type ScrapeBatch = {
   status: ScrapeBatchStatus;
   created_at: string;
   updated_at: string;
+  // Cel kontaktu wybrany dla całej paczki (Feature 2) — dziedziczą go leady.
+  contact_purpose?: string | null;
 };
 
 export type ScrapeJob = {
@@ -199,6 +208,10 @@ export type ScrapeJob = {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  // Klasyfikacja (Feature 1 + 2) — rozstrzygana przy tworzeniu zadania,
+  // kopiowana na scraped_leads triggerem, więc backend scrapera jej nie dotyka.
+  category?: string | null;
+  contact_purpose?: string | null;
 };
 
 export type ScrapedLeadStatus = "new" | "moved" | "duplicate" | "rejected";
@@ -223,6 +236,9 @@ export type ScrapedLead = {
   status: ScrapedLeadStatus;
   moved_to_prospect_id: string | null;
   scraped_at: string;
+  // Klasyfikacja skopiowana z zadania scrapowania triggerem (Feature 1 + 2).
+  category?: string | null;
+  contact_purpose?: string | null;
 };
 
 // Nazwa WebsiteStatus już zajęta przez prospects (inny zestaw wartości: 'none'|'active'|'broken'|'slow').
@@ -266,6 +282,77 @@ export const DEFAULT_STAGES: StageSeed[] = [
   { key: "won", label: "Wygrane", color: "#18A957", is_won: true, is_lost: false },
   { key: "lost", label: "Przegrane", color: "#8A92A6", is_won: false, is_lost: true },
 ];
+
+// ── Klasyfikacja leadów: KATEGORIA BRANŻY (Feature 1) ────────────────────
+// Stała lista 13 kategorii medyczno-okołozdrowotnych. Zasiewana per-owner
+// (jak pipeline_stages) — edytowalna kolorystycznie i rozszerzalna, ale
+// `key` jest stabilnym identyfikatorem trzymanym jako tekst na leadach.
+export type LeadCategory = {
+  id: string;
+  owner: string;
+  key: string;
+  label: string;
+  color: string;
+  position: number;
+};
+
+export type CategorySeed = { key: string; label: string; color: string };
+
+export const DEFAULT_CATEGORIES: CategorySeed[] = [
+  { key: "psychologia", label: "Psychologia / terapia / psychiatria", color: "#6C5CE7" },
+  { key: "fizjoterapia", label: "Fizjoterapia / trening / masaż", color: "#1A73E7" },
+  { key: "medycyna_estetyczna", label: "Medycyna estetyczna", color: "#E84393" },
+  { key: "beauty", label: "Branża beauty", color: "#E17055" },
+  { key: "stomatologia", label: "Stomatologia", color: "#00A3A3" },
+  { key: "dermatologia", label: "Dermatologia", color: "#F2994A" },
+  { key: "ginekologia", label: "Ginekologia / położnictwo", color: "#EB5286" },
+  { key: "lekarze", label: "Lekarze specjaliści (ogólne)", color: "#2D9CDB" },
+  { key: "dietetyka", label: "Dietetyka / żywienie", color: "#18A957" },
+  { key: "logopedia", label: "Logopedia", color: "#9B51E0" },
+  { key: "weterynaria", label: "Weterynaria", color: "#6D4C41" },
+  { key: "optyka", label: "Optyka / okulistyka", color: "#0984E3" },
+  { key: "podologia", label: "Podologia / kosmetologia lecznicza", color: "#00B894" },
+];
+
+// Mapowanie słowo kluczowe scrapera → kategoria (wiele słów → jedna kategoria).
+// Zarządzane w Ustawieniach → „Kategorie branż”. unique(owner, keyword).
+export type CategoryKeyword = {
+  id: string;
+  owner: string;
+  keyword: string;
+  category_key: string;
+  created_at: string;
+};
+
+// ── Klasyfikacja leadów: CEL KONTAKTU (Feature 2) ────────────────────────
+// Słownik wartości (ads/website/both), rozszerzalny bez zmiany schematu.
+export type ContactPurpose = {
+  id: string;
+  owner: string;
+  key: string;
+  label: string;
+  color: string;
+  position: number;
+};
+
+export type PurposeSeed = { key: string; label: string; color: string };
+
+export const DEFAULT_PURPOSES: PurposeSeed[] = [
+  { key: "ads", label: "Reklama", color: "#1A73E7" },
+  { key: "website", label: "Strona WWW", color: "#00A3A3" },
+  { key: "both", label: "Reklama + strona", color: "#6C5CE7" },
+];
+
+// Wpis historii celu kontaktu (append-only) — lead może być kontaktowany o
+// wiele celów w czasie; nic nie jest nadpisywane.
+export type ProspectPurpose = {
+  id: string;
+  owner: string;
+  prospect_id: string;
+  purpose: string;
+  source: string; // 'job' | 'bulk' | 'manual'
+  created_at: string;
+};
 
 // Minimalny kształt etapu używany w UI (wystarcza do etykiety/koloru).
 export type StageLike = { key: string; label: string; color: string };
