@@ -48,36 +48,20 @@ export function saveViewPrefs(page: string, userId: string | null, prefs: ViewPr
 }
 
 // Decyzja hydratacji stanu widoku przy wczytaniu strony — wyodrębniona jako
-// czysta funkcja, żeby dało się ją przetestować (to tu żył błąd: odświeżenie
-// z filtrem NIE przywracało zakładki/sortowania). Kluczowa subtelność:
-// `hasUrlFilters` jest prawdziwe zarówno przy zwykłym odświeżeniu (FilterBar
-// sam zapisuje filtry do URL), jak i przy udostępnionym linku — dlatego NIE
-// może blokować przywracania zakładki statusu / sortowania / aktywnego widoku,
-// których w URL nie ma. Steruje jedynie źródłem filtrów.
+// czysta funkcja, żeby dało się ją przetestować.
+//
+// Zmiana zachowania (Part 2 / zakładki-przeglądarki): stan początkowy strony to
+// ZAWSZE „Wszystkie" (brak aktywnego widoku, brak filtrów). Żaden zapisany widok
+// ani filtr nie jest pre-selekcjonowany na wejściu — użytkownik sam wybiera, co
+// zastosować. Z prefs przywracamy WYŁĄCZNIE preferencje prezentacji (tryb widoku
+// kanban/tabela oraz sortowanie), które nie są „filtrem". Filtry z udostępnionego
+// linku (?f=…) odtwarza samodzielnie FilterBar i pojawiają się jako filtr
+// tymczasowy (ad-hoc), nie jako zapisany widok.
 export type HydrationPlan = {
-  /** Przywróć zakładkę statusu / sortowanie / aktywny widok z prefs. */
-  restoreFromPrefs: boolean;
-  /** Wywołaj filterBar.setFilters(prefs.filters) — tylko gdy URL ich nie niesie. */
-  restoreFiltersFromPrefs: boolean;
-  /** Wyczyść aktywny widok (udostępniony link bez własnych prefs). */
-  clearActiveView: boolean;
-  /** Zastosuj domyślny (aktywny) zapisany widok — pierwsza wizyta bez prefs. */
-  applyDefaultView: boolean;
+  /** Przywróć preferencje prezentacji (viewMode / sort) z prefs. */
+  restoreDisplayFromPrefs: boolean;
 };
 
-export function planHydration(prefs: ViewPrefs | null, hasUrlFilters: boolean): HydrationPlan {
-  if (prefs) {
-    return {
-      restoreFromPrefs: true,
-      restoreFiltersFromPrefs: !hasUrlFilters && Array.isArray(prefs.filters),
-      clearActiveView: false,
-      applyDefaultView: false,
-    };
-  }
-  return {
-    restoreFromPrefs: false,
-    restoreFiltersFromPrefs: false,
-    clearActiveView: hasUrlFilters,
-    applyDefaultView: !hasUrlFilters,
-  };
+export function planHydration(prefs: ViewPrefs | null): HydrationPlan {
+  return { restoreDisplayFromPrefs: !!prefs };
 }

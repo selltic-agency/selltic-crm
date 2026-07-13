@@ -37,25 +37,14 @@ ok("inna strona nie widzi prefs", loadViewPrefs("deals", "user-A") === null);
 // ── 3. Brak prefs → null (nie rzuca) ──
 ok("brak wpisu → null", loadViewPrefs("prospecting", "nieznany") === null);
 
-// ── 4. planHydration: ODŚWIEŻENIE PO NAŁOŻENIU FILTRU (rdzeń błędu z 6c) ──
-// Po nałożeniu filtru FilterBar zapisuje go do URL, więc po odświeżeniu
-// hasUrlFilters === true. MIMO to zakładka/sort/aktywny widok muszą się
-// przywrócić z prefs (URL ich nie niesie); filtry odtwarza sam FilterBar z URL.
-const planReload = planHydration(prefs, /* hasUrlFilters */ true);
-ok("reload z filtrem: przywraca zakładkę/sort/widok z prefs", planReload.restoreFromPrefs === true);
-ok("reload z filtrem: NIE nadpisuje filtrów z prefs (URL wygrywa)", planReload.restoreFiltersFromPrefs === false);
+// ── 4. planHydration: z prefs → przywracamy TYLKO preferencje prezentacji ──
+// (Nowe zachowanie: żaden widok/filtr nie jest pre-selekcjonowany na wejściu;
+// stan początkowy to zawsze „Wszystkie". Z prefs bierzemy jedynie viewMode/sort.)
+const planWithPrefs = planHydration(prefs);
+ok("z prefs: przywraca preferencje prezentacji", planWithPrefs.restoreDisplayFromPrefs === true);
 
-// ── 5. planHydration: nawigacja wstecz (bez ?f w URL) → pełne przywrócenie ──
-const planNav = planHydration(prefs, /* hasUrlFilters */ false);
-ok("nawigacja wstecz: przywraca stan z prefs", planNav.restoreFromPrefs === true);
-ok("nawigacja wstecz: odtwarza też filtry z prefs", planNav.restoreFiltersFromPrefs === true);
-
-// ── 6. planHydration: pierwsza wizyta bez prefs ──
-const planFirst = planHydration(null, false);
-ok("pierwsza wizyta: stosuje domyślny widok", planFirst.applyDefaultView === true && planFirst.restoreFromPrefs === false);
-
-// ── 7. planHydration: udostępniony link bez prefs → czyści aktywny widok ──
-const planShared = planHydration(null, true);
-ok("udostępniony link bez prefs: czyści aktywny widok", planShared.clearActiveView === true && planShared.applyDefaultView === false);
+// ── 5. planHydration: pierwsza wizyta bez prefs → nic nie przywracamy ──
+const planFirst = planHydration(null);
+ok("pierwsza wizyta: nie przywraca prefs (start = Wszystkie)", planFirst.restoreDisplayFromPrefs === false);
 
 console.log(`✓ Wszystkie ${passed} asercji przeszły — trwałość stanu widoku działa.`);

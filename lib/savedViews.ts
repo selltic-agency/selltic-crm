@@ -126,7 +126,7 @@ export function useSavedViews(
       }
       setStorage("local");
       setViews(rows);
-      setActiveId((prev) => prev ?? rows[0]?.id ?? null);
+      // Brak auto-selekcji: stan początkowy to „Wszystkie" (activeId === null).
       setLoading(false);
       return;
     }
@@ -158,7 +158,7 @@ export function useSavedViews(
 
     setStorage("db");
     setViews(rows);
-    setActiveId((prev) => prev ?? rows[0]?.id ?? null);
+    // Brak auto-selekcji: stan początkowy to „Wszystkie" (activeId === null).
     setLoading(false);
   }, [supabase, page, seedDefaults]);
 
