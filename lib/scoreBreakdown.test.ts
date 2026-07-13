@@ -2,7 +2,12 @@
 //   node --experimental-strip-types lib/scoreBreakdown.test.ts
 // Nie wymaga frameworka — używa wbudowanego node:assert.
 import assert from "node:assert";
-import { parseScoreBreakdown, formatBreakdownLine, formatBreakdownItem } from "./scoreBreakdown.ts";
+import {
+  parseScoreBreakdown,
+  formatBreakdownLine,
+  formatBreakdownItem,
+  clampLeadScore,
+} from "./scoreBreakdown.ts";
 
 // 1. Realny kształt z score_website(): { klucz: { punkty, opis } }.
 const breakdown = {
@@ -43,5 +48,21 @@ assert.strictEqual(parseScoreBreakdown([]).items.length, 0);
 
 // 5. formatBreakdownLine bez pozycji, ale ze score -> samo "N/100".
 assert.strictEqual(formatBreakdownLine(parseScoreBreakdown(null), 55), "55/100");
+
+// 6. clampLeadScore — przycięcie do dziedziny prospects_lead_score_check (0..100).
+//    Wartości w zakresie przechodzą bez zmian; poza zakresem są przycinane;
+//    null/undefined/NaN/±∞ oraz nie-liczby dają null (kolumna dopuszcza null).
+assert.strictEqual(clampLeadScore(0), 0, "0 bez zmian");
+assert.strictEqual(clampLeadScore(62), 62, "62 bez zmian");
+assert.strictEqual(clampLeadScore(100), 100, "100 bez zmian");
+assert.strictEqual(clampLeadScore(105), 100, "105 -> 100");
+assert.strictEqual(clampLeadScore(1000), 100, "1000 -> 100");
+assert.strictEqual(clampLeadScore(-5), 0, "ujemne -> 0");
+assert.strictEqual(clampLeadScore(62.7), 63, "float -> zaokrąglenie (kolumna int)");
+assert.strictEqual(clampLeadScore(null), null, "null -> null");
+assert.strictEqual(clampLeadScore(undefined), null, "undefined -> null");
+assert.strictEqual(clampLeadScore(NaN), null, "NaN -> null");
+assert.strictEqual(clampLeadScore(Infinity), null, "Infinity -> null");
+assert.strictEqual(clampLeadScore("80"), null, "string -> null (nie ufamy nie-liczbie)");
 
 console.log("scoreBreakdown: wszystkie asercje przeszły ✓");

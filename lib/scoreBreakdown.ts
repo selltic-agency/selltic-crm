@@ -76,6 +76,19 @@ export function parseScoreBreakdown(
   return { items: [], total: null };
 }
 
+// Normalizuje lead score do dziedziny kolumny prospects.lead_score /
+// deals.lead_score (check: null lub 0..100). Źródłowy `scraped_leads.score`
+// jest zwykłym int-em BEZ ograniczenia zakresu — punkty pochodzą z wag w
+// scraper_config, więc przy „hojnej” konfiguracji suma może przekroczyć 100
+// (albo teoretycznie zejść poniżej 0). Kopiowanie takiej wartości wprost do
+// prospects wywala CAŁĄ paczkę na check constraint (upsert to jedno zapytanie).
+// Przycinamy do [0, 100] zamiast odrzucać: 105 → 100 („maks. gorący”, sensowny
+// ranking), wartości ujemne → 0, null/NaN/±∞ → null.
+export function clampLeadScore(score: unknown): number | null {
+  if (typeof score !== "number" || !Number.isFinite(score)) return null;
+  return Math.min(100, Math.max(0, Math.round(score)));
+}
+
 // Formatuje pojedynczą pozycję jako "opis: +40 pkt" (albo "opis: 0 pkt", albo
 // bez punktów gdy nieznane).
 export function formatBreakdownItem(item: ScoreBreakdownItem): string {

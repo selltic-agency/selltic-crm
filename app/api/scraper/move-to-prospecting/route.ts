@@ -16,6 +16,7 @@
 // funkcja serverless nie zmieści się w limicie czasu.
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { clampLeadScore } from "@/lib/scoreBreakdown";
 import type { ScrapedLead, WebsiteStatus } from "@/lib/types";
 
 // Bulk-move kilkuset leadów to dziesiątki zapytań do Supabase — domyślny
@@ -53,7 +54,10 @@ function prospectFields(lead: ScrapedLead) {
     // Kuratorowana kategoria branży (Feature 1) — jednowartościowa, więc
     // przy przywróceniu z Archiwum odświeżamy ją danymi z nowego scrapowania.
     category: lead.category ?? null,
-    lead_score: lead.score,
+    // Przycięcie do dziedziny prospects_lead_score_check (0..100) — źródłowy
+    // scraped_leads.score nie ma ograniczenia zakresu, a jedna wartość poza
+    // zakresem wywala całą zbiorczą wstawkę.
+    lead_score: clampLeadScore(lead.score),
     lead_score_breakdown: lead.score_breakdown,
     website_status: lead.website_status ? WEBSITE_STATUS_MAP[lead.website_status] ?? null : null,
     website_last_checked_at: lead.website_status ? lead.scraped_at : null,

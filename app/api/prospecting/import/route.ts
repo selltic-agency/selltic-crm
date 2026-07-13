@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { checkScraperApiKey } from "@/lib/prospectingAuth";
+import { clampLeadScore } from "@/lib/scoreBreakdown";
 
 type ImportRow = {
   place_id?: string | null;
@@ -98,7 +99,9 @@ export async function POST(req: Request) {
       business_status: r.business_status ?? null,
       industry: r.category ?? r.industry ?? null,
       city: r.city ?? null,
-      lead_score: r.priority_score ?? r.lead_score ?? null,
+      // Przycięcie do dziedziny prospects_lead_score_check (0..100) — payload
+      // scrapera nie jest ograniczony zakresem po stronie bazy.
+      lead_score: clampLeadScore(r.priority_score ?? r.lead_score ?? null),
       lead_score_breakdown: r.lead_score_breakdown ?? null,
       website_status: r.website_status ?? null,
       website_last_checked_at: r.website_status != null ? new Date().toISOString() : undefined,
