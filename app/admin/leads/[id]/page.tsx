@@ -1436,11 +1436,9 @@ function ProspectingDataCard({ deal }: { deal: Deal }) {
         <DealRow label="Branża">{deal.industry || "—"}</DealRow>
         <DealRow label="Miasto">{deal.city || "—"}</DealRow>
         <DealRow label="Status firmy">{deal.business_status || "—"}</DealRow>
-        {deal.lead_score != null && (
-          <DealRow label="Lead score">
-            <b>{deal.lead_score}/100</b>
-          </DealRow>
-        )}
+        <DealRow label="Lead score">
+          {deal.lead_score != null ? <b>{deal.lead_score}/100</b> : "—"}
+        </DealRow>
         {hasBreakdown && (
           <DealRow label="Wyjaśnienie">
             <ScoreBreakdownList

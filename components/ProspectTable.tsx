@@ -77,6 +77,11 @@ export default function ProspectTable({
     const arr = [...prospects].sort((a, b) => {
       const aVal = getVal(a, sort.key);
       const bVal = getVal(b, sort.key);
+      // Brak wartości (np. lead score dla nieocenionego leada) zawsze na dole,
+      // niezależnie od kierunku sortowania — nieocenione nie wypływają na górę.
+      const aNull = aVal === null || aVal === undefined;
+      const bNull = bVal === null || bVal === undefined;
+      if (aNull || bNull) return aNull === bNull ? 0 : aNull ? 1 : -1;
       if (aVal === bVal) return 0;
       const res = aVal > bVal ? 1 : -1;
       return sort.direction === "asc" ? res : -res;
@@ -343,8 +348,10 @@ export default function ProspectTable({
   );
 }
 
-function getVal(p: Prospect, key: string): string | number {
-  if (key === "lead_score") return p.lead_score ?? -1;
+function getVal(p: Prospect, key: string): string | number | null {
+  // null → komparator umieszcza wiersz na dole (nieoceniony lead niezależnie
+  // od kierunku sortowania), zamiast wiązać jego pozycję z asc/desc.
+  if (key === "lead_score") return p.lead_score ?? null;
   if (key === "rating") return p.rating ?? -1;
   if (key === "created_at") return new Date(p.created_at).getTime();
   if (key === "prospecting_status") return STATUS_LABEL[toDisplayStatus(p.prospecting_status)];
