@@ -7,13 +7,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, CheckSquare, Square, Archive, RotateCcw, Tag, Target } from "lucide-react";
+import { ChevronUp, ChevronDown, CheckSquare, Square, Archive, RotateCcw } from "lucide-react";
 import { tokens, formatDateTime } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
-import { useClassification } from "@/lib/classification";
 import { STATUS_LABEL, STATUS_COLOR, toDisplayStatus } from "@/lib/prospectStatus";
+import { asArray, readPropValue, type PropertyView } from "@/lib/properties";
+import { PropertyValueDisplay } from "@/components/PropertyFields";
+import BulkEditBar from "@/components/BulkEditBar";
 
 const WEBSITE_STATUS_LABEL: Record<string, string> = {
   none: "Brak strony",
@@ -46,8 +48,8 @@ export default function ProspectTable({
   archiveMode = false,
   onArchive,
   onRestore,
-  onBulkCategory,
-  onBulkPurpose,
+  properties = [],
+  onBulkEdit,
 }: {
   prospects: Prospect[];
   onRowClick: (id: string) => void;
@@ -56,14 +58,22 @@ export default function ProspectTable({
   archiveMode?: boolean;
   onArchive?: (ids: string[]) => void;
   onRestore?: (ids: string[]) => void;
-  // Akcje zbiorcze klasyfikacji (Feature 1 + 2) — dostępne poza Archiwum.
-  onBulkCategory?: (ids: string[], categoryKey: string) => void;
-  onBulkPurpose?: (ids: string[], purposeKey: string) => void;
+  // Właściwości (systemowe + własne) — kolumny dynamiczne + akcja zbiorcza.
+  properties?: PropertyView[];
+  onBulkEdit?: (ids: string[], view: PropertyView, value: unknown, mode: "replace" | "add") => void | Promise<void>;
 }) {
-  const { categories, purposes } = useClassification();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const pageSize = 25;
+
+  // Kolumny własnych właściwości dokładamy po stałych; systemowe (kategoria/cel)
+  // mają już swoje stałe kolumny z badge'ami.
+  const customViews = useMemo(() => properties.filter((p) => !p.system), [properties]);
+  const viewByKey = useMemo(() => new Map(customViews.map((v) => [v.key, v])), [customViews]);
+  const columns = useMemo(
+    () => [...COLUMNS, ...customViews.map((v) => ({ key: v.key, label: v.label, width: 160 }))],
+    [customViews]
+  );
 
   // Odznacz wiersze, które zniknęły z listy (zarchiwizowane / przywrócone gdzie indziej).
   useEffect(() => {
@@ -75,8 +85,8 @@ export default function ProspectTable({
 
   const sorted = useMemo(() => {
     const arr = [...prospects].sort((a, b) => {
-      const aVal = getVal(a, sort.key);
-      const bVal = getVal(b, sort.key);
+      const aVal = getVal(a, sort.key, viewByKey);
+      const bVal = getVal(b, sort.key, viewByKey);
       // Brak wartości (np. lead score dla nieocenionego leada) zawsze na dole,
       // niezależnie od kierunku sortowania — nieocenione nie wypływają na górę.
       const aNull = aVal === null || aVal === undefined;
@@ -87,7 +97,7 @@ export default function ProspectTable({
       return sort.direction === "asc" ? res : -res;
     });
     return arr;
-  }, [prospects, sort]);
+  }, [prospects, sort, viewByKey]);
 
   const totalPages = Math.ceil(sorted.length / pageSize);
   // Trzymaj bieżącą stronę w zakresie, gdy zmieni się liczba wyników (filtry).
@@ -117,15 +127,9 @@ export default function ProspectTable({
     setSelected(new Set());
   }
 
-  function runBulkCategory(key: string) {
-    if (!key || selected.size === 0) return;
-    onBulkCategory?.([...selected], key);
-    setSelected(new Set());
-  }
-
-  function runBulkPurpose(key: string) {
-    if (!key || selected.size === 0) return;
-    onBulkPurpose?.([...selected], key);
+  async function runBulkEdit(view: PropertyView, value: unknown, mode: "replace" | "add") {
+    if (selected.size === 0) return;
+    await onBulkEdit?.([...selected], view, value, mode);
     setSelected(new Set());
   }
 
@@ -170,25 +174,9 @@ export default function ProspectTable({
           Zaznacz wszystkie
         </button>
 
-        {/* Akcje zbiorcze klasyfikacji (poza Archiwum): ustaw kategorię
-            (nadpisuje) / dodaj cel kontaktu (dokłada, nie nadpisuje). */}
-        {!archiveMode && onBulkCategory && (
-          <BulkSelect
-            icon={<Tag size={14} />}
-            placeholder={`Ustaw kategorię${selected.size ? ` (${selected.size})` : ""}`}
-            disabled={selected.size === 0}
-            options={categories.map((c) => ({ key: c.key, label: c.label }))}
-            onPick={runBulkCategory}
-          />
-        )}
-        {!archiveMode && onBulkPurpose && (
-          <BulkSelect
-            icon={<Target size={14} />}
-            placeholder={`Dodaj cel${selected.size ? ` (${selected.size})` : ""}`}
-            disabled={selected.size === 0}
-            options={purposes.map((p) => ({ key: p.key, label: p.label }))}
-            onPick={runBulkPurpose}
-          />
+        {/* Akcja zbiorcza: ustaw dowolną właściwość (poza Archiwum). */}
+        {!archiveMode && onBulkEdit && (
+          <BulkEditBar properties={properties} count={selected.size} onApply={runBulkEdit} />
         )}
 
         <div style={{ flex: 1, minWidth: 8 }} />
@@ -220,7 +208,7 @@ export default function ProspectTable({
           <thead>
             <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
               <th style={{ padding: "12px 16px", width: 44 }} />
-              {COLUMNS.map((col) => (
+              {columns.map((col) => (
                 <th
                   key={col.key}
                   onClick={() => handleSort(col.key)}
@@ -271,9 +259,9 @@ export default function ProspectTable({
                       {isSelected ? <CheckSquare size={17} color={tokens.accent} /> : <Square size={17} color={tokens.muted} />}
                     </button>
                   </td>
-                  {COLUMNS.map((col) => (
+                  {columns.map((col) => (
                     <td key={col.key} style={{ ...tdStyle, width: col.width, maxWidth: col.width }}>
-                      {renderCell(p, col.key)}
+                      {renderCell(p, col.key, viewByKey)}
                     </td>
                   ))}
                   <td style={{ ...tdStyle, width: 56, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
@@ -302,7 +290,7 @@ export default function ProspectTable({
             })}
             {paginated.length === 0 && (
               <tr>
-                <td colSpan={COLUMNS.length + 2} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
+                <td colSpan={columns.length + 2} style={{ padding: 40, textAlign: "center", color: tokens.muted }}>
                   {archiveMode ? "Archiwum jest puste." : "Brak prospektów spełniających kryteria."}
                 </td>
               </tr>
@@ -348,7 +336,7 @@ export default function ProspectTable({
   );
 }
 
-function getVal(p: Prospect, key: string): string | number | null {
+function getVal(p: Prospect, key: string, viewByKey: Map<string, PropertyView>): string | number | null {
   // null → komparator umieszcza wiersz na dole (nieoceniony lead niezależnie
   // od kierunku sortowania), zamiast wiązać jego pozycję z asc/desc.
   if (key === "lead_score") return p.lead_score ?? null;
@@ -358,11 +346,19 @@ function getVal(p: Prospect, key: string): string | number | null {
   if (key === "website_status") return p.website_status ?? "";
   if (key === "category") return p.category ?? "";
   if (key === "purposes") return (p.purposes ?? []).join(",");
+  const view = viewByKey.get(key);
+  if (view) {
+    const cv = readPropValue(p as unknown as Record<string, unknown>, view);
+    if (view.type === "multi_select") return asArray(cv).join(",");
+    return typeof cv === "number" ? cv : cv == null ? "" : String(cv);
+  }
   const v = (p as unknown as Record<string, unknown>)[key];
   return typeof v === "number" ? v : (v as string) ?? "";
 }
 
-function renderCell(p: Prospect, key: string) {
+function renderCell(p: Prospect, key: string, viewByKey: Map<string, PropertyView>) {
+  const view = viewByKey.get(key);
+  if (view) return <PropertyValueDisplay view={view} value={readPropValue(p as unknown as Record<string, unknown>, view)} />;
   if (key === "name") return <span style={{ fontWeight: 600 }}>{p.name || "—"}</span>;
   if (key === "category") return <CategoryBadge categoryKey={p.category} size="sm" />;
   if (key === "purposes") return <PurposeBadges purposeKeys={p.purposes} size="sm" />;
@@ -385,69 +381,6 @@ function renderCell(p: Prospect, key: string) {
   }
   const v = (p as unknown as Record<string, unknown>)[key];
   return v != null && v !== "" ? String(v) : "—";
-}
-
-// Dropdown akcji zbiorczej: wybór opcji od razu ją stosuje, potem resetuje się
-// do etykiety-placeholdera (value="" jest stałe, więc select nie „zapamiętuje”).
-function BulkSelect({
-  icon,
-  placeholder,
-  disabled,
-  options,
-  onPick,
-}: {
-  icon: React.ReactNode;
-  placeholder: string;
-  disabled: boolean;
-  options: { key: string; label: string }[];
-  onPick: (key: string) => void;
-}) {
-  return (
-    <label
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "6px 10px",
-        borderRadius: 10,
-        border: `1px solid ${tokens.border}`,
-        background: tokens.card,
-        color: disabled ? tokens.muted : tokens.text,
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      {icon}
-      <select
-        value=""
-        disabled={disabled}
-        onChange={(e) => {
-          const v = e.target.value;
-          e.currentTarget.value = "";
-          if (v) onPick(v);
-        }}
-        style={{
-          border: "none",
-          background: "none",
-          fontSize: 13,
-          fontWeight: 600,
-          color: "inherit",
-          cursor: disabled ? "default" : "pointer",
-          outline: "none",
-          maxWidth: 200,
-        }}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((o) => (
-          <option key={o.key} value={o.key}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
 }
 
 const tdStyle: React.CSSProperties = {

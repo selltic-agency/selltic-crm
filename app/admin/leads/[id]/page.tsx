@@ -67,8 +67,10 @@ import { useClassification } from "@/lib/classification";
 import { useIsMobile } from "@/lib/responsive";
 import { useToast } from "@/components/Toast";
 import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
-import { CategoryBadge } from "@/components/ClassificationBadges";
+import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
+import { normalizeOptions, propLabel, type PropertyView } from "@/lib/properties";
+import { PropertyValueInput } from "@/components/PropertyFields";
 
 // Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
 // (28+28) trzeba odjąć od 100vh, żeby dwa panele zmieściły się bez
@@ -134,7 +136,7 @@ export default function DealPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const { stages, stageMeta } = useStages();
-  const { categories } = useClassification();
+  const { categories, purposes } = useClassification();
   const isNarrow = useIsMobile(STACK_BREAKPOINT);
 
   const [deal, setDeal] = useState<Deal | null>(null);
@@ -154,10 +156,11 @@ export default function DealPage() {
   const [contactSaving, setContactSaving] = useState(false);
   const [contactSavedAt, setContactSavedAt] = useState<number | null>(null);
 
-  const [propsDraft, setPropsDraft] = useState<{ value: string; assignee: Assignee | ""; category: string; custom: Record<string, string> }>({
+  const [propsDraft, setPropsDraft] = useState<{ value: string; assignee: Assignee | ""; category: string; purposes: string[]; custom: Record<string, unknown> }>({
     value: "",
     assignee: "",
     category: "",
+    purposes: [],
     custom: {},
   });
   const [propsSaving, setPropsSaving] = useState(false);
@@ -175,6 +178,7 @@ export default function DealPage() {
       value: deal.value ? String(deal.value) : "",
       assignee: deal.assignee ?? "",
       category: deal.category ?? "",
+      purposes: deal.purposes ?? [],
       custom: { ...(deal.props ?? {}) },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -192,7 +196,10 @@ export default function DealPage() {
     (propsDraft.value !== (deal.value ? String(deal.value) : "") ||
       propsDraft.assignee !== (deal.assignee ?? "") ||
       propsDraft.category !== (deal.category ?? "") ||
-      propertyDefs.some((d) => (propsDraft.custom[d.key] ?? "") !== (deal.props?.[d.key] ?? "")));
+      JSON.stringify([...propsDraft.purposes].sort()) !== JSON.stringify([...(deal.purposes ?? [])].sort()) ||
+      propertyDefs.some(
+        (d) => JSON.stringify(propsDraft.custom[d.key] ?? null) !== JSON.stringify(deal.props?.[d.key] ?? null)
+      ));
 
   const propTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -218,7 +225,7 @@ export default function DealPage() {
     setLoading(true);
     const [{ data: d }, { data: defs }] = await Promise.all([
       supabase.from("deals").select("*").eq("id", dealId).single(),
-      supabase.from("property_defs").select("*").order("position", { ascending: true }),
+      supabase.from("property_defs").select("*").is("archived_at", null).order("position", { ascending: true }),
     ]);
 
     const dealRow = d as Deal | null;
@@ -293,19 +300,21 @@ export default function DealPage() {
     const value = propsDraft.value ? Number(propsDraft.value) : 0;
     const assignee = propsDraft.assignee || null;
     const category = propsDraft.category || null;
+    const purposes = propsDraft.purposes;
     const props = { ...(deal.props ?? {}) };
     for (const def of propertyDefs) {
-      const v = (propsDraft.custom[def.key] ?? "").trim();
-      if (v === "") delete props[def.key];
-      else props[def.key] = v;
+      const raw = propsDraft.custom[def.key];
+      const empty = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
+      if (empty) delete props[def.key];
+      else props[def.key] = typeof raw === "string" ? raw.trim() : raw;
     }
-    const { error } = await supabase.from("deals").update({ value, assignee, category, props }).eq("id", deal.id);
+    const { error } = await supabase.from("deals").update({ value, assignee, category, purposes, props }).eq("id", deal.id);
     setPropsSaving(false);
     if (error) {
       toast.error("Nie udało się zapisać właściwości.");
       return;
     }
-    setDeal({ ...deal, value, assignee, category, props });
+    setDeal({ ...deal, value, assignee, category, purposes, props });
     setPropsSavedAt(Date.now());
     setTimeout(() => setPropsSavedAt(null), 2000);
   }
@@ -517,6 +526,7 @@ export default function DealPage() {
               {currentStage.label}
             </span>
             {deal.category && <CategoryBadge categoryKey={deal.category} />}
+            {(deal.purposes?.length ?? 0) > 0 && <PurposeBadges purposeKeys={deal.purposes} />}
             <span style={{ fontSize: 12.5, color: tokens.muted }}>
               Otwarty {formatDateTime(deal.opened_at)}
               {deal.closed_at ? ` · Zamknięty ${formatDateTime(deal.closed_at)}` : ""}
@@ -651,6 +661,22 @@ export default function DealPage() {
                 ))}
               </select>
             </FieldLabel>
+            {/* Cel kontaktu (Feature 2) — wielowartościowy, jak na prospektach. */}
+            <FieldLabel label="Cel kontaktu">
+              <PropertyValueInput
+                view={{
+                  key: "purposes",
+                  label: "Cel kontaktu",
+                  type: "multi_select",
+                  options: purposes.map((p) => ({ key: p.key, label: p.label, color: p.color })),
+                  system: true,
+                  storage: "column",
+                  archived: false,
+                }}
+                value={propsDraft.purposes}
+                onChange={(v) => setPropsDraft((d) => ({ ...d, purposes: Array.isArray(v) ? (v as string[]) : [] }))}
+              />
+            </FieldLabel>
           </div>
 
           {/* Konfigurowalne właściwości — przeciągnij, by zmienić kolejność.
@@ -667,7 +693,7 @@ export default function DealPage() {
                   <PropertyReorderRow
                     key={def.id}
                     def={def}
-                    value={propsDraft.custom[def.key] ?? ""}
+                    value={propsDraft.custom[def.key]}
                     onChange={(v) =>
                       setPropsDraft((d) => ({ ...d, custom: { ...d.custom, [def.key]: v } }))
                     }
@@ -817,10 +843,19 @@ function PropertyReorderRow({
   onChange,
 }: {
   def: PropertyDef;
-  value: string;
-  onChange: (value: string) => void;
+  value: unknown;
+  onChange: (value: unknown) => void;
 }) {
   const controls = useDragControls();
+  const view: PropertyView = {
+    key: def.key,
+    label: propLabel(def),
+    type: def.type,
+    options: normalizeOptions(def.options),
+    system: false,
+    storage: "props",
+    archived: !!def.archived_at,
+  };
 
   return (
     <Reorder.Item
@@ -846,44 +881,11 @@ function PropertyReorderRow({
         <GripVertical size={15} />
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <FieldLabel label={def.key}>
-          <PropertyInput def={def} value={value} onChange={onChange} />
+        <FieldLabel label={view.label}>
+          <PropertyValueInput view={view} value={value} onChange={onChange} />
         </FieldLabel>
       </div>
     </Reorder.Item>
-  );
-}
-
-// Pole właściwości renderowane wg typu (tekst / liczba / data / lista).
-function PropertyInput({
-  def,
-  value,
-  onChange,
-}: {
-  def: PropertyDef;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  if (def.type === "select") {
-    return (
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-        <option value="">—</option>
-        {(def.options ?? []).map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  const type = def.type === "number" ? "number" : def.type === "date" ? "date" : "text";
-  return (
-    <input
-      type={type}
-      defaultValue={value}
-      onBlur={(e) => onChange(e.target.value.trim())}
-      style={inputStyle}
-    />
   );
 }
 

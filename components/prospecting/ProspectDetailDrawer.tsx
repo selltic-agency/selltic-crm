@@ -13,6 +13,8 @@ import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
 import { useClassification } from "@/lib/classification";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
+import { useEntityProperties } from "@/lib/properties";
+import { PropertyValueInput } from "@/components/PropertyFields";
 import {
   STATUS_LABEL,
   STATUS_COLOR,
@@ -34,6 +36,7 @@ export default function ProspectDetailDrawer({
   onAddNote,
   onSetCategory,
   onAddPurpose,
+  onSaveProps,
 }: {
   prospect: Prospect;
   onClose: () => void;
@@ -42,10 +45,37 @@ export default function ProspectDetailDrawer({
   onAddNote: (p: Prospect, body: string) => Promise<void>;
   onSetCategory: (p: Prospect, categoryKey: string) => Promise<void>;
   onAddPurpose: (p: Prospect, purposeKey: string) => Promise<void>;
+  // Zapis wartości właściwości własnych (props jsonb) — opcjonalny.
+  onSaveProps?: (p: Prospect, props: Record<string, unknown>) => Promise<void>;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const { categories, purposes } = useClassification();
+  const { customViews } = useEntityProperties("prospects");
   const p = prospect;
+
+  // Szkic wartości właściwości własnych + zapis całej sekcji jednym przyciskiem.
+  const [propsDraft, setPropsDraft] = useState<Record<string, unknown>>({});
+  const [propsSaving, setPropsSaving] = useState(false);
+  useEffect(() => {
+    setPropsDraft({ ...(p.props ?? {}) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.id]);
+  const propsDirty = customViews.some(
+    (v) => JSON.stringify(propsDraft[v.key] ?? null) !== JSON.stringify((p.props ?? {})[v.key] ?? null)
+  );
+  async function saveCustomProps() {
+    if (!onSaveProps || !propsDirty || propsSaving) return;
+    setPropsSaving(true);
+    const next = { ...(p.props ?? {}) };
+    for (const v of customViews) {
+      const raw = propsDraft[v.key];
+      const empty = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
+      if (empty) delete next[v.key];
+      else next[v.key] = typeof raw === "string" ? raw.trim() : raw;
+    }
+    await onSaveProps(p, next);
+    setPropsSaving(false);
+  }
   const display = toDisplayStatus(p.prospecting_status);
   const closed = isClosedBusiness(p);
 
@@ -338,6 +368,34 @@ export default function ProspectDetailDrawer({
               <MapPin size={16} /> Google Maps
             </a>
           </Card>
+
+          {/* Właściwości własne (custom fields) */}
+          {onSaveProps && customViews.length > 0 && (
+            <Card>
+              <SectionTitle>Właściwości</SectionTitle>
+              <div style={{ display: "grid", gap: 12 }}>
+                {customViews.map((v) => (
+                  <label key={v.key} style={{ display: "grid", gap: 5 }}>
+                    <span style={{ fontSize: 12.5, color: tokens.muted, fontWeight: 600 }}>{v.label}</span>
+                    <PropertyValueInput
+                      view={v}
+                      value={propsDraft[v.key]}
+                      onChange={(val) => setPropsDraft((d) => ({ ...d, [v.key]: val }))}
+                    />
+                  </label>
+                ))}
+              </div>
+              {propsDirty && (
+                <button
+                  onClick={saveCustomProps}
+                  disabled={propsSaving}
+                  style={{ ...primaryButton, marginTop: 12, opacity: propsSaving ? 0.6 : 1 }}
+                >
+                  {propsSaving ? "Zapisywanie…" : "Zapisz właściwości"}
+                </button>
+              )}
+            </Card>
+          )}
 
           {/* Status */}
           <Card>

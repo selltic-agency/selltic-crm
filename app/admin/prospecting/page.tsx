@@ -30,11 +30,11 @@ import {
 import ProspectDetailDrawer from "@/components/prospecting/ProspectDetailDrawer";
 import CallingMode from "@/components/prospecting/CallingMode";
 import FilterBar, { type FieldDef, type FilterBarHandle } from "@/components/FilterBar";
-import SavedViewTabs from "@/components/SavedViewTabs";
-import { Filter, Sort, buildFilterQuery, columnForProspect } from "@/lib/filters";
+import ViewTabs from "@/components/ViewTabs";
+import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
 import { loadViewPrefs, saveViewPrefs, planHydration } from "@/lib/viewPrefs";
-import { useClassification } from "@/lib/classification";
+import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, type PropertyView } from "@/lib/properties";
 
 // Zakładka statusu. "" = wszystkie aktywne; "archived" = miękko usunięte.
 type StatusTab = DisplayStatus | "" | "archived";
@@ -84,7 +84,7 @@ export default function ProspectingPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const searchParams = useSearchParams();
-  const { categories, purposes } = useClassification();
+  const { views: properties } = useEntityProperties("prospects");
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [archivedProspects, setArchivedProspects] = useState<Prospect[]>([]);
@@ -120,20 +120,21 @@ export default function ProspectingPage() {
 
   const showingArchive = statusFilter === "archived";
 
-  // Kolumny miasta/branży są dynamiczne (zależą od zaimportowanych danych).
+  // Pola filtrów = wbudowane (status/score/strona) + miasto/branża (dynamiczne)
+  // + właściwości (kategoria/cel + własne). Kolumny miasta/branży są dynamiczne
+  // (zależą od zaimportowanych danych).
   const builtInFields = useMemo<FieldDef[]>(
     () => [
       ...PROSPECT_BUILT_IN_FIELDS,
-      // Kategoria (Feature 1) — jednowartościowa kolumna → operator „in”.
-      { key: "category", label: "Kategoria", type: "select", options: categories.map((c) => ({ key: c.key, label: c.label })) },
-      // Cel kontaktu (Feature 2) — kolumna-tablica → operator has_any; łączy się
-      // AND-em z kategorią, więc oba filtry działają jednocześnie.
-      { key: "purposes", label: "Cel kontaktu", type: "tags", options: purposes.map((p) => ({ key: p.key, label: p.label })) },
       { key: "city", label: "Miasto", type: "select", options: cities },
       { key: "industry", label: "Branża", type: "select", options: industries },
+      ...properties.map(toFieldDef),
     ],
-    [cities, industries, categories, purposes]
+    [cities, industries, properties]
   );
+
+  // Resolver: właściwości własne → props jsonb; reszta (kolumny) bezpośrednio.
+  const resolveColumn = useMemo(() => makeColumnResolver(properties), [properties]);
 
   const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
     return [
@@ -178,37 +179,34 @@ export default function ProspectingPage() {
     if (v) applyView(v.filters, v.sort);
   };
 
-  // ── Hydratacja trwałego stanu widoku ──────────────────────────────────
-  // Uruchamiana raz, gdy znamy użytkownika i wczytano zapisane widoki.
+  // „Wszystkie" — stan domyślny: brak aktywnego widoku i brak filtrów.
+  const handleSelectAll = useCallback(() => {
+    selectView(null);
+    filterBarRef.current?.setFilters([]);
+    setSort(null);
+  }, [selectView]);
+
+  // ── Hydratacja: stan początkowy to ZAWSZE „Wszystkie" (brak widoku/filtrów).
+  // Z prefs przywracamy tylko sortowanie (preferencja prezentacji). Filtry z
+  // udostępnionego linku (?f=…) odtwarza sam FilterBar → filtr tymczasowy.
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (hydrated || viewsLoading || userId === undefined) return;
-    // Filtry z URL (?f=…) obejmują zarówno zwykłe odświeżenie (FilterBar sam
-    // zapisuje je do URL), jak i udostępniony link. Gdy są obecne, FilterBar
-    // odtwarza je samodzielnie z URL — nie nadpisujemy ich z prefs. Zakładkę
-    // statusu, sortowanie i aktywny widok odtwarzamy ZAWSZE z prefs (nie ma
-    // ich w URL), więc odświeżenie przywraca pełny stan.
-    const hasUrlFilters = !!searchParams.get("f");
     const prefs = loadViewPrefs("prospecting", userId);
-    const plan = planHydration(prefs, hasUrlFilters);
-    if (plan.restoreFromPrefs && prefs) {
-      if (prefs.statusFilter !== undefined) setStatusFilter(prefs.statusFilter as StatusTab);
+    const plan = planHydration(prefs);
+    if (plan.restoreDisplayFromPrefs && prefs) {
       if (prefs.sort !== undefined) setSort(prefs.sort ?? null);
-      if (prefs.activeViewId !== undefined) selectView(prefs.activeViewId);
-      if (plan.restoreFiltersFromPrefs) filterBarRef.current?.setFilters(prefs.filters ?? []);
-    } else if (plan.clearActiveView) {
-      selectView(null);
-    } else if (plan.applyDefaultView && activeView) {
-      applyView(activeView.filters, activeView.sort);
     }
     setHydrated(true);
-  }, [hydrated, viewsLoading, userId, activeView, applyView, searchParams, selectView]);
+  }, [hydrated, viewsLoading, userId]);
 
-  // ── Zapis trwałego stanu widoku ───────────────────────────────────────
+  // ── Zapis preferencji prezentacji (tylko sortowanie) ──────────────────
+  // Filtry, aktywny widok i zakładka statusu NIE są utrwalane — każde wejście
+  // startuje z „Wszystkie".
   useEffect(() => {
     if (!hydrated) return;
-    saveViewPrefs("prospecting", userId ?? null, { activeViewId: activeId, statusFilter, filters, sort });
-  }, [hydrated, userId, activeId, statusFilter, filters, sort]);
+    saveViewPrefs("prospecting", userId ?? null, { sort });
+  }, [hydrated, userId, sort]);
 
   const isDirty = useMemo(() => {
     if (!activeView) return false;
@@ -218,11 +216,23 @@ export default function ProspectingPage() {
     );
   }, [activeView, filters, sort]);
 
+  // Filtr tymczasowy (ad-hoc): bieżące filtry różnią się od aktywnej zakładki
+  // (albo od „Wszystkie", gdy żaden widok nie jest wybrany).
+  const adhoc = activeView ? isDirty : filters.length > 0;
+
+  const handleClearAdhoc = useCallback(() => {
+    if (activeView) applyView(activeView.filters, activeView.sort);
+    else {
+      filterBarRef.current?.setFilters([]);
+      setSort(null);
+    }
+  }, [activeView, applyView]);
+
   // Aktywne prospekty (nie zarchiwizowane) — sterowane filtrami i sortowaniem.
   const load = useCallback(async () => {
     setLoading(true);
     let query = supabase.from("prospects").select("*").is("archived_at", null);
-    query = buildFilterQuery(query, filters, columnForProspect);
+    query = buildFilterQuery(query, filters, resolveColumn);
     // nullsFirst:false → wiersze bez wartości (np. nieocenione leady) zawsze na
     // dole, niezależnie od kierunku sortowania (spójne z sortowaniem tabeli).
     if (sort) query = query.order(sort.column, { ascending: sort.direction === "asc", nullsFirst: false });
@@ -231,7 +241,7 @@ export default function ProspectingPage() {
     const { data } = await query;
     setProspects((data as Prospect[]) ?? []);
     setLoading(false);
-  }, [supabase, filters, sort]);
+  }, [supabase, filters, sort, resolveColumn]);
 
   useEffect(() => {
     load();
@@ -241,12 +251,12 @@ export default function ProspectingPage() {
   const loadArchived = useCallback(async () => {
     setArchivedLoading(true);
     let query = supabase.from("prospects").select("*").not("archived_at", "is", null);
-    query = buildFilterQuery(query, filters, columnForProspect);
+    query = buildFilterQuery(query, filters, resolveColumn);
     query = query.order("archived_at", { ascending: false });
     const { data } = await query;
     setArchivedProspects((data as Prospect[]) ?? []);
     setArchivedLoading(false);
-  }, [supabase, filters]);
+  }, [supabase, filters, resolveColumn]);
 
   useEffect(() => {
     if (showingArchive) loadArchived();
@@ -365,44 +375,35 @@ export default function ProspectingPage() {
     return true;
   }
 
-  // ── Klasyfikacja (Feature 1 + 2) ───────────────────────────────────────
-  // Akcje zbiorcze z tabeli: ustaw kategorię (nadpisuje) / dodaj cel (dokłada).
-  const bulkSetCategory = useCallback(
-    async (ids: string[], categoryKey: string) => {
-      const res = await fetch("/api/prospecting/bulk-classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, category: categoryKey }),
-      });
-      if (!res.ok) {
-        toast.error("Nie udało się ustawić kategorii.");
+  // ── Zbiorcza edycja dowolnej właściwości (Feature 1 + 2 + własne) ──────────
+  // Kategoria/własne skalarne: nadpisujemy. Cel kontaktu (multi_select): tryb
+  // „dołóż" dokłada bez duplikatów i dopisuje historię (append-only), „zastąp"
+  // ustawia zbiór na nowo.
+  const handleBulkEdit = useCallback(
+    async (ids: string[], view: PropertyView, value: unknown, mode: "replace" | "add") => {
+      if (ids.length === 0) return;
+      const { error } = await applyBulkProperty(supabase, "prospects", ids, view, value, mode);
+      if (error) {
+        toast.error("Nie udało się zapisać właściwości.");
         return;
       }
-      setProspects((list) => list.map((p) => (ids.includes(p.id) ? { ...p, category: categoryKey } : p)));
-      toast.success(ids.length === 1 ? "Kategoria ustawiona." : `Ustawiono kategorię dla ${ids.length} leadów.`);
-    },
-    [toast]
-  );
-
-  const bulkAddPurpose = useCallback(
-    async (ids: string[], purposeKey: string) => {
-      const res = await fetch("/api/prospecting/bulk-classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, purpose: purposeKey }),
-      });
-      if (!res.ok) {
-        toast.error("Nie udało się dodać celu kontaktu.");
-        return;
+      // Cel kontaktu: historia (append-only), gdy dokładamy.
+      if (view.key === "purposes" && mode === "add") {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const vals = Array.isArray(value) ? (value as string[]) : [];
+        if (user && vals.length) {
+          await supabase.from("prospect_purposes").insert(
+            ids.flatMap((prospect_id) => vals.map((purpose) => ({ owner: user.id, prospect_id, purpose, source: "bulk" })))
+          );
+        }
       }
-      setProspects((list) =>
-        list.map((p) =>
-          ids.includes(p.id) ? { ...p, purposes: [...new Set([...(p.purposes ?? []), purposeKey])] } : p
-        )
-      );
-      toast.success(ids.length === 1 ? "Dodano cel kontaktu." : `Dodano cel kontaktu do ${ids.length} leadów.`);
+      toast.success(ids.length === 1 ? "Zapisano." : `Zaktualizowano ${ids.length} leadów.`);
+      load();
     },
-    [toast]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [supabase, toast]
   );
 
   // Zmiana kategorii pojedynczego leada z jego widoku (korekta klasyfikacji).
@@ -543,23 +544,25 @@ export default function ProspectingPage() {
 
       {!showingArchive && (
         <>
-          <SavedViewTabs
+          <ViewTabs
             views={views}
             activeId={activeId}
+            adhoc={adhoc}
             loading={viewsLoading}
-            isDirty={isDirty}
             storage={viewsStorage}
             error={viewsError}
-            onSelect={handleSelectView}
+            onSelectAll={handleSelectAll}
+            onSelectView={handleSelectView}
             onCreate={(name) => createView(name, { filters, sort, view_mode: "table" })}
             onRename={(id, name) => updateView(id, { name })}
             onDelete={deleteView}
             onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort, view_mode: "table" })}
+            onClearAdhoc={handleClearAdhoc}
           />
 
           <FilterBar
             ref={filterBarRef}
-            builtInFields={builtInFields}
+            fields={builtInFields}
             onFilterChange={setFilters}
             quickFilters={[{ label: "Tylko bez strony", filter: NO_WEBSITE_QUICK_FILTER }]}
           />
@@ -588,8 +591,8 @@ export default function ProspectingPage() {
           sort={tableSort}
           onSortChange={onTableSortChange}
           onArchive={archiveProspects}
-          onBulkCategory={bulkSetCategory}
-          onBulkPurpose={bulkAddPurpose}
+          properties={properties}
+          onBulkEdit={handleBulkEdit}
         />
       )}
 
@@ -608,6 +611,16 @@ export default function ProspectingPage() {
           }}
           onSetCategory={setCategory}
           onAddPurpose={addPurpose}
+          onSaveProps={async (pr, props) => {
+            const { error } = await supabase.from("prospects").update({ props }).eq("id", pr.id);
+            if (error) {
+              toast.error("Nie udało się zapisać właściwości.");
+              return;
+            }
+            setProspects((list) => list.map((x) => (x.id === pr.id ? { ...x, props } : x)));
+            setFocusProspect((fp) => (fp && fp.id === pr.id ? { ...fp, props } : fp));
+            toast.success("Właściwości zapisane.");
+          }}
         />
       )}
 

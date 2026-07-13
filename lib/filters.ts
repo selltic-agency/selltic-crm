@@ -111,7 +111,14 @@ export function buildFilterQuery(
         // Nakładanie się tablic: wiersz pasuje, gdy jego kolumna-tablica ma
         // co najmniej jedną wspólną wartość z podanym zbiorem.
         if (Array.isArray(f.value) && f.value.length > 0) {
-          q = q.overlaps(column, f.value);
+          if (column.includes("->")) {
+            // Właściwość własna multi_select trzymana jako tablica jsonb w props:
+            // dopasuj, gdy zawiera DOWOLNĄ z wybranych wartości (@> per wartość).
+            const orExpr = f.value.map((v: unknown) => `${column}.cs.${JSON.stringify([v])}`).join(",");
+            q = q.or(orExpr);
+          } else {
+            q = q.overlaps(column, f.value);
+          }
         }
         break;
     }

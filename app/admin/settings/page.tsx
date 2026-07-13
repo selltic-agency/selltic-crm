@@ -2,8 +2,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Reorder } from "framer-motion";
-import { Plus, Trash2, GripVertical, X, Check, Mail } from "lucide-react";
+import { Reorder, useDragControls } from "framer-motion";
+import { Plus, Trash2, GripVertical, X, Check, Mail, Archive, ChevronDown, ChevronRight, Lock } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import type {
@@ -11,6 +11,7 @@ import type {
   CategoryKeyword,
   PipelineStage,
   PropertyDef,
+  PropertyOption,
   PropertyType,
   ScraperConfig,
   ScraperConfigRule,
@@ -18,6 +19,7 @@ import type {
 import { useStages } from "@/lib/stages";
 import { useClassification } from "@/lib/classification";
 import { useToast } from "@/components/Toast";
+import { PROPERTY_TYPES, TYPE_LABEL, hasOptions, normalizeOptions, propLabel, slugify } from "@/lib/properties";
 
 type Tab = "properties" | "stages" | "categories" | "notifications" | "integrations" | "scraper";
 
@@ -41,13 +43,6 @@ const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
     { min_rating: 4.0, points: 10 },
     { min_rating: 4.5, points: 15 },
   ],
-};
-
-const TYPE_LABEL: Record<PropertyType, string> = {
-  text: "tekst",
-  number: "liczba",
-  date: "data",
-  select: "lista",
 };
 
 export default function SettingsPage() {
@@ -725,20 +720,27 @@ function CategoriesTab() {
   );
 }
 
-/* ── Właściwości ──────────────────────────────────────────── */
+/* ── Właściwości (custom fields, HubSpot/Notion-style) ─────────────────────
+   Uogólniony system pól leada. „Kategoria" i „Cel kontaktu" pojawiają się jako
+   dwie pierwsze właściwości SYSTEMOWE (dane w dedykowanych tabelach), reszta to
+   właściwości definiowane przez użytkownika (wartości w props jsonb). */
 function PropertiesTab() {
   const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
   const [defs, setDefs] = useState<PropertyDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [type, setType] = useState<PropertyType>("text");
+  const [newOptions, setNewOptions] = useState<PropertyOption[]>([]);
   const [adding, setAdding] = useState(false);
 
+  // Tylko aktywne definicje (zarchiwizowane chowamy z listy).
   const load = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase
       .from("property_defs")
       .select("*")
+      .is("archived_at", null)
       .order("position", { ascending: true });
     setDefs((data as PropertyDef[]) ?? []);
     setLoading(false);
@@ -750,8 +752,8 @@ function PropertiesTab() {
 
   async function addDef(e?: React.FormEvent) {
     e?.preventDefault();
-    const key = name.trim();
-    if (!key || adding) return;
+    const label = name.trim();
+    if (!label || adding) return;
     setAdding(true);
     const {
       data: { user },
@@ -760,120 +762,387 @@ function PropertiesTab() {
       setAdding(false);
       return;
     }
+    // Unikalny, stabilny klucz ze slugu nazwy (props jsonb trzyma ten klucz).
+    const existing = new Set(defs.map((d) => d.key));
+    let key = slugify(label);
+    if (existing.has(key)) key = `${key}_${Math.random().toString(36).slice(2, 5)}`;
     const position = defs.length ? Math.max(...defs.map((d) => d.position)) + 1 : 0;
     const { data, error } = await supabase
       .from("property_defs")
-      .insert({ owner: user.id, key, type, position })
+      .insert({ owner: user.id, key, label, type, position, options: hasOptions(type) ? newOptions : null })
       .select()
       .single();
     if (!error && data) {
       setDefs((list) => [...list, data as PropertyDef]);
       setName("");
       setType("text");
+      setNewOptions([]);
+      toast.success("Właściwość dodana.");
     } else if (error) {
-      alert("Nie udało się dodać właściwości (czy nazwa nie jest zajęta?).");
+      toast.error("Nie udało się dodać właściwości (czy nazwa nie jest zajęta?).");
     }
     setAdding(false);
   }
 
-  async function removeDef(def: PropertyDef) {
+  async function patchDef(id: string, patch: Partial<PropertyDef>) {
+    const snapshot = defs;
+    setDefs((list) => list.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+    const { error } = await supabase.from("property_defs").update(patch).eq("id", id);
+    if (error) {
+      setDefs(snapshot);
+      toast.error("Nie udało się zapisać zmian.");
+    }
+  }
+
+  // Miękkie usunięcie — dane w props zostają, właściwość znika z list/filtrów.
+  async function archiveDef(def: PropertyDef) {
+    if (!window.confirm(`Zarchiwizować właściwość „${propLabel(def)}"?\n\nDane leadów NIE zostaną usunięte — właściwość zniknie tylko z kolumn, filtrów i panelu leada. Możesz ją odtworzyć uruchomieniem ponownie migracji lub w bazie.`)) return;
     const snapshot = defs;
     setDefs((list) => list.filter((d) => d.id !== def.id));
-    const { error } = await supabase.from("property_defs").delete().eq("id", def.id);
-    if (error) setDefs(snapshot);
+    const { error } = await supabase.from("property_defs").update({ archived_at: new Date().toISOString() }).eq("id", def.id);
+    if (error) {
+      setDefs(snapshot);
+      toast.error("Nie udało się zarchiwizować właściwości.");
+    } else {
+      toast.success("Właściwość zarchiwizowana.");
+    }
+  }
+
+  function persistOrder(next: PropertyDef[]) {
+    setDefs(next);
+    Promise.all(next.map((d, i) => supabase.from("property_defs").update({ position: i }).eq("id", d.id)));
   }
 
   return (
-    <section
-      style={{
-        background: tokens.card,
-        border: `1px solid ${tokens.border}`,
-        borderRadius: tokens.radius,
-        padding: 20,
-      }}
-    >
-      <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 16px" }}>
-        Właściwości są wspólne dla wszystkich kontaktów i pojawiają się w panelu
-        kontaktu od razu po dodaniu.
+    <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 20 }}>
+      <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 18px" }}>
+        Właściwości to pola leada — działają jako kolumny na listach, filtry oraz pola w panelu leada.
+        „Kategoria" i „Cel kontaktu" to właściwości systemowe. Nowe właściwości dodajesz sam poniżej.
       </p>
 
+      {/* ── Właściwości systemowe ── */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase", margin: "0 0 8px" }}>
+        Systemowe
+      </div>
+      <div style={{ display: "grid", gap: 8, marginBottom: 22 }}>
+        <SystemPropertyCard title="Kategoria" typeLabel={TYPE_LABEL.select} table="lead_categories" />
+        <SystemPropertyCard title="Cel kontaktu" typeLabel={TYPE_LABEL.multi_select} table="contact_purposes" />
+      </div>
+
+      {/* ── Właściwości użytkownika ── */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase", margin: "0 0 8px" }}>
+        Twoje właściwości
+      </div>
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : defs.length === 0 ? (
-        <p style={{ color: tokens.muted, fontSize: 14 }}>Brak właściwości.</p>
+        <p style={{ color: tokens.muted, fontSize: 14, margin: "0 0 18px" }}>Brak własnych właściwości.</p>
       ) : (
-        <div style={{ display: "grid", gap: 8, marginBottom: 18 }}>
+        <Reorder.Group axis="y" values={defs} onReorder={persistOrder} style={{ listStyle: "none", margin: "0 0 18px", padding: 0, display: "grid", gap: 8 }}>
           {defs.map((d) => (
-            <div
-              key={d.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                border: `1px solid ${tokens.border}`,
-                borderRadius: 10,
-                padding: "10px 14px",
-              }}
-            >
-              <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{d.key}</span>
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  padding: "3px 10px",
-                  borderRadius: 999,
-                  background: tokens.accentSoft,
-                  color: tokens.accent,
-                }}
-              >
-                {TYPE_LABEL[d.type] ?? d.type}
-              </span>
-              <button
-                onClick={() => removeDef(d)}
-                aria-label="Usuń"
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  border: `1px solid ${tokens.border}`,
-                  background: "#fff",
-                  display: "grid",
-                  placeItems: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <Trash2 size={15} color={tokens.muted} />
-              </button>
-            </div>
+            <UserPropertyRow key={d.id} def={d} onPatch={patchDef} onArchive={archiveDef} />
           ))}
-        </div>
+        </Reorder.Group>
       )}
 
-      <form onSubmit={addDef} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <input
-          placeholder="Nazwa właściwości"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={{ ...inputStyle, flex: "2 1 200px" }}
-        />
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value as PropertyType)}
-          style={{ ...inputStyle, flex: "1 1 130px" }}
-        >
-          <option value="text">tekst</option>
-          <option value="number">liczba</option>
-          <option value="date">data</option>
-          <option value="select">lista</option>
-        </select>
-        <button type="submit" disabled={adding} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
-          <Plus size={16} />
-          Dodaj
-        </button>
-      </form>
+      {/* ── Dodaj właściwość ── */}
+      <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 16 }}>
+        <form onSubmit={addDef} style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input placeholder="Nazwa właściwości" value={name} onChange={(e) => setName(e.target.value)} style={{ ...inputStyle, flex: "2 1 200px" }} />
+            <select value={type} onChange={(e) => setType(e.target.value as PropertyType)} style={{ ...inputStyle, flex: "1 1 160px" }}>
+              {PROPERTY_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            <button type="submit" disabled={adding} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
+              <Plus size={16} /> Dodaj
+            </button>
+          </div>
+          {hasOptions(type) && (
+            <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: tokens.muted, marginBottom: 8 }}>Opcje listy</div>
+              <OptionsEditor options={newOptions} onChange={setNewOptions} />
+            </div>
+          )}
+        </form>
+      </div>
     </section>
   );
 }
+
+// Wiersz właściwości użytkownika: nazwa, typ (zmiana z potwierdzeniem), edytor
+// opcji dla list, archiwizacja. Przeciągalny (zmiana kolejności).
+function UserPropertyRow({
+  def,
+  onPatch,
+  onArchive,
+}: {
+  def: PropertyDef;
+  onPatch: (id: string, patch: Partial<PropertyDef>) => void;
+  onArchive: (def: PropertyDef) => void;
+}) {
+  const controls = useDragControls();
+  const [expanded, setExpanded] = useState(false);
+  const [labelDraft, setLabelDraft] = useState(propLabel(def));
+  const options = useMemo(() => normalizeOptions(def.options), [def.options]);
+
+  function changeType(next: PropertyType) {
+    if (next === def.type) return;
+    if (!window.confirm(`Zmienić typ właściwości „${propLabel(def)}" z „${TYPE_LABEL[def.type]}" na „${TYPE_LABEL[next]}"?\n\nIstniejące wartości leadów nie zostaną skasowane, ale mogą być inaczej interpretowane/wyświetlane.`)) return;
+    onPatch(def.id, { type: next, options: hasOptions(next) ? options : null });
+  }
+
+  return (
+    <Reorder.Item value={def} dragListener={false} dragControls={controls} style={{ listStyle: "none", border: `1px solid ${tokens.border}`, borderRadius: 10, background: tokens.card }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
+        <button onPointerDown={(e) => controls.start(e)} aria-label="Przeciągnij" style={{ border: "none", background: "none", cursor: "grab", padding: 0, color: tokens.muted, touchAction: "none", flexShrink: 0 }}>
+          <GripVertical size={15} />
+        </button>
+        <input
+          value={labelDraft}
+          onChange={(e) => setLabelDraft(e.target.value)}
+          onBlur={() => {
+            const v = labelDraft.trim();
+            if (v && v !== propLabel(def)) onPatch(def.id, { label: v });
+            else setLabelDraft(propLabel(def));
+          }}
+          style={{ ...inputStyle, flex: 1, minWidth: 0, fontWeight: 600, padding: "6px 10px" }}
+        />
+        <select value={def.type} onChange={(e) => changeType(e.target.value as PropertyType)} style={{ ...inputStyle, width: 170, padding: "6px 10px", flexShrink: 0 }}>
+          {PROPERTY_TYPES.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        {hasOptions(def.type) && (
+          <button onClick={() => setExpanded((s) => !s)} title="Opcje listy" style={{ ...iconBtn }}>
+            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          </button>
+        )}
+        <button onClick={() => onArchive(def)} title="Archiwizuj" aria-label="Archiwizuj właściwość" style={{ ...iconBtn }}>
+          <Archive size={15} color={tokens.muted} />
+        </button>
+      </div>
+      {hasOptions(def.type) && expanded && (
+        <div style={{ borderTop: `1px solid ${tokens.border}`, padding: 12 }}>
+          <OptionsEditor options={options} onChange={(next) => onPatch(def.id, { options: next })} />
+        </div>
+      )}
+    </Reorder.Item>
+  );
+}
+
+// Właściwość systemowa (Kategoria / Cel kontaktu) — dane w dedykowanej tabeli
+// (lead_categories / contact_purposes). Edytor opcji zapisuje wprost do tabeli.
+function SystemPropertyCard({ title, typeLabel, table }: { title: string; typeLabel: string; table: "lead_categories" | "contact_purposes" }) {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const { reload } = useClassification();
+  const [rows, setRows] = useState<{ id: string; key: string; label: string; color: string; position: number }[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await supabase.from(table).select("id, key, label, color, position").order("position", { ascending: true });
+    setRows((data as typeof rows) ?? []);
+    setLoaded(true);
+  }, [supabase, table]);
+
+  useEffect(() => {
+    if (expanded && !loaded) load();
+  }, [expanded, loaded, load]);
+
+  const options = useMemo<PropertyOption[]>(() => rows.map((r) => ({ key: r.key, label: r.label, color: r.color })), [rows]);
+
+  async function addOption(label: string, color: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const existing = new Set(rows.map((r) => r.key));
+    let key = slugify(label);
+    if (existing.has(key)) key = `${key}_${Math.random().toString(36).slice(2, 5)}`;
+    const position = rows.length ? Math.max(...rows.map((r) => r.position)) + 1 : 0;
+    const { data, error } = await supabase.from(table).insert({ owner: user.id, key, label, color, position }).select("id, key, label, color, position").single();
+    if (!error && data) {
+      setRows((r) => [...r, data as (typeof rows)[number]]);
+      reload();
+    } else {
+      toast.error("Nie udało się dodać opcji.");
+    }
+  }
+
+  async function editOption(key: string, patch: { label?: string; color?: string }) {
+    const row = rows.find((r) => r.key === key);
+    if (!row) return;
+    setRows((list) => list.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    const { error } = await supabase.from(table).update(patch).eq("id", row.id);
+    if (error) toast.error("Nie udało się zapisać opcji.");
+    else reload();
+  }
+
+  async function removeOption(key: string) {
+    const row = rows.find((r) => r.key === key);
+    if (!row) return;
+    if (!window.confirm(`Usunąć opcję „${row.label}"? Leady, które ją miały, pokażą „—".`)) return;
+    setRows((list) => list.filter((r) => r.key !== key));
+    const { error } = await supabase.from(table).delete().eq("id", row.id);
+    if (error) toast.error("Nie udało się usunąć opcji.");
+    else reload();
+  }
+
+  async function reorder(keys: string[]) {
+    const next = keys.map((k) => rows.find((r) => r.key === k)!).filter(Boolean);
+    setRows(next.map((r, i) => ({ ...r, position: i })));
+    await Promise.all(next.map((r, i) => supabase.from(table).update({ position: i }).eq("id", r.id)));
+    reload();
+  }
+
+  return (
+    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 10, background: tokens.card }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
+        <Lock size={14} color={tokens.muted} style={{ flexShrink: 0 }} />
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{title}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 999, background: tokens.accentSoft, color: tokens.accent }}>{typeLabel}</span>
+        <button onClick={() => setExpanded((s) => !s)} title="Opcje listy" style={{ ...iconBtn }}>
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+      </div>
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${tokens.border}`, padding: 12 }}>
+          {!loaded ? (
+            <p style={{ fontSize: 13, color: tokens.muted, margin: 0 }}>Wczytywanie…</p>
+          ) : (
+            <OptionsEditor
+              options={options}
+              onAdd={addOption}
+              onEdit={editOption}
+              onRemove={removeOption}
+              onReorderKeys={reorder}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Edytor opcji listy — dwa tryby:
+//  • lokalny (property_defs): przekaż `onChange(next)`; edytor trzyma stan.
+//  • tabelaryczny (systemowe): przekaż `onAdd/onEdit/onRemove/onReorderKeys`,
+//    które zapisują wprost do bazy.
+function OptionsEditor({
+  options,
+  onChange,
+  onAdd,
+  onEdit,
+  onRemove,
+  onReorderKeys,
+}: {
+  options: PropertyOption[];
+  onChange?: (next: PropertyOption[]) => void;
+  onAdd?: (label: string, color: string) => void;
+  onEdit?: (key: string, patch: { label?: string; color?: string }) => void;
+  onRemove?: (key: string) => void;
+  onReorderKeys?: (keys: string[]) => void;
+}) {
+  const [newLabel, setNewLabel] = useState("");
+  const [newColor, setNewColor] = useState("#6C5CE7");
+
+  function add() {
+    const label = newLabel.trim();
+    if (!label) return;
+    if (onAdd) onAdd(label, newColor);
+    else if (onChange) {
+      const existing = new Set(options.map((o) => o.key));
+      let key = slugify(label);
+      if (existing.has(key)) key = `${key}_${Math.random().toString(36).slice(2, 5)}`;
+      onChange([...options, { key, label, color: newColor }]);
+    }
+    setNewLabel("");
+  }
+
+  function edit(key: string, patch: { label?: string; color?: string }) {
+    if (onEdit) onEdit(key, patch);
+    else if (onChange) onChange(options.map((o) => (o.key === key ? { ...o, ...patch } : o)));
+  }
+
+  function remove(key: string) {
+    if (onRemove) onRemove(key);
+    else if (onChange) onChange(options.filter((o) => o.key !== key));
+  }
+
+  function reorder(next: PropertyOption[]) {
+    if (onReorderKeys) onReorderKeys(next.map((o) => o.key));
+    else if (onChange) onChange(next);
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {options.length === 0 && <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>Brak opcji — dodaj pierwszą poniżej.</p>}
+      <Reorder.Group axis="y" values={options} onReorder={reorder} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+        {options.map((o) => (
+          <OptionRow key={o.key} option={o} onEdit={edit} onRemove={remove} />
+        ))}
+      </Reorder.Group>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
+        <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} style={{ width: 34, height: 34, padding: 0, border: `1px solid ${tokens.border}`, borderRadius: 8, cursor: "pointer", flexShrink: 0 }} />
+        <input
+          placeholder="Nowa opcja…"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          style={{ ...inputStyle, flex: 1, padding: "7px 10px" }}
+        />
+        <button type="button" onClick={add} style={{ ...ghostButton, padding: "7px 12px", display: "flex", alignItems: "center", gap: 5 }}>
+          <Plus size={15} /> Dodaj
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OptionRow({ option, onEdit, onRemove }: { option: PropertyOption; onEdit: (key: string, patch: { label?: string; color?: string }) => void; onRemove: (key: string) => void }) {
+  const controls = useDragControls();
+  const [label, setLabel] = useState(option.label);
+  useEffect(() => setLabel(option.label), [option.label]);
+  return (
+    <Reorder.Item value={option} dragListener={false} dragControls={controls} style={{ listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+      <button onPointerDown={(e) => controls.start(e)} aria-label="Przeciągnij" style={{ border: "none", background: "none", cursor: "grab", padding: 0, color: tokens.muted, touchAction: "none", flexShrink: 0 }}>
+        <GripVertical size={14} />
+      </button>
+      <input type="color" value={option.color ?? "#6C5CE7"} onChange={(e) => onEdit(option.key, { color: e.target.value })} style={{ width: 30, height: 30, padding: 0, border: `1px solid ${tokens.border}`, borderRadius: 7, cursor: "pointer", flexShrink: 0 }} />
+      <input
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        onBlur={() => {
+          const v = label.trim();
+          if (v && v !== option.label) onEdit(option.key, { label: v });
+          else setLabel(option.label);
+        }}
+        style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "6px 10px" }}
+      />
+      <button onClick={() => onRemove(option.key)} aria-label="Usuń opcję" style={{ ...iconBtn }}>
+        <Trash2 size={14} color={tokens.muted} />
+      </button>
+    </Reorder.Item>
+  );
+}
+
+const iconBtn: React.CSSProperties = {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  border: `1px solid ${tokens.border}`,
+  background: "#fff",
+  display: "grid",
+  placeItems: "center",
+  cursor: "pointer",
+  flexShrink: 0,
+};
 
 /* ── Powiadomienia ────────────────────────────────────────── */
 function NotificationsTab() {

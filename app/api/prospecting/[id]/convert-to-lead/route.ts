@@ -69,6 +69,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       // Kuratorowana kategoria branży (Feature 1) — przeniesiona na deala, żeby
       // klasyfikacja nie ginęła przy konwersji prospekt → deal.
       category: p.category ?? null,
+      // Cele kontaktu (Feature 2) — przeniesione na deala (model hybrydowy).
+      purposes: p.purposes ?? [],
       // props zachowane dla zgodności wstecznej (google_maps_url, score_reasons)
       // oraz komplet danych zdublowany, żeby nic nie zginęło.
       props: {
@@ -92,6 +94,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .single();
   if (dErr || !deal) {
     return NextResponse.json({ error: "Nie udało się utworzyć deala" }, { status: 500 });
+  }
+
+  // Historia celów kontaktu (append-only) — przenieś na deala przy konwersji.
+  if ((p.purposes?.length ?? 0) > 0) {
+    await supabase.from("deal_purposes").insert(
+      (p.purposes ?? []).map((purpose) => ({ owner: user.id, deal_id: deal.id, purpose, source: "convert" }))
+    );
   }
 
   const reasons = Array.isArray(props.score_reasons) ? (props.score_reasons as string[]).join(", ") : "";
