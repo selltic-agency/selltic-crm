@@ -7,10 +7,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, CheckSquare, Square, Archive, RotateCcw } from "lucide-react";
+import { ChevronUp, ChevronDown, CheckSquare, Square, Archive, RotateCcw, Tag, Target } from "lucide-react";
 import { tokens, formatDateTime } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
+import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
+import { useClassification } from "@/lib/classification";
 import { STATUS_LABEL, STATUS_COLOR, toDisplayStatus } from "@/lib/prospectStatus";
 
 const WEBSITE_STATUS_LABEL: Record<string, string> = {
@@ -24,6 +26,8 @@ export type SortConfig = { key: string; direction: "asc" | "desc" };
 
 const COLUMNS: { key: string; label: string; width: number }[] = [
   { key: "name", label: "Nazwa", width: 200 },
+  { key: "category", label: "Kategoria", width: 175 },
+  { key: "purposes", label: "Cel kontaktu", width: 165 },
   { key: "industry", label: "Branża", width: 150 },
   { key: "phone", label: "Telefon", width: 140 },
   { key: "website_status", label: "Strona", width: 120 },
@@ -42,6 +46,8 @@ export default function ProspectTable({
   archiveMode = false,
   onArchive,
   onRestore,
+  onBulkCategory,
+  onBulkPurpose,
 }: {
   prospects: Prospect[];
   onRowClick: (id: string) => void;
@@ -50,7 +56,11 @@ export default function ProspectTable({
   archiveMode?: boolean;
   onArchive?: (ids: string[]) => void;
   onRestore?: (ids: string[]) => void;
+  // Akcje zbiorcze klasyfikacji (Feature 1 + 2) — dostępne poza Archiwum.
+  onBulkCategory?: (ids: string[], categoryKey: string) => void;
+  onBulkPurpose?: (ids: string[], purposeKey: string) => void;
 }) {
+  const { categories, purposes } = useClassification();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const pageSize = 25;
@@ -102,6 +112,18 @@ export default function ProspectTable({
     setSelected(new Set());
   }
 
+  function runBulkCategory(key: string) {
+    if (!key || selected.size === 0) return;
+    onBulkCategory?.([...selected], key);
+    setSelected(new Set());
+  }
+
+  function runBulkPurpose(key: string) {
+    if (!key || selected.size === 0) return;
+    onBulkPurpose?.([...selected], key);
+    setSelected(new Set());
+  }
+
   function handleSort(key: string) {
     onSortChange({
       key,
@@ -142,6 +164,28 @@ export default function ProspectTable({
           {allSelected ? <CheckSquare size={17} color={tokens.accent} /> : <Square size={17} color={tokens.muted} />}
           Zaznacz wszystkie
         </button>
+
+        {/* Akcje zbiorcze klasyfikacji (poza Archiwum): ustaw kategorię
+            (nadpisuje) / dodaj cel kontaktu (dokłada, nie nadpisuje). */}
+        {!archiveMode && onBulkCategory && (
+          <BulkSelect
+            icon={<Tag size={14} />}
+            placeholder={`Ustaw kategorię${selected.size ? ` (${selected.size})` : ""}`}
+            disabled={selected.size === 0}
+            options={categories.map((c) => ({ key: c.key, label: c.label }))}
+            onPick={runBulkCategory}
+          />
+        )}
+        {!archiveMode && onBulkPurpose && (
+          <BulkSelect
+            icon={<Target size={14} />}
+            placeholder={`Dodaj cel${selected.size ? ` (${selected.size})` : ""}`}
+            disabled={selected.size === 0}
+            options={purposes.map((p) => ({ key: p.key, label: p.label }))}
+            onPick={runBulkPurpose}
+          />
+        )}
+
         <div style={{ flex: 1, minWidth: 8 }} />
         <button
           onClick={bulkAction}
@@ -167,7 +211,7 @@ export default function ProspectTable({
       </div>
 
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1200 }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
               <th style={{ padding: "12px 16px", width: 44 }} />
@@ -305,12 +349,16 @@ function getVal(p: Prospect, key: string): string | number {
   if (key === "created_at") return new Date(p.created_at).getTime();
   if (key === "prospecting_status") return STATUS_LABEL[toDisplayStatus(p.prospecting_status)];
   if (key === "website_status") return p.website_status ?? "";
+  if (key === "category") return p.category ?? "";
+  if (key === "purposes") return (p.purposes ?? []).join(",");
   const v = (p as unknown as Record<string, unknown>)[key];
   return typeof v === "number" ? v : (v as string) ?? "";
 }
 
 function renderCell(p: Prospect, key: string) {
   if (key === "name") return <span style={{ fontWeight: 600 }}>{p.name || "—"}</span>;
+  if (key === "category") return <CategoryBadge categoryKey={p.category} size="sm" />;
+  if (key === "purposes") return <PurposeBadges purposeKeys={p.purposes} size="sm" />;
   if (key === "lead_score")
     return <ScoreBadge score={p.lead_score} breakdown={p.lead_score_breakdown} fallbackReasons={p.props?.score_reasons} />;
   if (key === "rating") return p.rating != null ? `⭐ ${p.rating} (${p.review_count ?? 0})` : "—";
@@ -330,6 +378,69 @@ function renderCell(p: Prospect, key: string) {
   }
   const v = (p as unknown as Record<string, unknown>)[key];
   return v != null && v !== "" ? String(v) : "—";
+}
+
+// Dropdown akcji zbiorczej: wybór opcji od razu ją stosuje, potem resetuje się
+// do etykiety-placeholdera (value="" jest stałe, więc select nie „zapamiętuje”).
+function BulkSelect({
+  icon,
+  placeholder,
+  disabled,
+  options,
+  onPick,
+}: {
+  icon: React.ReactNode;
+  placeholder: string;
+  disabled: boolean;
+  options: { key: string; label: string }[];
+  onPick: (key: string) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 10px",
+        borderRadius: 10,
+        border: `1px solid ${tokens.border}`,
+        background: tokens.card,
+        color: disabled ? tokens.muted : tokens.text,
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {icon}
+      <select
+        value=""
+        disabled={disabled}
+        onChange={(e) => {
+          const v = e.target.value;
+          e.currentTarget.value = "";
+          if (v) onPick(v);
+        }}
+        style={{
+          border: "none",
+          background: "none",
+          fontSize: 13,
+          fontWeight: 600,
+          color: "inherit",
+          cursor: disabled ? "default" : "pointer",
+          outline: "none",
+          maxWidth: 200,
+        }}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.key} value={o.key}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 const tdStyle: React.CSSProperties = {

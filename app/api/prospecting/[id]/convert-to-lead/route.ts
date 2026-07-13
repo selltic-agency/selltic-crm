@@ -66,13 +66,16 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       website_status: p.website_status,
       lead_score: p.lead_score,
       lead_score_breakdown: p.lead_score_breakdown,
+      // Kuratorowana kategoria branży (Feature 1) — przeniesiona na deala, żeby
+      // klasyfikacja nie ginęła przy konwersji prospekt → deal.
+      category: p.category ?? null,
       // props zachowane dla zgodności wstecznej (google_maps_url, score_reasons)
       // oraz komplet danych zdublowany, żeby nic nie zginęło.
       props: {
         website: p.website,
         address: p.address,
         industry: p.industry,
-        category: p.industry,
+        category: p.category ?? p.industry,
         city: p.city,
         place_id: p.place_id,
         rating: p.rating,

@@ -63,9 +63,11 @@ import {
   type Task,
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
+import { useClassification } from "@/lib/classification";
 import { useIsMobile } from "@/lib/responsive";
 import { useToast } from "@/components/Toast";
 import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
+import { CategoryBadge } from "@/components/ClassificationBadges";
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
 
 // Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
@@ -132,6 +134,7 @@ export default function DealPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const { stages, stageMeta } = useStages();
+  const { categories } = useClassification();
   const isNarrow = useIsMobile(STACK_BREAKPOINT);
 
   const [deal, setDeal] = useState<Deal | null>(null);
@@ -151,9 +154,10 @@ export default function DealPage() {
   const [contactSaving, setContactSaving] = useState(false);
   const [contactSavedAt, setContactSavedAt] = useState<number | null>(null);
 
-  const [propsDraft, setPropsDraft] = useState<{ value: string; assignee: Assignee | ""; custom: Record<string, string> }>({
+  const [propsDraft, setPropsDraft] = useState<{ value: string; assignee: Assignee | ""; category: string; custom: Record<string, string> }>({
     value: "",
     assignee: "",
+    category: "",
     custom: {},
   });
   const [propsSaving, setPropsSaving] = useState(false);
@@ -170,6 +174,7 @@ export default function DealPage() {
     setPropsDraft({
       value: deal.value ? String(deal.value) : "",
       assignee: deal.assignee ?? "",
+      category: deal.category ?? "",
       custom: { ...(deal.props ?? {}) },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -186,6 +191,7 @@ export default function DealPage() {
     !!deal &&
     (propsDraft.value !== (deal.value ? String(deal.value) : "") ||
       propsDraft.assignee !== (deal.assignee ?? "") ||
+      propsDraft.category !== (deal.category ?? "") ||
       propertyDefs.some((d) => (propsDraft.custom[d.key] ?? "") !== (deal.props?.[d.key] ?? "")));
 
   const propTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -286,19 +292,20 @@ export default function DealPage() {
     setPropsSaving(true);
     const value = propsDraft.value ? Number(propsDraft.value) : 0;
     const assignee = propsDraft.assignee || null;
+    const category = propsDraft.category || null;
     const props = { ...(deal.props ?? {}) };
     for (const def of propertyDefs) {
       const v = (propsDraft.custom[def.key] ?? "").trim();
       if (v === "") delete props[def.key];
       else props[def.key] = v;
     }
-    const { error } = await supabase.from("deals").update({ value, assignee, props }).eq("id", deal.id);
+    const { error } = await supabase.from("deals").update({ value, assignee, category, props }).eq("id", deal.id);
     setPropsSaving(false);
     if (error) {
       toast.error("Nie udało się zapisać właściwości.");
       return;
     }
-    setDeal({ ...deal, value, assignee, props });
+    setDeal({ ...deal, value, assignee, category, props });
     setPropsSavedAt(Date.now());
     setTimeout(() => setPropsSavedAt(null), 2000);
   }
@@ -509,6 +516,7 @@ export default function DealPage() {
             >
               {currentStage.label}
             </span>
+            {deal.category && <CategoryBadge categoryKey={deal.category} />}
             <span style={{ fontSize: 12.5, color: tokens.muted }}>
               Otwarty {formatDateTime(deal.opened_at)}
               {deal.closed_at ? ` · Zamknięty ${formatDateTime(deal.closed_at)}` : ""}
@@ -626,6 +634,21 @@ export default function DealPage() {
                 <option value="">Nieprzypisany</option>
                 <option value="dominik">Dominik</option>
                 <option value="kuba">Kuba</option>
+              </select>
+            </FieldLabel>
+            {/* Kategoria branży (Feature 1) — przeniesiona z prospektu, edytowalna. */}
+            <FieldLabel label="Kategoria branży">
+              <select
+                value={propsDraft.category}
+                onChange={(e) => setPropsDraft((d) => ({ ...d, category: e.target.value }))}
+                style={inputStyle}
+              >
+                <option value="">— brak —</option>
+                {categories.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
               </select>
             </FieldLabel>
           </div>

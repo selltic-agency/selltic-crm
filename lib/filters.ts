@@ -12,7 +12,11 @@ export type FilterOperator =
   | "before"
   | "after"
   | "last_n_days"
-  | "in";
+  | "in"
+  // Kolumna-tablica (np. prospects.purposes text[]) zawiera DOWOLNĄ z podanych
+  // wartości. Filtry łączą się AND-em, więc łączy się niezależnie z „in”/„equals”
+  // dla kategorii (Feature 2 + 1 razem).
+  | "has_any";
 
 export type Filter = {
   field: string;
@@ -100,6 +104,14 @@ export function buildFilterQuery(
       case "in":
         if (Array.isArray(f.value) && f.value.length > 0) {
           q = q.in(column, f.value);
+        }
+        break;
+
+      case "has_any":
+        // Nakładanie się tablic: wiersz pasuje, gdy jego kolumna-tablica ma
+        // co najmniej jedną wspólną wartość z podanym zbiorem.
+        if (Array.isArray(f.value) && f.value.length > 0) {
+          q = q.overlaps(column, f.value);
         }
         break;
     }

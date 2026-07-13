@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import type {
   AppSettings,
+  CategoryKeyword,
   PipelineStage,
   PropertyDef,
   PropertyType,
@@ -15,9 +16,10 @@ import type {
   ScraperConfigRule,
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
+import { useClassification } from "@/lib/classification";
 import { useToast } from "@/components/Toast";
 
-type Tab = "properties" | "stages" | "notifications" | "integrations" | "scraper";
+type Tab = "properties" | "stages" | "categories" | "notifications" | "integrations" | "scraper";
 
 const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
   google_places_api_key: "",
@@ -60,6 +62,7 @@ export default function SettingsPage() {
           [
             ["properties", "Właściwości"],
             ["stages", "Etapy lejka"],
+            ["categories", "Kategorie branż"],
             ["notifications", "Powiadomienia"],
             ["integrations", "Integracje"],
             ["scraper", "Scraper"],
@@ -88,6 +91,8 @@ export default function SettingsPage() {
         <PropertiesTab />
       ) : tab === "stages" ? (
         <StagesTab />
+      ) : tab === "categories" ? (
+        <CategoriesTab />
       ) : tab === "notifications" ? (
         <NotificationsTab />
       ) : tab === "integrations" ? (
@@ -487,6 +492,236 @@ function Section({ children }: { children: React.ReactNode }) {
     >
       {children}
     </section>
+  );
+}
+
+/* ── Kategorie branż (Feature 1) ──────────────────────────────────────────
+   Stała lista 13 kategorii (z kontekstu klasyfikacji). Ekran zarządza
+   MAPOWANIEM słów kluczowych scrapera → kategoria (wiele słów → jedna
+   kategoria): dodaj / usuń / przenieś słowo między kategoriami. Mapowanie
+   dotyczy PRZYSZŁYCH zadań scrapowania (istniejące leady nie są przeklejane). */
+function CategoriesTab() {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const { categories, loading: catLoading } = useClassification();
+  const [keywords, setKeywords] = useState<CategoryKeyword[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("category_keywords")
+      .select("*")
+      .order("keyword", { ascending: true });
+    setKeywords((data as CategoryKeyword[]) ?? []);
+    setLoading(false);
+  }, [supabase]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const byCategory = useMemo(() => {
+    const map: Record<string, CategoryKeyword[]> = {};
+    for (const k of keywords) (map[k.category_key] ??= []).push(k);
+    return map;
+  }, [keywords]);
+
+  const unmapped = useMemo(() => {
+    const known = new Set(categories.map((c) => c.key));
+    return keywords.filter((k) => !known.has(k.category_key));
+  }, [keywords, categories]);
+
+  async function addKeyword(categoryKey: string) {
+    const raw = (drafts[categoryKey] ?? "").trim();
+    if (!raw || busy) return;
+    setBusy(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setBusy(false);
+      return;
+    }
+    // Rozbij po przecinkach/nowych liniach — wygodne wklejanie wielu słów.
+    const toAdd = [...new Set(raw.split(/[\n,]/).map((k) => k.trim().toLowerCase()).filter(Boolean))];
+    const { data, error } = await supabase
+      .from("category_keywords")
+      .upsert(
+        toAdd.map((keyword) => ({ owner: user.id, keyword, category_key: categoryKey })),
+        { onConflict: "owner,keyword" }
+      )
+      .select("*");
+    setBusy(false);
+    if (error) {
+      toast.error("Nie udało się dodać słów kluczowych.");
+      return;
+    }
+    // Upsert może odświeżyć istniejące (przeniesienie słowa do tej kategorii).
+    setKeywords((list) => {
+      const updated = new Map(list.map((k) => [k.id, k]));
+      for (const row of (data as CategoryKeyword[]) ?? []) updated.set(row.id, row);
+      // usuń stare wiersze o tym samym keyword (gdyby id się zmieniło — nie
+      // zmienia się przy upsert po unique, ale na wszelki wypadek dedup po keyword)
+      const seen = new Set<string>();
+      return [...updated.values()]
+        .filter((k) => (seen.has(k.owner + k.keyword) ? false : (seen.add(k.owner + k.keyword), true)))
+        .sort((a, b) => a.keyword.localeCompare(b.keyword));
+    });
+    setDrafts((d) => ({ ...d, [categoryKey]: "" }));
+  }
+
+  async function removeKeyword(k: CategoryKeyword) {
+    const snapshot = keywords;
+    setKeywords((list) => list.filter((x) => x.id !== k.id));
+    const { error } = await supabase.from("category_keywords").delete().eq("id", k.id);
+    if (error) {
+      setKeywords(snapshot);
+      toast.error("Nie udało się usunąć słowa kluczowego.");
+    }
+  }
+
+  async function moveKeyword(k: CategoryKeyword, categoryKey: string) {
+    if (k.category_key === categoryKey) return;
+    setKeywords((list) => list.map((x) => (x.id === k.id ? { ...x, category_key: categoryKey } : x)));
+    const { error } = await supabase.from("category_keywords").update({ category_key: categoryKey }).eq("id", k.id);
+    if (error) {
+      toast.error("Nie udało się przenieść słowa kluczowego.");
+      load();
+    }
+  }
+
+  if (catLoading || loading) {
+    return (
+      <Section>
+        <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section>
+      <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 18px" }}>
+        Przypisz słowa kluczowe scrapera do kategorii branży (wiele słów → jedna kategoria).
+        Nowe zadanie scrapowania z niezmapowanym słowem poprosi o wskazanie kategorii,
+        zanim ruszy. Zmiany dotyczą <b>przyszłych</b> zadań — istniejących leadów nie
+        przepinamy automatycznie (kategorię pojedynczego leada zmienisz w jego widoku
+        lub zbiorczo na liście).
+      </p>
+
+      <div style={{ display: "grid", gap: 12 }}>
+        {categories.map((c) => {
+          const list = byCategory[c.key] ?? [];
+          return (
+            <div key={c.key} style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{c.label}</span>
+                <span style={{ fontSize: 12, color: tokens.muted, fontWeight: 600 }}>({list.length})</span>
+              </div>
+
+              {list.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                  {list.map((k) => (
+                    <span
+                      key={k.id}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "4px 6px 4px 12px",
+                        borderRadius: 999,
+                        background: `${c.color}14`,
+                        border: `1px solid ${c.color}33`,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: tokens.text,
+                      }}
+                    >
+                      {k.keyword}
+                      <select
+                        value={c.key}
+                        onChange={(e) => moveKeyword(k, e.target.value)}
+                        title="Przenieś do innej kategorii"
+                        style={{
+                          border: `1px solid ${tokens.border}`,
+                          borderRadius: 8,
+                          background: "#fff",
+                          fontSize: 11,
+                          padding: "2px 4px",
+                          cursor: "pointer",
+                          maxWidth: 130,
+                        }}
+                      >
+                        {categories.map((opt) => (
+                          <option key={opt.key} value={opt.key}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => removeKeyword(k)}
+                        aria-label={`Usuń słowo ${k.keyword}`}
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: 7,
+                          border: "none",
+                          background: "none",
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          color: tokens.muted,
+                        }}
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  placeholder="Dodaj słowo kluczowe (możesz wkleić kilka po przecinku)"
+                  value={drafts[c.key] ?? ""}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addKeyword(c.key);
+                    }
+                  }}
+                  style={{ ...inputStyle, flex: "1 1 240px", minWidth: 0 }}
+                />
+                <button
+                  onClick={() => addKeyword(c.key)}
+                  disabled={busy || !(drafts[c.key] ?? "").trim()}
+                  style={{
+                    ...ghostButton,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    opacity: busy || !(drafts[c.key] ?? "").trim() ? 0.5 : 1,
+                  }}
+                >
+                  <Plus size={16} /> Dodaj
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {unmapped.length > 0 && (
+        <p style={{ fontSize: 12.5, color: tokens.warning, marginTop: 14 }}>
+          {unmapped.length} słów jest przypisanych do nieistniejących kategorii — przenieś je do
+          jednej z powyższych.
+        </p>
+      )}
+    </Section>
   );
 }
 

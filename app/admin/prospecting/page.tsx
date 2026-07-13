@@ -34,6 +34,7 @@ import SavedViewTabs from "@/components/SavedViewTabs";
 import { Filter, Sort, buildFilterQuery, columnForProspect } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
 import { loadViewPrefs, saveViewPrefs, planHydration } from "@/lib/viewPrefs";
+import { useClassification } from "@/lib/classification";
 
 // Zakładka statusu. "" = wszystkie aktywne; "archived" = miękko usunięte.
 type StatusTab = DisplayStatus | "" | "archived";
@@ -83,6 +84,7 @@ export default function ProspectingPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const searchParams = useSearchParams();
+  const { categories, purposes } = useClassification();
 
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [archivedProspects, setArchivedProspects] = useState<Prospect[]>([]);
@@ -122,10 +124,15 @@ export default function ProspectingPage() {
   const builtInFields = useMemo<FieldDef[]>(
     () => [
       ...PROSPECT_BUILT_IN_FIELDS,
+      // Kategoria (Feature 1) — jednowartościowa kolumna → operator „in”.
+      { key: "category", label: "Kategoria", type: "select", options: categories.map((c) => ({ key: c.key, label: c.label })) },
+      // Cel kontaktu (Feature 2) — kolumna-tablica → operator has_any; łączy się
+      // AND-em z kategorią, więc oba filtry działają jednocześnie.
+      { key: "purposes", label: "Cel kontaktu", type: "tags", options: purposes.map((p) => ({ key: p.key, label: p.label })) },
       { key: "city", label: "Miasto", type: "select", options: cities },
       { key: "industry", label: "Branża", type: "select", options: industries },
     ],
-    [cities, industries]
+    [cities, industries, categories, purposes]
   );
 
   const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
@@ -356,6 +363,82 @@ export default function ProspectingPage() {
     return true;
   }
 
+  // ── Klasyfikacja (Feature 1 + 2) ───────────────────────────────────────
+  // Akcje zbiorcze z tabeli: ustaw kategorię (nadpisuje) / dodaj cel (dokłada).
+  const bulkSetCategory = useCallback(
+    async (ids: string[], categoryKey: string) => {
+      const res = await fetch("/api/prospecting/bulk-classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, category: categoryKey }),
+      });
+      if (!res.ok) {
+        toast.error("Nie udało się ustawić kategorii.");
+        return;
+      }
+      setProspects((list) => list.map((p) => (ids.includes(p.id) ? { ...p, category: categoryKey } : p)));
+      toast.success(ids.length === 1 ? "Kategoria ustawiona." : `Ustawiono kategorię dla ${ids.length} leadów.`);
+    },
+    [toast]
+  );
+
+  const bulkAddPurpose = useCallback(
+    async (ids: string[], purposeKey: string) => {
+      const res = await fetch("/api/prospecting/bulk-classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, purpose: purposeKey }),
+      });
+      if (!res.ok) {
+        toast.error("Nie udało się dodać celu kontaktu.");
+        return;
+      }
+      setProspects((list) =>
+        list.map((p) =>
+          ids.includes(p.id) ? { ...p, purposes: [...new Set([...(p.purposes ?? []), purposeKey])] } : p
+        )
+      );
+      toast.success(ids.length === 1 ? "Dodano cel kontaktu." : `Dodano cel kontaktu do ${ids.length} leadów.`);
+    },
+    [toast]
+  );
+
+  // Zmiana kategorii pojedynczego leada z jego widoku (korekta klasyfikacji).
+  const setCategory = useCallback(
+    async (p: Prospect, categoryKey: string) => {
+      const value = categoryKey || null;
+      const { error } = await supabase.from("prospects").update({ category: value }).eq("id", p.id);
+      if (error) {
+        toast.error("Nie udało się zmienić kategorii.");
+        return;
+      }
+      setProspects((list) => list.map((x) => (x.id === p.id ? { ...x, category: value } : x)));
+      setFocusProspect((fp) => (fp && fp.id === p.id ? { ...fp, category: value } : fp));
+      toast.success("Kategoria zaktualizowana.");
+    },
+    [supabase, toast]
+  );
+
+  // Dodanie celu kontaktu pojedynczego leada (append-only, przez wspólny endpoint).
+  const addPurpose = useCallback(
+    async (p: Prospect, purposeKey: string) => {
+      const res = await fetch("/api/prospecting/bulk-classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [p.id], purpose: purposeKey }),
+      });
+      if (!res.ok) {
+        toast.error("Nie udało się dodać celu kontaktu.");
+        return;
+      }
+      const next = [...new Set([...(p.purposes ?? []), purposeKey])];
+      setProspects((list) => list.map((x) => (x.id === p.id ? { ...x, purposes: next } : x)));
+      setFocusProspect((fp) => (fp && fp.id === p.id ? { ...fp, purposes: next } : fp));
+      toast.success("Dodano cel kontaktu.");
+    },
+    [toast]
+  );
+
   // Archiwizacja (miękkie usunięcie) — pojedynczy prospekt lub zaznaczona grupa.
   const archiveProspects = useCallback(
     async (ids: string[]) => {
@@ -503,6 +586,8 @@ export default function ProspectingPage() {
           sort={tableSort}
           onSortChange={onTableSortChange}
           onArchive={archiveProspects}
+          onBulkCategory={bulkSetCategory}
+          onBulkPurpose={bulkAddPurpose}
         />
       )}
 
@@ -519,6 +604,8 @@ export default function ProspectingPage() {
           onAddNote={async (p, body) => {
             await addNote(p, body);
           }}
+          onSetCategory={setCategory}
+          onAddPurpose={addPurpose}
         />
       )}
 

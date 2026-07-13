@@ -11,6 +11,7 @@ import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
 import type { Prospect } from "@/lib/types";
 import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
+import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import {
   scoreColor,
   scoreLabel,
@@ -187,6 +188,15 @@ export default function CallingMode({
                 <div style={{ fontSize: 14, color: tokens.muted, marginTop: 4 }}>
                   {[current.industry, current.city].filter(Boolean).join(" · ") || "—"}
                 </div>
+                {/* Klasyfikacja leada (Feature 1 + 2) — widoczna bez wychodzenia
+                    z trybu dzwonienia. Kolejka i tak jest już przefiltrowana wg
+                    kategorii/celu z listy Prospectingu. */}
+                {(current.category || (current.purposes ?? []).length > 0) && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginTop: 10 }}>
+                    {current.category && <CategoryBadge categoryKey={current.category} />}
+                    <PurposeBadges purposeKeys={current.purposes} />
+                  </div>
+                )}
 
                 {current.phone ? (
                   <a

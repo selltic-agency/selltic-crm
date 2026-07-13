@@ -11,6 +11,8 @@ import { tokens, inputStyle, primaryButton, formatDateTime } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
 import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
+import { useClassification } from "@/lib/classification";
+import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import {
   STATUS_LABEL,
   STATUS_COLOR,
@@ -30,14 +32,19 @@ export default function ProspectDetailDrawer({
   onConvert,
   onSetStatus,
   onAddNote,
+  onSetCategory,
+  onAddPurpose,
 }: {
   prospect: Prospect;
   onClose: () => void;
   onConvert: (p: Prospect) => Promise<void>;
   onSetStatus: (p: Prospect, status: WritableDisplayStatus) => Promise<void>;
   onAddNote: (p: Prospect, body: string) => Promise<void>;
+  onSetCategory: (p: Prospect, categoryKey: string) => Promise<void>;
+  onAddPurpose: (p: Prospect, purposeKey: string) => Promise<void>;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const { categories, purposes } = useClassification();
   const p = prospect;
   const display = toDisplayStatus(p.prospecting_status);
   const closed = isClosedBusiness(p);
@@ -199,6 +206,52 @@ export default function ProspectDetailDrawer({
               </a>
             </Card>
           )}
+
+          {/* Klasyfikacja (Feature 1 + 2): kategoria (jednowartościowa, można
+              zmienić przy błędnej klasyfikacji) + cele kontaktu (wielowartościowe,
+              dokładane bez nadpisywania). */}
+          <Card>
+            <SectionTitle>Klasyfikacja</SectionTitle>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gap: 8 }}>
+                <span style={{ fontSize: 12.5, color: tokens.muted, fontWeight: 600 }}>Kategoria branży</span>
+                <div><CategoryBadge categoryKey={p.category} /></div>
+                <select
+                  value={p.category ?? ""}
+                  onChange={(e) => onSetCategory(p, e.target.value)}
+                  style={{ ...inputStyle, maxWidth: 320 }}
+                >
+                  <option value="">— brak —</option>
+                  {categories.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                <span style={{ fontSize: 12.5, color: tokens.muted, fontWeight: 600 }}>Cele kontaktu</span>
+                <div><PurposeBadges purposeKeys={p.purposes} /></div>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    e.currentTarget.value = "";
+                    if (v) onAddPurpose(p, v);
+                  }}
+                  style={{ ...inputStyle, maxWidth: 320 }}
+                >
+                  <option value="">Dodaj cel kontaktu…</option>
+                  {purposes.map((pp) => (
+                    <option key={pp.key} value={pp.key}>
+                      {pp.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </Card>
 
           {/* Właściwości */}
           <Card>

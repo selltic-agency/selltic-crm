@@ -17,7 +17,9 @@ export type FieldOption = string | { key: string; label: string };
 export type FieldDef = {
   key: string;
   label: string;
-  type: PropertyType | "stage" | "source" | "value" | "date" | "select";
+  // „tags” = kolumna-tablica (np. prospects.purposes) — multi-select z
+  // operatorem has_any (nakładanie się zbiorów).
+  type: PropertyType | "stage" | "source" | "value" | "date" | "select" | "tags";
   options?: FieldOption[];
 };
 
@@ -130,12 +132,13 @@ const FilterBar = forwardRef<
     const defaultOp: FilterOperator =
       field.type === "number" || field.type === "value" ? "gt" :
       field.type === "date" ? "after" :
+      field.type === "tags" ? "has_any" :
       field.type === "stage" || field.type === "select" ? "in" : "contains";
 
     setEditingFilter({
       field: field.key,
       operator: defaultOp,
-      value: field.type === "stage" || field.type === "select" ? [] : "",
+      value: field.type === "stage" || field.type === "select" || field.type === "tags" ? [] : "",
     });
     setShowAdd(false);
   };
@@ -401,6 +404,9 @@ function getOperators(type: FieldDef["type"] | undefined) {
   if (type === "stage" || type === "select") {
     return [{ val: "in", label: "Należy do" }];
   }
+  if (type === "tags") {
+    return [{ val: "has_any", label: "Zawiera dowolny" }];
+  }
   return [
     { val: "contains", label: "Zawiera" },
     { val: "equals", label: "Równe" },
@@ -423,7 +429,7 @@ function ValueInput({
 }) {
   if (operator === "is_empty") return null;
 
-  if (field?.type === "stage" || field?.type === "select") {
+  if (field?.type === "stage" || field?.type === "select" || field?.type === "tags") {
     const options = field.type === "stage"
       ? stages.map(s => ({ key: s.key, label: s.label }))
       : field.options?.map(normOption) || [];
@@ -530,7 +536,7 @@ function formatValue(f: Filter, fieldDef?: FieldDef, stages?: any[]): string {
     if (fieldDef?.type === "stage") {
       return f.value.map(k => stages?.find(s => s.key === k)?.label || k).join(", ");
     }
-    if (fieldDef?.type === "select" && fieldDef.options) {
+    if ((fieldDef?.type === "select" || fieldDef?.type === "tags") && fieldDef.options) {
       const opts = fieldDef.options.map(normOption);
       return f.value.map(k => opts.find(o => o.key === k)?.label || k).join(", ");
     }
