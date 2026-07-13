@@ -1,32 +1,102 @@
 // app/admin/scraper/page.tsx — zakładka "Scraper": headless Google Maps
-// scraper sterowany z CRM. Tworzy scrape_jobs (keyword × location), woła
-// webhook Cloud Run (przez /api/scraper/start), i pokazuje postęp oraz
-// wyniki na żywo przez Supabase Realtime.
+// scraper sterowany z CRM. Tworzy scrape_jobs (keyword × location) zgrupowane w
+// paczki (scrape_batches), woła webhook Cloud Run (przez /api/scraper/start), i
+// pokazuje postęp oraz wyniki na żywo przez Supabase Realtime.
+//
+// Każda paczka to zwijany wiersz: nagłówek (słowa kluczowe, data, postęp, liczba
+// leadów, status) + sterowanie (Pauza / Stop / Wznów). Rozwinięcie pokazuje
+// pełną listę zadań miasto × słowo kluczowe. Aktywne paczki są u góry; reszta w
+// paginowanej sekcji „Historia scrapowania”.
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2, AlertTriangle, Archive, RotateCcw } from "lucide-react";
+import {
+  Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2,
+  Archive, RotateCcw, Pause, Play, Ban, ChevronRight, ChevronDown,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import { humanizeScrapeError, ZERO_RESULTS_MESSAGE, formatFound } from "@/lib/scraperMessages";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
-import type { ScrapeJob, ScrapedLead, Prospect } from "@/lib/types";
+import type { ScrapeJob, ScrapeBatch, ScrapeBatchStatus, ScrapedLead, Prospect } from "@/lib/types";
 
 type Tab = "leads" | "duplicates" | "archive";
+
+const HISTORY_PAGE_SIZE = 15;
 
 const JOB_STATUS_LABEL: Record<ScrapeJob["status"], string> = {
   pending: "Oczekuje",
   running: "W trakcie",
   done: "Gotowe",
   error: "Błąd",
+  canceled: "Anulowane",
 };
 const JOB_STATUS_COLOR: Record<ScrapeJob["status"], string> = {
   pending: tokens.muted,
   running: tokens.accent,
   done: tokens.success,
   error: tokens.danger,
+  canceled: tokens.muted,
 };
+
+const BATCH_STATUS_LABEL: Record<ScrapeBatchStatus, string> = {
+  running: "W trakcie",
+  paused: "Wstrzymane",
+  stopped: "Zatrzymane",
+  completed: "Zakończone",
+};
+const BATCH_STATUS_COLOR: Record<ScrapeBatchStatus, string> = {
+  running: tokens.accent,
+  paused: tokens.warning,
+  stopped: tokens.danger,
+  completed: tokens.success,
+};
+
+// ── Agregaty paczki liczone z jej zadań ──────────────────────────────────
+type BatchAgg = {
+  done: number;
+  errored: number;
+  canceled: number;
+  running: number;
+  pending: number;
+  total: number;
+  finished: number;
+  leads: number;
+  newLeads: number;
+  existing: number;
+};
+
+function computeAgg(batch: ScrapeBatch, jobs: ScrapeJob[]): BatchAgg {
+  let done = 0, errored = 0, canceled = 0, running = 0, pending = 0;
+  let leads = 0, newLeads = 0, existing = 0;
+  for (const j of jobs) {
+    if (j.status === "done") done++;
+    else if (j.status === "error") errored++;
+    else if (j.status === "canceled") canceled++;
+    else if (j.status === "running") running++;
+    else if (j.status === "pending") pending++;
+    leads += j.results_count || 0;
+    newLeads += j.new_count || 0;
+    existing += j.existing_count || 0;
+  }
+  const total = batch.total_jobs || jobs.length;
+  return { done, errored, canceled, running, pending, total, finished: done + errored + canceled, leads, newLeads, existing };
+}
+
+// Status paczki widoczny użytkownikowi. Fallback: paczka wciąż 'running', ale
+// wszystkie zadania są terminalne → traktujemy jako 'completed' (backend/watchdog
+// domknie ją w bazie, my nie czekamy z UI).
+function effectiveStatus(batch: ScrapeBatch, agg: BatchAgg): ScrapeBatchStatus {
+  // Uwaga: warunkiem jest finished >= total (wszystkie zadania rozliczone jako
+  // terminalne), a NIE „brak pending/running”. Świeża paczka, której zadania nie
+  // wczytały się jeszcze do stanu, ma pending=running=0 przy finished=0 — nie
+  // wolno jej wtedy uznać za zakończoną.
+  if (batch.status === "running" && agg.total > 0 && agg.finished >= agg.total) {
+    return "completed";
+  }
+  return batch.status;
+}
 
 export default function ScraperPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -36,10 +106,13 @@ export default function ScraperPage() {
   const [locationsText, setLocationsText] = useState("");
   const [starting, setStarting] = useState(false);
 
+  const [batches, setBatches] = useState<ScrapeBatch[]>([]);
   const [jobs, setJobs] = useState<ScrapeJob[]>([]);
   const [leads, setLeads] = useState<ScrapedLead[]>([]);
   const [tab, setTab] = useState<Tab>("leads");
   const [refreshing, setRefreshing] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [controlBusy, setControlBusy] = useState<string | null>(null);
 
   // Puls „nowy lead” na liczniku + zliczanie przychodzących leadów do jednego
   // zbiorczego toasta (unikamy 60 toastów przy dużym scrapowaniu).
@@ -48,32 +121,38 @@ export default function ScraperPage() {
   const newLeadLastName = useRef("");
   const newLeadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cykl życia zadań/paczek — toasty tylko dla scrapowań uruchomionych w tej
-  // sesji (nie dla historycznych zadań wczytanych przy wejściu / odświeżeniu).
+  // Cykl życia zadań/paczek — toasty tylko dla scrapowań uruchomionych w tej sesji.
   const sessionBatchIds = useRef<Set<string>>(new Set());
   const announcedJobTerminal = useRef<Set<string>>(new Set());
   const announcedBatchStart = useRef<Set<string>>(new Set());
   const announcedBatchDone = useRef<Set<string>>(new Set());
 
   // Bezpiecznik utkniętych zadań: zanim wczytamy listę, poprosimy backend CRM
-  // o oznaczenie zadań wiszących zbyt długo w pending/running jako błąd. Dzięki
-  // temu zadanie, które nigdy nie ruszyło (np. webhook nie dotarł / instancja
-  // uśpiona), przestaje wisieć w nieskończoność bez sygnału. Best-effort —
-  // błąd tego wywołania nie może zablokować wczytania danych.
+  // o oznaczenie zadań wiszących zbyt długo jako błąd (i domknięcie paczek).
   const reapStaleJobs = useCallback(async () => {
     try {
       await fetch("/api/scraper/reap-stale", { method: "POST" });
     } catch {
-      /* best-effort: brak sieci nie może psuć wczytywania listy */
+      /* best-effort */
     }
   }, []);
+
+  const loadBatches = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("scrape_batches")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (!error) setBatches((data as ScrapeBatch[]) ?? []);
+    return error;
+  }, [supabase]);
 
   const loadJobs = useCallback(async () => {
     const { data, error } = await supabase
       .from("scrape_jobs")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(3000);
     if (!error) setJobs((data as ScrapeJob[]) ?? []);
     return error;
   }, [supabase]);
@@ -89,14 +168,30 @@ export default function ScraperPage() {
   }, [supabase]);
 
   useEffect(() => {
-    // Kolejność: najpierw reap (oznacz utknięte jako błąd), potem wczytaj listę,
-    // żeby użytkownik od razu zobaczył aktualne statusy.
-    reapStaleJobs().finally(loadJobs);
+    reapStaleJobs().finally(() => {
+      loadBatches();
+      loadJobs();
+    });
     loadLeads();
 
-    // Realtime: statusy/kroki zadań i nowe leady pojawiają się na żywo (bez pollingu).
+    // Realtime: statusy paczek, statusy/kroki zadań i nowe leady — na żywo.
     const channel = supabase
       .channel("scraper_tab")
+      .on("postgres_changes", { event: "*", schema: "public", table: "scrape_batches" }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (oldId) setBatches((list) => list.filter((b) => b.id !== oldId));
+          return;
+        }
+        const row = payload.new as ScrapeBatch;
+        setBatches((list) => {
+          const idx = list.findIndex((b) => b.id === row.id);
+          if (idx === -1) return [row, ...list];
+          const next = [...list];
+          next[idx] = row;
+          return next;
+        });
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "scrape_jobs" }, (payload) => {
         if (payload.eventType === "DELETE") {
           const oldId = (payload.old as { id?: string })?.id;
@@ -117,7 +212,6 @@ export default function ScraperPage() {
         if (lead.status === "new" || lead.status === "duplicate") {
           setLeads((list) => (list.some((l) => l.id === lead.id) ? list : [lead, ...list]));
         }
-        // Sukces równie widoczny jak błąd: puls + zbiorczy toast po ustaniu napływu.
         newLeadCount.current += 1;
         newLeadLastName.current = lead.business_name;
         setLeadPulseKey((k) => k + 1);
@@ -140,23 +234,51 @@ export default function ScraperPage() {
       if (newLeadTimer.current) clearTimeout(newLeadTimer.current);
       supabase.removeChannel(channel);
     };
-  }, [supabase, loadJobs, loadLeads, reapStaleJobs, toast]);
+  }, [supabase, loadBatches, loadJobs, loadLeads, reapStaleJobs, toast]);
 
-  // Toasty cyklu życia (start / sukces / błąd / częściowy wynik paczki) —
-  // liczone na podstawie stanu zadań, wyłącznie dla paczek z tej sesji.
+  // Widoki paczek: dołącz zadania i policz agregaty raz, użyj do podziału i kart.
+  const jobsByBatch = useMemo(() => {
+    const map = new Map<string, ScrapeJob[]>();
+    for (const j of jobs) {
+      const arr = map.get(j.batch_id);
+      if (arr) arr.push(j);
+      else map.set(j.batch_id, [j]);
+    }
+    return map;
+  }, [jobs]);
+
+  const batchViews = useMemo(
+    () =>
+      batches.map((batch) => {
+        const bj = jobsByBatch.get(batch.id) ?? [];
+        const agg = computeAgg(batch, bj);
+        return { batch, jobs: bj, agg, eff: effectiveStatus(batch, agg) };
+      }),
+    [batches, jobsByBatch]
+  );
+
+  const activeViews = batchViews.filter((v) => v.eff === "running" || v.eff === "paused");
+  const historyViews = batchViews.filter((v) => v.eff === "completed" || v.eff === "stopped");
+  const historyPages = Math.max(1, Math.ceil(historyViews.length / HISTORY_PAGE_SIZE));
+  const historyPageClamped = Math.min(historyPage, historyPages - 1);
+  const historySlice = historyViews.slice(
+    historyPageClamped * HISTORY_PAGE_SIZE,
+    historyPageClamped * HISTORY_PAGE_SIZE + HISTORY_PAGE_SIZE
+  );
+
+  // Toasty cyklu życia — liczone ze stanu zadań, wyłącznie dla paczek z tej sesji.
   useEffect(() => {
     if (jobs.length === 0) return;
-    const batches = new Map<string, ScrapeJob[]>();
+    const grouped = new Map<string, ScrapeJob[]>();
     for (const j of jobs) {
-      const arr = batches.get(j.batch_id);
+      const arr = grouped.get(j.batch_id);
       if (arr) arr.push(j);
-      else batches.set(j.batch_id, [j]);
+      else grouped.set(j.batch_id, [j]);
     }
 
-    for (const [bid, list] of batches) {
+    for (const [bid, list] of grouped) {
       if (!sessionBatchIds.current.has(bid)) continue;
 
-      // Paczka wystartowała (pierwsze zadanie ruszyło).
       if (
         !announcedBatchStart.current.has(bid) &&
         list.some((j) => j.status === "running" || j.status === "done" || j.status === "error")
@@ -165,8 +287,6 @@ export default function ScraperPage() {
         toast.info("▶️ Scrapowanie rozpoczęte…");
       }
 
-      // Zakończenie pojedynczych zadań — błędy zawsze (są akcjonowalne),
-      // sukces pojedynczego zadania tylko gdy paczka to jedno zadanie.
       for (const j of list) {
         if ((j.status === "done" || j.status === "error") && !announcedJobTerminal.current.has(j.id)) {
           announcedJobTerminal.current.add(j.id);
@@ -180,8 +300,7 @@ export default function ScraperPage() {
         }
       }
 
-      // Podsumowanie całej paczki (dla paczek wielozadaniowych).
-      const allTerminal = list.every((j) => j.status === "done" || j.status === "error");
+      const allTerminal = list.every((j) => j.status === "done" || j.status === "error" || j.status === "canceled");
       if (allTerminal && !announcedBatchDone.current.has(bid)) {
         announcedBatchDone.current.add(bid);
         if (list.length > 1) {
@@ -207,9 +326,9 @@ export default function ScraperPage() {
   async function refresh() {
     setRefreshing(true);
     await reapStaleJobs();
-    const [jobsErr, leadsErr] = await Promise.all([loadJobs(), loadLeads()]);
+    const [bErr, jErr, lErr] = await Promise.all([loadBatches(), loadJobs(), loadLeads()]);
     setRefreshing(false);
-    if (jobsErr || leadsErr) toast.error("Nie udało się odświeżyć danych. Spróbuj ponownie.");
+    if (bErr || jErr || lErr) toast.error("Nie udało się odświeżyć danych. Spróbuj ponownie.");
     else toast.info("Odświeżono.");
   }
 
@@ -235,6 +354,7 @@ export default function ScraperPage() {
       if (data.batch_id) sessionBatchIds.current.add(data.batch_id as string);
       toast.success(`Utworzono ${keywords.length * locations.length} zadań. Scrapowanie startuje…`);
       if (data.warning) toast.error(data.warning);
+      loadBatches();
       loadJobs();
     } catch {
       toast.error("Błąd połączenia z serwerem.");
@@ -243,18 +363,37 @@ export default function ScraperPage() {
     }
   }
 
+  // Sterowanie paczką: pauza / stop / wznów. Backend widzi zmianę statusu i
+  // realnie wstrzymuje/wznawia pracę (nie tylko UI).
+  async function control(action: "pause" | "stop" | "resume", batchId: string) {
+    setControlBusy(`${batchId}:${action}`);
+    try {
+      const resp = await fetch(`/api/scraper/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batch_id: batchId }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        toast.error(data.error ?? "Nie udało się wykonać operacji.");
+        return;
+      }
+      if (action === "pause") toast.info("⏸️ Scrapowanie wstrzymane. Postęp zachowany.");
+      else if (action === "resume") toast.success("▶️ Wznowiono scrapowanie.");
+      else toast.info(`⏹️ Scrapowanie zatrzymane. Anulowano ${data.canceled ?? 0} oczekujących zadań.`);
+      if (data.warning) toast.error(data.warning);
+      loadBatches();
+      loadJobs();
+    } catch {
+      toast.error("Błąd połączenia z serwerem.");
+    } finally {
+      setControlBusy(null);
+    }
+  }
+
   const newLeads = leads.filter((l) => l.status === "new");
   const duplicateLeads = leads.filter((l) => l.status === "duplicate");
   const archivedLeads = leads.filter((l) => l.status === "rejected");
-
-  const recentBatchIds = useMemo(() => {
-    const seen: string[] = [];
-    for (const j of jobs) {
-      if (!seen.includes(j.batch_id)) seen.push(j.batch_id);
-      if (seen.length >= 3) break;
-    }
-    return seen;
-  }, [jobs]);
 
   return (
     <div style={{ maxWidth: 980 }}>
@@ -305,7 +444,8 @@ export default function ScraperPage() {
         </button>
       </section>
 
-      {recentBatchIds.length > 0 && (
+      {/* Aktywne scrapowania (w trakcie / wstrzymane) */}
+      {activeViews.length > 0 && (
         <section
           style={{
             background: tokens.card,
@@ -316,7 +456,7 @@ export default function ScraperPage() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Zadania</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Aktywne scrapowania</h2>
             <button
               onClick={refresh}
               disabled={refreshing}
@@ -326,13 +466,96 @@ export default function ScraperPage() {
               {refreshing ? "Odświeżanie…" : "Odśwież"}
             </button>
           </div>
-          <div style={{ display: "grid", gap: 16 }}>
-            {recentBatchIds.map((batchId) => (
-              <JobsBatch key={batchId} jobs={jobs.filter((j) => j.batch_id === batchId)} pulseKey={leadPulseKey} />
+          <div style={{ display: "grid", gap: 12 }}>
+            {activeViews.map((v) => (
+              <BatchCard
+                key={v.batch.id}
+                batch={v.batch}
+                jobs={v.jobs}
+                agg={v.agg}
+                eff={v.eff}
+                pulseKey={leadPulseKey}
+                controlBusy={controlBusy}
+                onControl={control}
+                defaultExpanded={false}
+              />
             ))}
           </div>
         </section>
       )}
+
+      {/* Historia scrapowania — wszystkie zakończone/zatrzymane paczki, paginowane */}
+      <section
+        style={{
+          background: tokens.card,
+          border: `1px solid ${tokens.border}`,
+          borderRadius: tokens.radius,
+          padding: 20,
+          marginBottom: 20,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
+            Historia scrapowania{historyViews.length > 0 ? ` (${historyViews.length})` : ""}
+          </h2>
+          {activeViews.length === 0 && (
+            <button
+              onClick={refresh}
+              disabled={refreshing}
+              style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", opacity: refreshing ? 0.6 : 1 }}
+            >
+              <RefreshCw size={14} className={refreshing ? "selltic-spin" : undefined} />
+              {refreshing ? "Odświeżanie…" : "Odśwież"}
+            </button>
+          )}
+        </div>
+
+        {historyViews.length === 0 ? (
+          <div style={{ padding: "20px 4px", textAlign: "center", color: tokens.muted, fontSize: 13 }}>
+            Brak zakończonych scrapowań — uruchom nowe powyżej.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "grid", gap: 12 }}>
+              {historySlice.map((v) => (
+                <BatchCard
+                  key={v.batch.id}
+                  batch={v.batch}
+                  jobs={v.jobs}
+                  agg={v.agg}
+                  eff={v.eff}
+                  pulseKey={leadPulseKey}
+                  controlBusy={controlBusy}
+                  onControl={control}
+                  defaultExpanded={false}
+                />
+              ))}
+            </div>
+
+            {historyPages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 16 }}>
+                <button
+                  onClick={() => setHistoryPage((p) => Math.max(0, p - 1))}
+                  disabled={historyPageClamped === 0}
+                  style={{ ...ghostButton, padding: "6px 12px", opacity: historyPageClamped === 0 ? 0.5 : 1 }}
+                >
+                  ← Poprzednia
+                </button>
+                <span style={{ fontSize: 13, color: tokens.muted }}>
+                  Strona {historyPageClamped + 1} z {historyPages}
+                </span>
+                <button
+                  onClick={() => setHistoryPage((p) => Math.min(historyPages - 1, p + 1))}
+                  disabled={historyPageClamped >= historyPages - 1}
+                  style={{ ...ghostButton, padding: "6px 12px", opacity: historyPageClamped >= historyPages - 1 ? 0.5 : 1 }}
+                >
+                  Następna →
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
         <TabButton active={tab === "leads"} onClick={() => setTab("leads")}>
@@ -357,82 +580,229 @@ export default function ScraperPage() {
   );
 }
 
-function JobsBatch({ jobs, pulseKey }: { jobs: ScrapeJob[]; pulseKey: number }) {
-  const done = jobs.filter((j) => j.status === "done").length;
-  const errored = jobs.filter((j) => j.status === "error").length;
-  const total = jobs.reduce((s, j) => s + (j.results_count || 0), 0);
-  const totalNew = jobs.reduce((s, j) => s + (j.new_count || 0), 0);
-  const totalExisting = jobs.reduce((s, j) => s + (j.existing_count || 0), 0);
-  const active = jobs.some((j) => j.status === "running" || j.status === "pending");
-  const allTerminal = done + errored === jobs.length;
+// ── Zwijana karta paczki: nagłówek-podsumowanie + (po rozwinięciu) lista zadań ─
+function BatchCard({
+  batch,
+  jobs,
+  agg,
+  eff,
+  pulseKey,
+  controlBusy,
+  onControl,
+  defaultExpanded,
+}: {
+  batch: ScrapeBatch;
+  jobs: ScrapeJob[];
+  agg: BatchAgg;
+  eff: ScrapeBatchStatus;
+  pulseKey: number;
+  controlBusy: string | null;
+  onControl: (action: "pause" | "stop" | "resume", batchId: string) => void;
+  defaultExpanded: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  const keywordsLabel = batch.keywords.length > 0 ? batch.keywords.join(", ") : "(bez słów kluczowych)";
+  const isActive = eff === "running";
+  const statusColor = BATCH_STATUS_COLOR[eff];
+  const busyPrefix = `${batch.id}:`;
+  const anyBusy = controlBusy != null && controlBusy.startsWith(busyPrefix);
+
+  // Zadania z bazy przychodzą posortowane po created_at; sortujemy stabilnie po
+  // keyword/location, żeby lista miasto × słowo kluczowe była czytelna.
+  const sortedJobs = useMemo(
+    () =>
+      [...jobs].sort((a, b) =>
+        a.keyword === b.keyword ? a.location.localeCompare(b.location) : a.keyword.localeCompare(b.keyword)
+      ),
+    [jobs]
+  );
 
   return (
-    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, padding: 12 }}>
-      {/* Nagłówek paczki: postęp + licznik leadów na żywo */}
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: active ? 8 : 10 }}>
-        <span style={{ fontSize: 13, color: tokens.muted }}>
-          {done + errored}/{jobs.length} zakończonych
-          {errored > 0 ? ` · ${errored} ${errored === 1 ? "błąd" : "błędów"}` : ""} · utworzono{" "}
-          {formatDateTime(jobs[0]?.created_at)}
-        </span>
-        <span
-          // key wymusza ponowne odtworzenie animacji „puls” przy każdym nowym leadzie
-          key={active ? pulseKey : "static"}
-          className={active ? "selltic-pulse" : undefined}
-          style={{
-            marginLeft: "auto",
-            fontSize: 12.5,
-            fontWeight: 700,
-            color: total > 0 ? tokens.success : tokens.muted,
-            background: total > 0 ? `${tokens.success}14` : tokens.bg,
-            border: `1px solid ${tokens.border}`,
-            borderRadius: 999,
-            padding: "3px 10px",
-          }}
-        >
-          Znaleziono: {formatFound(total, totalNew, totalExisting)}
-        </span>
-      </div>
+    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, overflow: "hidden" }}>
+      {/* Nagłówek — klik rozwija/zwija listę zadań */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          padding: 14,
+          display: "grid",
+          gap: 8,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {expanded ? (
+            <ChevronDown size={16} color={tokens.muted} style={{ flexShrink: 0 }} />
+          ) : (
+            <ChevronRight size={16} color={tokens.muted} style={{ flexShrink: 0 }} />
+          )}
+          <span
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: tokens.text,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+            }}
+            title={keywordsLabel}
+          >
+            {keywordsLabel}
+          </span>
 
-      {/* Nieokreślony pasek postępu — nie znamy całkowitej liczby wyników z góry */}
-      {active && <div className="selltic-indeterminate" style={{ height: 6, marginBottom: 12 }} />}
+          {/* Status */}
+          <span
+            style={{
+              flexShrink: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 12,
+              fontWeight: 700,
+              color: statusColor,
+              background: `${statusColor}14`,
+              border: `1px solid ${tokens.border}`,
+              borderRadius: 999,
+              padding: "3px 10px",
+            }}
+          >
+            {eff === "running" && <Loader2 size={12} className="selltic-spin" />}
+            {BATCH_STATUS_LABEL[eff]}
+          </span>
 
-      {/* Podsumowanie końcowe */}
-      {allTerminal && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            flexWrap: "wrap",
-            gap: 8,
-            fontSize: 12.5,
-            fontWeight: 700,
-            color: errored > 0 ? tokens.danger : tokens.success,
-            background: errored > 0 ? `${tokens.danger}12` : `${tokens.success}12`,
-            borderRadius: 10,
-            padding: "8px 12px",
-            marginBottom: 10,
-            overflowWrap: "anywhere",
-          }}
-        >
-          <span style={{ flexShrink: 0, display: "flex" }}>
-            {errored > 0 ? <AlertTriangle size={15} /> : <span>✓</span>}
-          </span>{" "}
-          {errored > 0
-            ? `${done} z ${jobs.length} zadań zakończone, ${errored} ${errored === 1 ? "błąd" : "błędów"} · ${formatFound(total, totalNew, totalExisting)}`
-            : total > 0
-              ? `Zakończono — znaleziono ${formatFound(total, totalNew, totalExisting)}`
-              : "Zakończono — brak wyników dla tej kombinacji"}
+          {/* Sterowanie (na aktywnych paczkach) — stopPropagation, by nie rozwijać */}
+          <span style={{ display: "inline-flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+            {eff === "running" && (
+              <ControlButton
+                label="Pauza"
+                icon={<Pause size={13} />}
+                busy={controlBusy === `${batch.id}:pause`}
+                disabled={anyBusy}
+                onClick={() => onControl("pause", batch.id)}
+              />
+            )}
+            {eff === "paused" && (
+              <ControlButton
+                label="Wznów"
+                icon={<Play size={13} />}
+                busy={controlBusy === `${batch.id}:resume`}
+                disabled={anyBusy}
+                onClick={() => onControl("resume", batch.id)}
+              />
+            )}
+            {(eff === "running" || eff === "paused") && (
+              <ControlButton
+                label="Stop"
+                icon={<Ban size={13} />}
+                danger
+                busy={controlBusy === `${batch.id}:stop`}
+                disabled={anyBusy}
+                onClick={() => onControl("stop", batch.id)}
+              />
+            )}
+          </span>
+        </div>
+
+        {/* Meta: data · postęp · liczba leadów */}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, paddingLeft: 26 }}>
+          <span style={{ fontSize: 12.5, color: tokens.muted }}>{formatDateTime(batch.created_at)}</span>
+          <span style={{ fontSize: 12.5, color: tokens.muted }}>
+            {agg.finished}/{agg.total} zadań
+            {agg.errored > 0 ? ` · ${agg.errored} ${agg.errored === 1 ? "błąd" : "błędów"}` : ""}
+            {agg.canceled > 0 ? ` · ${agg.canceled} anul.` : ""}
+          </span>
+          <span
+            key={isActive ? pulseKey : "static"}
+            className={isActive ? "selltic-pulse" : undefined}
+            style={{
+              marginLeft: "auto",
+              fontSize: 12,
+              fontWeight: 700,
+              color: agg.leads > 0 ? tokens.success : tokens.muted,
+            }}
+          >
+            Leady: {formatFound(agg.leads, agg.newLeads, agg.existing)}
+          </span>
+        </div>
+
+        {/* Pasek postępu */}
+        {isActive ? (
+          <div className="selltic-indeterminate" style={{ height: 5, marginLeft: 26, borderRadius: 4 }} />
+        ) : (
+          agg.total > 0 && (
+            <div style={{ height: 5, marginLeft: 26, borderRadius: 4, background: tokens.bg, overflow: "hidden" }}>
+              <div
+                style={{
+                  width: `${Math.min(100, Math.round((agg.finished / agg.total) * 100))}%`,
+                  height: "100%",
+                  background: agg.errored > 0 ? tokens.warning : tokens.success,
+                }}
+              />
+            </div>
+          )
+        )}
+      </button>
+
+      {/* Lista zadań (rozwinięta) */}
+      {expanded && (
+        <div style={{ padding: "0 14px 14px", display: "grid", gap: 6 }}>
+          {sortedJobs.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: tokens.muted, padding: "6px 2px" }}>
+              Brak szczegółów zadań do wyświetlenia.
+            </div>
+          ) : (
+            sortedJobs.map((j) => <JobRow key={j.id} job={j} />)
+          )}
         </div>
       )}
-
-      {/* Wiersze zadań ze szczegółami postępu (bieżący krok, licznik, błąd) */}
-      <div style={{ display: "grid", gap: 6 }}>
-        {jobs.map((j) => (
-          <JobRow key={j.id} job={j} />
-        ))}
-      </div>
     </div>
+  );
+}
+
+function ControlButton({
+  label,
+  icon,
+  onClick,
+  busy,
+  disabled,
+  danger,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  busy: boolean;
+  disabled: boolean;
+  danger?: boolean;
+}) {
+  const color = danger ? tokens.danger : tokens.text;
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || busy}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        fontSize: 12,
+        fontWeight: 600,
+        color,
+        background: tokens.card,
+        border: `1px solid ${danger ? tokens.danger : tokens.border}`,
+        borderRadius: 8,
+        padding: "5px 10px",
+        cursor: disabled || busy ? "default" : "pointer",
+        opacity: disabled && !busy ? 0.5 : 1,
+      }}
+    >
+      {busy ? <Loader2 size={13} className="selltic-spin" /> : icon}
+      {label}
+    </button>
   );
 }
 
@@ -440,11 +810,7 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
   const color = JOB_STATUS_COLOR[j.status];
   const [expanded, setExpanded] = useState(false);
   const isError = j.status === "error";
-  // Pełny surowy komunikat błędu — bez przycinania. `title` daje natywny
-  // dymek na hover (działa nawet w kontenerach z overflow:hidden), a rozwijane
-  // szczegóły pokazują całość z zawijaniem.
   const rawError = j.error_message ?? "";
-
   const statusText = isError ? humanizeScrapeError(j.error_message).text : "";
 
   return (
@@ -459,7 +825,6 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
         minWidth: 0,
       }}
     >
-      {/* Wiersz tytułu: zawija się na wąskich ekranach zamiast wypływać poza kartę */}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
         {j.status === "running" ? (
           <Loader2 size={13} className="selltic-spin" color={color} style={{ flexShrink: 0 }} />
@@ -471,8 +836,6 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
           {j.keyword} · {j.location}
         </span>
 
-        {/* Krok „w trakcie” / status końcowy (nie-błąd) — skrócony wielokropkiem,
-            błąd pokazujemy z pełnym zawijaniem w osobnym wierszu poniżej. */}
         {!isError && (
           <span
             style={{
@@ -495,7 +858,6 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
           </span>
         )}
 
-        {/* Rozwiń pełny, surowy komunikat błędu (techniczny) */}
         {isError && rawError && (
           <button
             onClick={() => setExpanded((v) => !v)}
@@ -515,7 +877,6 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
           </button>
         )}
 
-        {/* Licznik leadów na żywo (running) / wynik końcowy (done) */}
         {(j.status === "running" || j.status === "done") && j.results_count > 0 && (
           <span style={{ fontSize: 12, fontWeight: 700, color: tokens.success, flexShrink: 0, marginLeft: "auto" }}>
             {j.results_count}
@@ -523,7 +884,6 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
         )}
       </div>
 
-      {/* Komunikat błędu — PEŁNY, z zawijaniem, nigdy nie ucinany. */}
       {isError && (
         <div
           style={{
@@ -564,12 +924,10 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
-  // Pojedynczy lead w trakcie odrzucania (blokuje jego przycisk w wierszu).
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const busy = moving || rejecting || rejectingId !== null;
 
   useEffect(() => {
-    // Odznacz leady, które zniknęły z listy (już przeniesione/oznaczone duplikatem gdzie indziej).
     setSelected((prev) => new Set([...prev].filter((id) => leads.some((l) => l.id === id))));
   }, [leads]);
 
@@ -608,8 +966,6 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
           (data.duplicates > 0 ? `, ${data.duplicates} oznaczono jako duplikaty` : "") +
           "."
       );
-      // Błędy pojedynczych wierszy nie mogą przepadać po cichu — bez tego
-      // "Przeniesiono 0" wygląda jak sukces, a leady zostają w miejscu.
       if (Array.isArray(data.errors) && data.errors.length > 0) {
         toast.error(
           `Nie udało się przenieść ${data.errors.length} ${data.errors.length === 1 ? "leada" : "leadów"}: ` +
@@ -625,7 +981,6 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
     }
   }
 
-  // Odrzucenie (archiwizacja) — pojedynczy lead lub cała zaznaczona grupa.
   async function reject(ids: string[]) {
     if (ids.length === 0) return;
     const resp = await fetch("/api/scraper/reject", {
@@ -780,8 +1135,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
-// Archiwum: leady odrzucone przez użytkownika (status 'rejected'). Zachowane do
-// wglądu, poza aktywną listą „Leady”. Można je przywrócić (z powrotem do 'new').
+// Archiwum: leady odrzucone przez użytkownika (status 'rejected').
 function ArchiveTab({
   leads,
   supabase,
@@ -796,7 +1150,6 @@ function ArchiveTab({
 
   async function restore(id: string) {
     setRestoringId(id);
-    // RLS ogranicza zapis do własnych leadów; wracamy tylko z 'rejected' do 'new'.
     const { error } = await supabase
       .from("scraped_leads")
       .update({ status: "new" })
@@ -868,9 +1221,6 @@ function DuplicatesTab({
   const [prospectsById, setProspectsById] = useState<Record<string, Prospect>>({});
   const [restoringId, setRestoringId] = useState<string | null>(null);
 
-  // Cofnięcie flagi duplikatu: lead wraca do listy „Leady”, skąd można znów
-  // spróbować przenieść go do Prospectingu (np. po zarchiwizowaniu/usunięciu
-  // istniejącego prospekta).
   async function restore(id: string) {
     setRestoringId(id);
     const { error } = await supabase

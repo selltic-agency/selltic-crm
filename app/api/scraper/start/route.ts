@@ -1,22 +1,19 @@
 // app/api/scraper/start/route.ts
-// Wywoływane z zakładki "Scraper" (zalogowany user, RLS po owner). Generuje
-// zadania scrape_jobs jako iloczyn kartezjański keywords × locations, po czym
-// woła webhook Cloud Run z SAMYMI job_id (nigdy z danymi leadów — te zapisuje
+// Wywoływane z zakładki "Scraper" (zalogowany user, RLS po owner). Tworzy
+// wiersz scrape_batches (paczka = jedno kliknięcie), generuje zadania
+// scrape_jobs jako iloczyn kartezjański keywords × locations, po czym woła
+// webhook Cloud Run z SAMYMI job_id (nigdy z danymi leadów — te zapisuje
 // bezpośrednio do Supabase headless backend na Cloud Run).
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { dispatchScrapeJobs } from "@/lib/scraperDispatch";
 
 // Cloud Run może mieć min-instances=0 → pierwszy webhook po bezczynności
 // wywołuje zimny start (kilka–kilkanaście s). Domyślny limit czasu funkcji
 // Vercel (10 s na Hobby) potrafi ubić żądanie w trakcie tego oczekiwania, ZANIM
 // wykona się nasza obsługa błędu — zadania zostają wtedy w "pending" bez śladu.
-// Podnosimy limit funkcji, żeby to MY kontrolowali timeout (patrz WEBHOOK_TIMEOUT_MS).
+// Podnosimy limit funkcji, żeby to MY kontrolowali timeout.
 export const maxDuration = 60;
-
-// Twardy limit czasu na uścisk dłoni z webhookiem. Hojny, by przetrwać zimny
-// start Cloud Run, ale krótszy niż maxDuration — dzięki temu przy zawieszeniu
-// przerywamy sami (AbortError) i logujemy to, zamiast dać platformie ubić funkcję.
-const WEBHOOK_TIMEOUT_MS = 45_000;
 
 export async function POST(req: Request) {
   const supabase = await createSupabaseServer();
@@ -48,95 +45,39 @@ export async function POST(req: Request) {
     locations.map((location) => ({ owner: user.id, keyword, location, batch_id: batchId }))
   );
 
+  // Najpierw paczka — jej wiersz jest nośnikiem statusu (running/paused/stopped/
+  // completed) i metadanych nagłówka pokazywanych w zwiniętym wierszu UI.
+  const { error: batchErr } = await supabase.from("scrape_batches").insert({
+    id: batchId,
+    owner: user.id,
+    keywords,
+    locations,
+    total_jobs: rows.length,
+    status: "running",
+  });
+  if (batchErr) {
+    console.error("[scraper/start] Nie udało się utworzyć paczki", batchErr);
+    return NextResponse.json({ error: "Nie udało się utworzyć zadań" }, { status: 500 });
+  }
+
   const { data: jobs, error: insertErr } = await supabase
     .from("scrape_jobs")
     .insert(rows)
     .select("id");
   if (insertErr || !jobs) {
     console.error("[scraper/start]", insertErr);
+    // Sprzątamy pustą paczkę, żeby nie wisiała w historii bez zadań.
+    await supabase.from("scrape_batches").delete().eq("id", batchId);
     return NextResponse.json({ error: "Nie udało się utworzyć zadań" }, { status: 500 });
   }
 
   const jobIds = jobs.map((j) => j.id as string);
 
-  const webhookUrl = process.env.SCRAPER_WEBHOOK_URL;
-  const webhookSecret = process.env.SCRAPER_WEBHOOK_SECRET;
-  if (!webhookUrl || !webhookSecret) {
-    console.error("[scraper/start] Brak SCRAPER_WEBHOOK_URL/SCRAPER_WEBHOOK_SECRET — zadania utworzone, ale webhook nie wywołany.");
-    return NextResponse.json({
-      batch_id: batchId,
-      job_ids: jobIds,
-      warning: "Webhook scrapera nieskonfigurowany — zadania czekają jako 'pending'.",
-    });
-  }
+  const result = await dispatchScrapeJobs(supabase, batchId, jobIds);
 
-  // Loguj KAŻDĄ próbę wywołania webhooka (sukces i porażka) — w logach Vercel
-  // musi być widać, czy dla danej paczki żądanie w ogóle poszło i co odpowiedziało.
-  const target = `${webhookUrl.replace(/\/$/, "")}/webhook/scrape`;
-  const startedAt = Date.now();
-  console.log(
-    `[scraper/start] Wywołuję webhook batch=${batchId} jobs=${jobIds.length} → POST ${target}`
-  );
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
-  try {
-    const resp = await fetch(target, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${webhookSecret}` },
-      body: JSON.stringify({ batch_id: batchId, job_ids: jobIds }),
-      signal: controller.signal,
-    });
-    const text = await resp.text();
-    const ms = Date.now() - startedAt;
-    // Zawsze logujemy status + treść odpowiedzi (przycięte), żeby dało się w
-    // Vercel prześledzić, co dokładnie zwrócił backend dla tej paczki.
-    console.log(
-      `[scraper/start] Webhook batch=${batchId} → HTTP ${resp.status} w ${ms}ms; body=${text.slice(0, 500)}`
-    );
-    if (!resp.ok) {
-      console.error("[scraper/start] Webhook odpowiedział błędem", resp.status, text);
-      // Definitywne odrzucenie: webhook był osiągalny, ale nie zaplanował pracy
-      // (np. 401 zły sekret, 400 zła treść, 5xx). Zadania NIE ruszą same, więc
-      // oznaczamy je od razu jako "error" z czytelnym komunikatem, zamiast
-      // zostawiać w "pending" bez sygnału. (Gdyby backend jednak wystartował,
-      // nadpisze status na running/done — pisze wartości absolutne po id.)
-      await supabase
-        .from("scrape_jobs")
-        .update({
-          status: "error",
-          error_message: `Backend scrapera odrzucił zlecenie (HTTP ${resp.status}). Sprawdź konfigurację usługi webhooka (adres, sekret) i spróbuj ponownie.`,
-          completed_at: new Date().toISOString(),
-        })
-        .in("id", jobIds);
-      return NextResponse.json({
-        batch_id: batchId,
-        job_ids: jobIds,
-        warning: `Webhook scrapera odpowiedział błędem ${resp.status}. Zadania oznaczono jako błąd.`,
-      });
-    }
-  } catch (e) {
-    const ms = Date.now() - startedAt;
-    const isTimeout = e instanceof Error && e.name === "AbortError";
-    // Celowo NIE oznaczamy zadań jako "error": timeout/zerwane połączenie NIE
-    // oznacza, że backend nie odebrał zlecenia — przy zimnym starcie Cloud Run
-    // mógł przyjąć POST i ruszyć w tle mimo że my przerwaliśmy czekanie. Jeśli
-    // faktycznie ruszył, nadpisze status na running/done. Jeśli nie — zabezpiecza
-    // watchdog (/api/scraper/reap-stale), który po limicie czasu oznaczy je błędem.
-    console.error(
-      `[scraper/start] Webhook batch=${batchId} nieudany po ${ms}ms (${isTimeout ? "TIMEOUT/abort" : "błąd sieci"}):`,
-      e
-    );
-    return NextResponse.json({
-      batch_id: batchId,
-      job_ids: jobIds,
-      warning: isTimeout
-        ? "Backend scrapera nie odpowiedział w wyznaczonym czasie (możliwy zimny start). Zadania czekają jako 'pending' — jeśli backend je odebrał, ruszą; w przeciwnym razie zostaną oznaczone jako błąd po upływie limitu czasu."
-        : "Nie udało się połączyć z webhookiem scrapera. Zadania zostały utworzone jako 'pending'.",
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  return NextResponse.json({ batch_id: batchId, job_ids: jobIds });
+  return NextResponse.json({
+    batch_id: batchId,
+    job_ids: jobIds,
+    ...(result.warning ? { warning: result.warning } : {}),
+  });
 }
