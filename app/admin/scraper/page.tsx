@@ -949,7 +949,7 @@ function BatchCard({
           gap: 8,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", minWidth: 0 }}>
           {expanded ? (
             <ChevronDown size={16} color={tokens.muted} style={{ flexShrink: 0 }} />
           ) : (
