@@ -102,9 +102,10 @@ export default function PipelinePage() {
         } = await supabase.auth.getUser();
         const vals = Array.isArray(value) ? (value as string[]) : [];
         if (user && vals.length) {
-          await supabase.from("deal_purposes").insert(
+          const { error: histErr } = await supabase.from("deal_purposes").insert(
             ids.flatMap((deal_id) => vals.map((purpose) => ({ owner: user.id, deal_id, purpose, source: "bulk" })))
           );
+          if (histErr) console.error("Nie zapisano historii celu kontaktu (deal_purposes):", histErr);
         }
       }
       toast.success(ids.length === 1 ? "Zapisano." : `Zaktualizowano ${ids.length} leadów.`);

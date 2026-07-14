@@ -23,6 +23,7 @@ import {
   Inbox,
   Calendar,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
@@ -360,7 +361,7 @@ function NavItem({
 }: {
   href: string;
   label: string;
-  icon: any;
+  icon: LucideIcon;
   active: boolean;
   collapsed: boolean;
 }) {

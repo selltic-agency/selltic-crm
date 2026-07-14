@@ -8,7 +8,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { tokens, inputStyle, ghostButton, primaryButton } from "@/lib/ui";
 import { useStages } from "@/lib/stages";
-import { PropertyType } from "@/lib/types";
+import { PropertyType, type StageLike } from "@/lib/types";
 import { Filter, FilterOperator } from "@/lib/filters";
 
 export type FieldOption = string | { key: string; label: string };
@@ -399,7 +399,7 @@ function ValueInput({
   operator?: FilterOperator;
   value: any;
   onChange: (val: any) => void;
-  stages: any[];
+  stages: StageLike[];
 }) {
   if (operator === "is_empty") return null;
 
@@ -498,7 +498,7 @@ function ValueInput({
   );
 }
 
-function formatValue(f: Filter, fieldDef?: FieldDef, stages?: any[]): string {
+function formatValue(f: Filter, fieldDef?: FieldDef, stages?: StageLike[]): string {
   if (f.operator === "is_empty") return "puste";
   if (f.operator === "between") {
     return `${f.value[0]} do ${f.value[1]}`;

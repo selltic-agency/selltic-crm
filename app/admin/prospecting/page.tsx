@@ -356,9 +356,10 @@ export default function ProspectingPage() {
         } = await supabase.auth.getUser();
         const vals = Array.isArray(value) ? (value as string[]) : [];
         if (user && vals.length) {
-          await supabase.from("prospect_purposes").insert(
+          const { error: histErr } = await supabase.from("prospect_purposes").insert(
             ids.flatMap((prospect_id) => vals.map((purpose) => ({ owner: user.id, prospect_id, purpose, source: "bulk" })))
           );
+          if (histErr) console.error("Nie zapisano historii celu kontaktu (prospect_purposes):", histErr);
         }
       }
       toast.success(ids.length === 1 ? "Zapisano." : `Zaktualizowano ${ids.length} leadów.`);
