@@ -34,7 +34,7 @@ import ViewTabs from "@/components/ViewTabs";
 import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
 import { loadViewPrefs, saveViewPrefs, planHydration, type ViewMode } from "@/lib/viewPrefs";
-import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, type PropertyView } from "@/lib/properties";
+import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, appendPurposeHistory, type PropertyView } from "@/lib/properties";
 import { useToast } from "@/components/Toast";
 
 const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
@@ -97,16 +97,7 @@ export default function PipelinePage() {
       }
       // Cel kontaktu: dopisz też historię (append-only), gdy dokładamy wartości.
       if (view.key === "purposes" && mode === "add") {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        const vals = Array.isArray(value) ? (value as string[]) : [];
-        if (user && vals.length) {
-          const { error: histErr } = await supabase.from("deal_purposes").insert(
-            ids.flatMap((deal_id) => vals.map((purpose) => ({ owner: user.id, deal_id, purpose, source: "bulk" })))
-          );
-          if (histErr) console.error("Nie zapisano historii celu kontaktu (deal_purposes):", histErr);
-        }
+        await appendPurposeHistory(supabase, "deals", ids, Array.isArray(value) ? (value as string[]) : []);
       }
       toast.success(ids.length === 1 ? "Zapisano." : `Zaktualizowano ${ids.length} leadów.`);
       load(filters);
