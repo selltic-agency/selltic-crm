@@ -225,8 +225,29 @@ create table if not exists app_settings (
   owner           uuid primary key references auth.users on delete cascade,
   email_new_lead  boolean not null default true,
   email_task_due  boolean not null default false,
-  notify_email    text
+  notify_email    text,
+  -- Integracje → Wysyłka e-mail (Resend). Klucz i adres nadawcy trzymane
+  -- per-właściciel, czytane WYŁĄCZNIE po stronie serwera (/api/submit,
+  -- /api/email/test, /api/email/send). Klucz nigdy nie wraca do klienta jawnie.
+  -- resend_reply_to = adres, na który trafiają ODPOWIEDZI (np. Gmail zespołu).
+  resend_api_key  text,
+  resend_from     text,
+  resend_reply_to text
 );
+
+-- ── Szablony e-mail (Integracje) ─────────────────────────────────────────
+-- Wielokrotnego użytku szablony z placeholderami {{first_name}} itp.,
+-- podstawianymi danymi leada przy wysyłce z karty leada.
+create table if not exists email_templates (
+  id          uuid primary key default gen_random_uuid(),
+  owner       uuid not null references auth.users on delete cascade,
+  name        text not null,                   -- nazwa wewnętrzna (identyfikacja)
+  subject     text not null default '',        -- temat (może zawierać {{pola}})
+  body        text not null default '',         -- treść HTML (może zawierać {{pola}})
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists idx_email_templates_owner on email_templates (owner, updated_at desc);
 
 -- ── INDEKSY ─────────────────────────────────────────────────────────────
 -- Trigramy do szybkiego wyszukiwania po numerze (LIKE %digits%).
@@ -273,6 +294,7 @@ alter table duplicate_flags enable row level security;
 alter table property_defs enable row level security;
 alter table tasks         enable row level security;
 alter table app_settings  enable row level security;
+alter table email_templates enable row level security;
 alter table notifications enable row level security;
 alter table pipeline_stages enable row level security;
 alter table table_view_config enable row level security;
@@ -299,6 +321,8 @@ drop policy if exists "own tasks" on tasks;
 create policy "own tasks"        on tasks         for all using (auth.uid() = owner) with check (auth.uid() = owner);
 drop policy if exists "own settings" on app_settings;
 create policy "own settings"     on app_settings  for all using (auth.uid() = owner) with check (auth.uid() = owner);
+drop policy if exists "own email templates" on email_templates;
+create policy "own email templates" on email_templates for all using (auth.uid() = owner) with check (auth.uid() = owner);
 drop policy if exists "own notifications" on notifications;
 create policy "own notifications" on notifications for all using (auth.uid() = owner) with check (auth.uid() = owner);
 drop policy if exists "own stages" on pipeline_stages;

@@ -38,12 +38,13 @@ export async function POST(req: Request) {
     // app_settings, na końcu zmienne środowiskowe.
     const { data: settings } = await supabase
       .from("app_settings")
-      .select("resend_api_key, resend_from")
+      .select("resend_api_key, resend_from, resend_reply_to")
       .eq("owner", user.id)
       .maybeSingle();
 
     const apiKey = (bodyKey || settings?.resend_api_key || process.env.RESEND_API_KEY || "").trim();
     const from = (bodyFrom || settings?.resend_from || process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>").trim();
+    const replyTo = (settings?.resend_reply_to || "").trim();
 
     if (!apiKey) {
       return NextResponse.json(
@@ -61,7 +62,13 @@ export async function POST(req: Request) {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: target, subject: `[TEST] ${finalSubject}`, html: finalHtml }),
+      body: JSON.stringify({
+        from,
+        to: target,
+        subject: `[TEST] ${finalSubject}`,
+        html: finalHtml,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+      }),
     });
 
     if (!res.ok) {
