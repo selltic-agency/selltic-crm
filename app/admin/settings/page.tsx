@@ -20,8 +20,9 @@ import { useStages } from "@/lib/stages";
 import { useClassification } from "@/lib/classification";
 import { useToast } from "@/components/Toast";
 import { PROPERTY_TYPES, TYPE_LABEL, hasOptions, normalizeOptions, propLabel, slugify } from "@/lib/properties";
+import { EmailTemplatesTab } from "@/components/email/EmailTemplatesTab";
 
-type Tab = "properties" | "stages" | "categories" | "notifications" | "integrations" | "scraper";
+type Tab = "properties" | "stages" | "categories" | "notifications" | "integrations" | "templates" | "scraper";
 
 const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
   google_places_api_key: "",
@@ -60,6 +61,7 @@ export default function SettingsPage() {
             ["categories", "Kategorie branż"],
             ["notifications", "Powiadomienia"],
             ["integrations", "Integracje"],
+            ["templates", "Szablony e-mail"],
             ["scraper", "Scraper"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
@@ -92,6 +94,8 @@ export default function SettingsPage() {
         <NotificationsTab />
       ) : tab === "integrations" ? (
         <IntegrationsTab />
+      ) : tab === "templates" ? (
+        <EmailTemplatesTab />
       ) : (
         <ScraperTab />
       )}
@@ -1350,9 +1354,23 @@ function IntegrationsTab() {
   const [configured, setConfigured] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [from, setFrom] = useState("");
+  const [replyTo, setReplyTo] = useState("");
   const [testTo, setTestTo] = useState("");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  // Trwały komunikat pod przyciskiem „Zapisz” (obok ulotnego toastu), żeby po
+  // zapisie ZAWSZE było widać jednoznaczne potwierdzenie sukcesu lub błędu.
+  const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
+
+  const refresh = useCallback(async () => {
+    const res = await fetch("/api/settings/email");
+    if (res.ok) {
+      const body = await res.json();
+      setConfigured(!!body.configured);
+      setFrom(body.from || "");
+      setReplyTo(body.replyTo || "");
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -1361,36 +1379,37 @@ function IntegrationsTab() {
       } = await supabase.auth.getUser();
       if (user?.email) setTestTo(user.email);
       try {
-        const res = await fetch("/api/settings/email");
-        if (res.ok) {
-          const body = await res.json();
-          setConfigured(!!body.configured);
-          setFrom(body.from || "");
-        }
+        await refresh();
       } catch {
         /* offline — pozostaw pola puste */
       }
       setLoading(false);
     })();
-  }, [supabase]);
+  }, [supabase, refresh]);
 
   async function save() {
     setSaving(true);
+    setStatus(null);
     try {
       const res = await fetch("/api/settings/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: apiKey || undefined, from }),
+        body: JSON.stringify({ apiKey: apiKey || undefined, from, replyTo }),
       });
       if (!res.ok) {
         const b = await res.json().catch(() => null);
-        toast.error(b?.error || "Nie udało się zapisać.");
+        const msg = b?.error || "Nie udało się zapisać.";
+        setStatus({ kind: "err", msg });
+        toast.error(msg);
       } else {
-        if (apiKey.trim()) setConfigured(true);
         setApiKey("");
+        // Odczytaj z powrotem z bazy, aby POTWIERDZIĆ, że zapis faktycznie się utrwalił.
+        await refresh().catch(() => {});
+        setStatus({ kind: "ok", msg: "Zapisano ✓ — ustawienia e-mail są utrwalone w bazie." });
         toast.success("Zapisano ustawienia e-mail.");
       }
     } catch {
+      setStatus({ kind: "err", msg: "Błąd sieci przy zapisie." });
       toast.error("Błąd sieci przy zapisie.");
     }
     setSaving(false);
@@ -1398,6 +1417,7 @@ function IntegrationsTab() {
 
   async function clearKey() {
     setSaving(true);
+    setStatus(null);
     try {
       const res = await fetch("/api/settings/email", {
         method: "POST",
@@ -1407,9 +1427,14 @@ function IntegrationsTab() {
       if (res.ok) {
         setConfigured(false);
         setApiKey("");
+        setStatus({ kind: "ok", msg: "Klucz usunięty." });
         toast.success("Klucz usunięty.");
+      } else {
+        const b = await res.json().catch(() => null);
+        setStatus({ kind: "err", msg: b?.error || "Nie udało się usunąć klucza." });
       }
     } catch {
+      setStatus({ kind: "err", msg: "Błąd sieci." });
       toast.error("Błąd sieci.");
     }
     setSaving(false);
@@ -1447,21 +1472,25 @@ function IntegrationsTab() {
     );
   }
 
+  // Dokąd trafią ODPOWIEDZI: jeśli podano reply-to → tam; inaczej na adres nadawcy.
+  const replyDestination = replyTo.trim() || senderEmail(from) || "adres nadawcy";
+
   return (
     <Section>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <Mail size={16} color={tokens.accent} />
         <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Wysyłka e-mail (Resend)</h3>
       </div>
-      <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px" }}>
-        Automatyczne maile „dziękujemy” oraz powiadomienia o leadach wysyłamy przez{" "}
+      <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px", lineHeight: 1.6 }}>
+        Wszystkie maile z systemu — automatyczne „dziękujemy”, powiadomienia o leadach oraz wiadomości
+        wysyłane ręcznie z karty leada (szablony) — wychodzą przez{" "}
         <a href="https://resend.com" target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
           Resend
         </a>
         . Klucz jest przechowywany po stronie serwera i nigdy nie wraca do przeglądarki.
       </p>
 
-      <div style={{ display: "grid", gap: 16, maxWidth: 460 }}>
+      <div style={{ display: "grid", gap: 16, maxWidth: 480 }}>
         <label style={{ display: "grid", gap: 6 }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>
             Klucz API Resend {configured && <span style={{ color: tokens.success, fontWeight: 600 }}>· zapisany ✓</span>}
@@ -1473,22 +1502,57 @@ function IntegrationsTab() {
             onChange={(e) => setApiKey(e.target.value)}
             style={inputStyle}
           />
+          <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.55 }}>
+            Klucz uwierzytelnia wysyłkę w Resend. Wygenerujesz go w panelu Resend →{" "}
+            <a
+              href="https://resend.com/api-keys"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: tokens.accent }}
+            >
+              API Keys
+            </a>{" "}
+            (zaczyna się od <code>re_</code>). Bez niego żaden e-mail nie zostanie wysłany.
+          </span>
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Adres nadawcy</span>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Adres nadawcy (FROM)</span>
           <input
-            placeholder="Selltic Team <contact@selltic-agency.pl>"
+            placeholder="Zespół Selltic <kontakt@twoja-domena.pl>"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
             style={inputStyle}
           />
-          <span style={{ fontSize: 12, color: tokens.muted }}>
-            Domena musi być zweryfikowana w Resend (SPF/DKIM). Odpowiedzi możesz kierować na Gmaila przez „reply_to”.
+          <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.55 }}>
+            To adres, z którego <b>wychodzą</b> wszystkie automatyczne wiadomości (widoczny u odbiorcy jako
+            nadawca). Domena (część po <code>@</code>) <b>musi być zweryfikowana w Resend</b> (SPF/DKIM) →{" "}
+            <a href="https://resend.com/domains" target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
+              Domains
+            </a>
+            . Format: <code>Nazwa &lt;adres@domena.pl&gt;</code>.
           </span>
         </label>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Adres do odpowiedzi (Reply-To)</span>
+          <input
+            type="email"
+            placeholder="np. biuro@gmail.com (opcjonalnie)"
+            value={replyTo}
+            onChange={(e) => setReplyTo(e.target.value)}
+            style={inputStyle}
+          />
+          <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.55 }}>
+            Gdy odbiorca kliknie „Odpowiedz”, wiadomość trafi tutaj. Ustaw np. swojego Gmaila, mimo że
+            maile wychodzą z domeny. Pole opcjonalne — jeśli je zostawisz puste, odpowiedzi pójdą na adres
+            nadawcy.
+            <br />
+            <span style={{ color: tokens.text, fontWeight: 600 }}>Odpowiedzi trafią do: {replyDestination}</span>
+          </span>
+        </label>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <button onClick={save} disabled={saving} style={primaryButton}>
             {saving ? "Zapisywanie…" : "Zapisz"}
           </button>
@@ -1498,6 +1562,23 @@ function IntegrationsTab() {
             </button>
           )}
         </div>
+
+        {status && (
+          <div
+            role="status"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: `1px solid ${status.kind === "ok" ? tokens.success : tokens.danger}`,
+              background: status.kind === "ok" ? "rgba(24,169,87,0.08)" : "rgba(229,72,77,0.08)",
+              color: status.kind === "ok" ? tokens.success : tokens.danger,
+            }}
+          >
+            {status.msg}
+          </div>
+        )}
 
         <div style={{ height: 1, background: tokens.border }} />
 
@@ -1515,13 +1596,21 @@ function IntegrationsTab() {
               {testing ? "Wysyłanie…" : "Wyślij test"}
             </button>
           </div>
-          <span style={{ fontSize: 12, color: tokens.muted }}>
-            Wyśle przykładowy e-mail, aby potwierdzić, że klucz i domena działają.
+          <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.55 }}>
+            Wysyła przykładowy e-mail na adres wpisany powyżej, korzystając z podanego (lub zapisanego)
+            klucza i adresu nadawcy. Jeśli dojdzie — klucz i domena są poprawnie skonfigurowane. Jeśli nie —
+            zobaczysz konkretny błąd zwrócony przez Resend.
           </span>
         </label>
       </div>
     </Section>
   );
+}
+
+// Wyciąga sam adres e-mail z pola nadawcy w formacie „Nazwa <adres@domena>”.
+function senderEmail(from: string): string {
+  const m = from.match(/<([^>]+)>/);
+  return (m ? m[1] : from).trim();
 }
 
 /* ── Scraper (klucz API, konfiguracja, scoring) ──────────────────────────

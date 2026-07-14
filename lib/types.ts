@@ -189,6 +189,21 @@ export type AppSettings = {
   // klienta wraca tylko zamaskowany (patrz zakładka Integracje).
   resend_api_key?: string | null;
   resend_from?: string | null;
+  // Adres, na który trafiają ODPOWIEDZI na wysłane maile (nagłówek Reply-To).
+  // Pozwala kierować odpowiedzi np. na Gmaila zespołu, mimo wysyłki z domeny.
+  resend_reply_to?: string | null;
+};
+
+// Szablon e-mail (Integracje → Szablony e-mail). Body to HTML; subject i body
+// mogą zawierać placeholdery {{first_name}} itd. podstawiane danymi leada.
+export type EmailTemplate = {
+  id: string;
+  owner: string;
+  name: string;
+  subject: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
 };
 
 // ── Scraper headless (zakładka "Scraper") ───────────────────────────────

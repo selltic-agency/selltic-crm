@@ -204,12 +204,13 @@ export async function POST(req: Request) {
     // 8. Konfiguracja e-mail właściciela: klucz Resend (item 9 — trzymany
     //    server-side w app_settings) + adres nadawcy + adres powiadomień.
     const { data: settings } = await db.from("app_settings")
-      .select("email_new_lead, notify_email, resend_api_key, resend_from")
+      .select("email_new_lead, notify_email, resend_api_key, resend_from, resend_reply_to")
       .eq("owner", form.owner)
       .maybeSingle();
     const mail: MailConfig = {
       apiKey: settings?.resend_api_key || process.env.RESEND_API_KEY || "",
       from: settings?.resend_from || process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>",
+      replyTo: settings?.resend_reply_to || undefined,
     };
 
     // Powiadomienie mailowe DO WŁAŚCICIELA (jeśli włączone w ustawieniach).
@@ -233,7 +234,7 @@ export async function POST(req: Request) {
 
 // Konfiguracja wysyłki e-mail (item 9). Klucz preferencyjnie z app_settings
 // (ustawiany w Ustawienia → Integracje), z fallbackiem do zmiennej środowiskowej.
-type MailConfig = { apiKey: string; from: string };
+type MailConfig = { apiKey: string; from: string; replyTo?: string };
 
 // Wyślij maila przez Resend (https://resend.com). Działa tylko gdy jest klucz.
 async function notifyNewLead(
@@ -250,6 +251,7 @@ async function notifyNewLead(
       body: JSON.stringify({
         from: mail.from,
         to,
+        ...(mail.replyTo ? { reply_to: mail.replyTo } : {}),
         subject: `🎯 ${kind}: ${lead.name}`,
         html: `<h2>${kind}</h2>
                <p>Nowa szansa sprzedaży z formularza${lead.returning ? " (ten e-mail już wcześniej zostawił zgłoszenie)" : ""}.</p>
@@ -280,7 +282,13 @@ async function sendThankYouEmail(mail: MailConfig, to: string, name: string, set
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${mail.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: mail.from, to, subject, html }),
+      body: JSON.stringify({
+        from: mail.from,
+        to,
+        ...(mail.replyTo ? { reply_to: mail.replyTo } : {}),
+        subject,
+        html,
+      }),
     });
   } catch (e) {
     console.error("[sendThankYouEmail]", e);

@@ -71,6 +71,7 @@ import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges"
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
 import { normalizeOptions, propLabel, type PropertyView } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
+import { SendEmailModal } from "@/components/email/SendEmailModal";
 
 // Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
 // (28+28) trzeba odjąć od 100vh, żeby dwa panele zmieściły się bez
@@ -146,6 +147,7 @@ export default function DealPage() {
   const [loading, setLoading] = useState(true);
 
   const [composer, setComposer] = useState<Composer>({ open: false });
+  const [emailOpen, setEmailOpen] = useState(false);
 
   // ── Sekcje z wsadową edycją: lokalny szkic + jeden przycisk „Zapisz” dla
   // całej sekcji (zamiast zapisu przy każdej zmianie pola). Szkic resetuje
@@ -549,7 +551,12 @@ export default function DealPage() {
               label="Zadanie"
               onClick={() => setComposer({ open: true, editor: "task", mode: "create" })}
             />
-            <ActionButton icon={Mail} label="E-mail" disabled title="Wkrótce — integracja Google" />
+            <ActionButton
+              icon={Mail}
+              label="E-mail"
+              onClick={() => setEmailOpen(true)}
+              title="Wyślij e-mail z szablonu"
+            />
             <ActionButton icon={Calendar} label="Kalendarz" disabled title="Wkrótce — integracja Google" />
           </div>
 
@@ -765,6 +772,16 @@ export default function DealPage() {
           composer={composer}
           onClose={() => setComposer({ open: false })}
           handlers={{ createNote, updateActivity, createTask, updateTask }}
+        />
+      )}
+
+      {/* Modal „Wyślij e-mail” — szablon + dane leada → wysyłka przez Resend.
+          Po wysyłce backend dopisuje wpis „email” na osi czasu; odświeżamy feed. */}
+      {emailOpen && (
+        <SendEmailModal
+          deal={deal}
+          onClose={() => setEmailOpen(false)}
+          onSent={reloadFeed}
         />
       )}
     </div>
