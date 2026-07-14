@@ -17,14 +17,10 @@ import { useToast } from "@/components/Toast";
 import type { Prospect } from "@/lib/types";
 import ProspectTable, { type SortConfig } from "@/components/ProspectTable";
 import {
-  DISPLAY_STATUSES,
   STATUS_LABEL,
-  STATUS_COLOR,
-  toDisplayStatus,
   isCallable,
   dbStatusForWrite,
   notesFromProps,
-  type DisplayStatus,
   type WritableDisplayStatus,
 } from "@/lib/prospectStatus";
 import ProspectDetailDrawer from "@/components/prospecting/ProspectDetailDrawer";
@@ -35,18 +31,6 @@ import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
 import { loadViewPrefs, saveViewPrefs, planHydration } from "@/lib/viewPrefs";
 import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, type PropertyView } from "@/lib/properties";
-
-// Zakładka statusu. "" = wszystkie aktywne; "archived" = miękko usunięte.
-type StatusTab = DisplayStatus | "" | "archived";
-
-const TABS: { key: StatusTab; label: string }[] = [
-  { key: "", label: "Wszystkie" },
-  { key: "new", label: "Nowe" },
-  { key: "no_answer", label: "Nie odbiera" },
-  { key: "converted", label: "Skonwertowane" },
-  { key: "not_interested", label: "Niezainteresowane" },
-  { key: "archived", label: "Archiwum" },
-];
 
 const DEFAULT_SORT: SortConfig = { key: "lead_score", direction: "desc" };
 
@@ -78,8 +62,6 @@ const PROSPECT_BUILT_IN_FIELDS: FieldDef[] = [
   },
 ];
 
-const NO_WEBSITE_QUICK_FILTER: Filter = { field: "website_status", operator: "in", value: ["none"] };
-
 export default function ProspectingPage() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
@@ -90,17 +72,12 @@ export default function ProspectingPage() {
   const [archivedProspects, setArchivedProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
   const [archivedLoading, setArchivedLoading] = useState(false);
-  const [counts, setCounts] = useState<Record<DisplayStatus, number>>({
-    new: 0,
-    no_answer: 0,
-    not_interested: 0,
-    converted: 0,
-  });
   const [archivedCount, setArchivedCount] = useState(0);
   const [industries, setIndustries] = useState<string[]>([]);
   const [cities, setCities] = useState<string[]>([]);
 
-  const [statusFilter, setStatusFilter] = useState<StatusTab>("");
+  // Widok Archiwum (miękko usunięte prospekty) — zakładka obok „Wszystkie".
+  const [showingArchive, setShowingArchive] = useState(false);
   const [filters, setFilters] = useState<Filter[]>([]);
   const [sort, setSort] = useState<Sort | null>(null);
   const filterBarRef = useRef<FilterBarHandle>(null);
@@ -118,8 +95,6 @@ export default function ProspectingPage() {
   // wypadek, gdyby nie mieścił się w bieżącym filtrze/zakładce.
   const [focusProspect, setFocusProspect] = useState<Prospect | null>(null);
 
-  const showingArchive = statusFilter === "archived";
-
   // Pola filtrów = wbudowane (status/score/strona) + miasto/branża (dynamiczne)
   // + właściwości (kategoria/cel + własne). Kolumny miasta/branży są dynamiczne
   // (zależą od zaimportowanych danych).
@@ -136,24 +111,9 @@ export default function ProspectingPage() {
   // Resolver: właściwości własne → props jsonb; reszta (kolumny) bezpośrednio.
   const resolveColumn = useMemo(() => makeColumnResolver(properties), [properties]);
 
-  const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
-    return [
-      { name: "Wszystkie", view_mode: "table", filters: [], sort: null },
-      {
-        name: "Do zadzwonienia",
-        view_mode: "table",
-        filters: [{ field: "prospecting_status", operator: "in", value: ["new", "contact_attempted"] }],
-        sort: { column: "lead_score", direction: "desc" },
-      },
-      {
-        name: "Wysokie priorytety",
-        view_mode: "table",
-        // >= 70: brak operatora "gte" w modelu filtrów, 69 daje ten sam próg dla liczb całkowitych.
-        filters: [{ field: "lead_score", operator: "gt", value: 69 }],
-        sort: null,
-      },
-    ];
-  }, []);
+  // Brak predefiniowanych (systemowych) zakładek — pozostaje tylko „Wszystkie"
+  // (zaszyta w ViewTabs), zakładka „Archiwum" oraz widoki tworzone ręcznie.
+  const seedDefaults = useCallback(async (): Promise<SeedView[]> => [], []);
 
   const {
     views,
@@ -168,12 +128,17 @@ export default function ProspectingPage() {
     deleteView,
   } = useSavedViews("prospecting", seedDefaults);
 
+  // W zakładkach pokazujemy tylko widoki utworzone ręcznie przez użytkownika.
+  // Predefiniowane/systemowe (is_default) są ukryte — „Wszystkie" wystarcza.
+  const customViews = useMemo(() => views.filter((v) => !v.is_default), [views]);
+
   const applyView = useCallback((filters_: Filter[], sort_: Sort | null) => {
     filterBarRef.current?.setFilters(filters_);
     setSort(sort_);
   }, []);
 
   const handleSelectView = (id: string) => {
+    setShowingArchive(false);
     selectView(id);
     const v = views.find((x) => x.id === id);
     if (v) applyView(v.filters, v.sort);
@@ -181,9 +146,19 @@ export default function ProspectingPage() {
 
   // „Wszystkie" — stan domyślny: brak aktywnego widoku i brak filtrów.
   const handleSelectAll = useCallback(() => {
+    setShowingArchive(false);
     selectView(null);
     filterBarRef.current?.setFilters([]);
     setSort(null);
+  }, [selectView]);
+
+  // „Archiwum" — jak „Wszystkie", tylko rekordy zarchiwizowane. Czyścimy
+  // aktywny widok i filtry, żeby zachowywała się jak zakładka bazowa.
+  const handleSelectArchive = useCallback(() => {
+    selectView(null);
+    filterBarRef.current?.setFilters([]);
+    setSort(null);
+    setShowingArchive(true);
   }, [selectView]);
 
   // ── Hydratacja: stan początkowy to ZAWSZE „Wszystkie" (brak widoku/filtrów).
@@ -262,20 +237,12 @@ export default function ProspectingPage() {
     if (showingArchive) loadArchived();
   }, [showingArchive, loadArchived]);
 
-  // Dashboard liczników i opcje filtrów — niezależne od aktywnych filtrów.
+  // Licznik Archiwum (na zakładce) i opcje filtrów miasta/branży — niezależne
+  // od aktywnych filtrów.
   const refreshCounts = useCallback(async () => {
-    const { data } = await supabase.from("prospects").select("prospecting_status, industry, city, archived_at");
-    const rows =
-      (data as { prospecting_status: string; industry: string | null; city: string | null; archived_at: string | null }[]) ??
-      [];
-    const c: Record<DisplayStatus, number> = { new: 0, no_answer: 0, not_interested: 0, converted: 0 };
-    let archived = 0;
-    for (const r of rows) {
-      if (r.archived_at) archived++;
-      else c[toDisplayStatus(r.prospecting_status)]++;
-    }
-    setCounts(c);
-    setArchivedCount(archived);
+    const { data } = await supabase.from("prospects").select("industry, city, archived_at");
+    const rows = (data as { industry: string | null; city: string | null; archived_at: string | null }[]) ?? [];
+    setArchivedCount(rows.filter((r) => r.archived_at).length);
     setIndustries([...new Set(rows.map((r) => r.industry).filter(Boolean))] as string[]);
     setCities([...new Set(rows.map((r) => r.city).filter(Boolean))] as string[]);
   }, [supabase]);
@@ -283,11 +250,6 @@ export default function ProspectingPage() {
   useEffect(() => {
     refreshCounts();
   }, [refreshCounts]);
-
-  const visible = useMemo(() => {
-    if (!statusFilter) return prospects;
-    return prospects.filter((p) => toDisplayStatus(p.prospecting_status) === statusFilter);
-  }, [prospects, statusFilter]);
 
   const callableQueue = useMemo(() => prospects.filter(isCallable), [prospects]);
 
@@ -509,65 +471,24 @@ export default function ProspectingPage() {
         </button>
       </div>
 
-      {/* Dashboard liczników */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 20 }}>
-        {DISPLAY_STATUSES.map((s) => (
-          <div key={s} style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: "14px 16px" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase" }}>{STATUS_LABEL[s]}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: STATUS_COLOR[s] }}>{counts[s] ?? 0}</div>
-          </div>
-        ))}
-      </div>
+      <ViewTabs
+        views={customViews}
+        activeId={activeId}
+        adhoc={adhoc}
+        loading={viewsLoading}
+        storage={viewsStorage}
+        error={viewsError}
+        archiveTab={{ active: showingArchive, count: archivedCount, onSelect: handleSelectArchive }}
+        onSelectAll={handleSelectAll}
+        onSelectView={handleSelectView}
+        onCreate={(name) => createView(name, { filters, sort, view_mode: "table" })}
+        onRename={(id, name) => updateView(id, { name })}
+        onDelete={deleteView}
+        onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort, view_mode: "table" })}
+        onClearAdhoc={handleClearAdhoc}
+      />
 
-      {/* Zakładki statusu */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        {TABS.map((tab) => (
-          <button
-            key={tab.key || "all"}
-            onClick={() => setStatusFilter(tab.key)}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 999,
-              border: `1px solid ${statusFilter === tab.key ? tokens.accent : tokens.border}`,
-              background: statusFilter === tab.key ? `${tokens.accent}1A` : tokens.card,
-              color: statusFilter === tab.key ? tokens.accent : tokens.text,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            {tab.label}
-            {tab.key === "archived" && archivedCount > 0 ? ` (${archivedCount})` : ""}
-          </button>
-        ))}
-      </div>
-
-      {!showingArchive && (
-        <>
-          <ViewTabs
-            views={views}
-            activeId={activeId}
-            adhoc={adhoc}
-            loading={viewsLoading}
-            storage={viewsStorage}
-            error={viewsError}
-            onSelectAll={handleSelectAll}
-            onSelectView={handleSelectView}
-            onCreate={(name) => createView(name, { filters, sort, view_mode: "table" })}
-            onRename={(id, name) => updateView(id, { name })}
-            onDelete={deleteView}
-            onSaveChanges={() => activeView && updateView(activeView.id, { filters, sort, view_mode: "table" })}
-            onClearAdhoc={handleClearAdhoc}
-          />
-
-          <FilterBar
-            ref={filterBarRef}
-            fields={builtInFields}
-            onFilterChange={setFilters}
-            quickFilters={[{ label: "Tylko bez strony", filter: NO_WEBSITE_QUICK_FILTER }]}
-          />
-        </>
-      )}
+      <FilterBar ref={filterBarRef} fields={builtInFields} onFilterChange={setFilters} />
 
       {showingArchive ? (
         archivedLoading ? (
@@ -586,7 +507,7 @@ export default function ProspectingPage() {
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : (
         <ProspectTable
-          prospects={visible}
+          prospects={prospects}
           onRowClick={(id) => setSelectedId(id)}
           sort={tableSort}
           onSortChange={onTableSortChange}

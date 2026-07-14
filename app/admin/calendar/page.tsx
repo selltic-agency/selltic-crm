@@ -76,7 +76,7 @@ function buildGrid(monthStart: Date): Date[] {
 export default function CalendarPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
-  const [view, setView] = useState<CalView>("month");
+  const [view, setView] = useState<CalView>("week");
   const [cursor, setCursor] = useState(() => new Date());
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);

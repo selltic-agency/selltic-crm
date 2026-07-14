@@ -125,25 +125,9 @@ export default function PipelinePage() {
     setViewMode(mode);
   };
 
-  const seedDefaults = useCallback(async (): Promise<SeedView[]> => {
-    const wonKey = stages.find((s) => s.is_won)?.key;
-    const lostKey = stages.find((s) => s.is_lost)?.key;
-    return [
-      { name: "Wszystkie leady", view_mode: "kanban", filters: [], sort: null },
-      {
-        name: "Wygrane",
-        view_mode: "kanban",
-        filters: wonKey ? [{ field: "stage", operator: "in", value: [wonKey] }] : [],
-        sort: null,
-      },
-      {
-        name: "Przegrane",
-        view_mode: "kanban",
-        filters: lostKey ? [{ field: "stage", operator: "in", value: [lostKey] }] : [],
-        sort: null,
-      },
-    ];
-  }, [stages]);
+  // Brak predefiniowanych (systemowych) zakładek — pozostaje tylko „Wszystkie"
+  // (zaszyta w ViewTabs) oraz widoki tworzone ręcznie przez użytkownika.
+  const seedDefaults = useCallback(async (): Promise<SeedView[]> => [], []);
 
   // Zasiew domyślnych widoków czeka na etapy lejka (klucze wygrane/przegrane).
   const {
@@ -158,6 +142,10 @@ export default function PipelinePage() {
     updateView,
     deleteView,
   } = useSavedViews("deals", seedDefaults, !stagesLoading);
+
+  // W zakładkach pokazujemy tylko widoki utworzone ręcznie przez użytkownika.
+  // Predefiniowane/systemowe (is_default) są ukryte — „Wszystkie" wystarcza.
+  const customViews = useMemo(() => views.filter((v) => !v.is_default), [views]);
 
   // Zastosuj widok (zakładkę) do filtrów/trybu/sortu.
   const applyView = useCallback((filters_: Filter[], mode: "kanban" | "table", sort: Sort | null) => {
@@ -329,7 +317,7 @@ export default function PipelinePage() {
       </div>
 
       <ViewTabs
-        views={views}
+        views={customViews}
         activeId={activeId}
         adhoc={adhoc}
         loading={viewsLoading}

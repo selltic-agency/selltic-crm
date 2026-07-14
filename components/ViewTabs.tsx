@@ -25,6 +25,7 @@ export default function ViewTabs({
   loading,
   storage = "db",
   error = null,
+  archiveTab = null,
   onSelectAll,
   onSelectView,
   onCreate,
@@ -40,6 +41,12 @@ export default function ViewTabs({
   loading: boolean;
   storage?: SavedViewStorage;
   error?: string | null;
+  /**
+   * Opcjonalna zakładka „Archiwum" — zachowuje się jak „Wszystkie", tylko
+   * filtruje rekordy zarchiwizowane. Używa jej Prospecting; Leady nie mają
+   * archiwum i nie przekazują tej właściwości.
+   */
+  archiveTab?: { active: boolean; count: number; onSelect: () => void } | null;
   onSelectAll: () => void;
   onSelectView: (id: string) => void;
   onCreate: (name: string) => void;
@@ -57,8 +64,9 @@ export default function ViewTabs({
   if (loading) return null;
 
   const activeView = views.find((v) => v.id === activeId) ?? null;
-  // Zakładka „bazowa" jest aktywna tylko, gdy NIE leży na niej filtr tymczasowy.
-  const allActive = activeId === null && !adhoc;
+  // Zakładka „bazowa" jest aktywna tylko, gdy NIE leży na niej filtr tymczasowy
+  // i nie oglądamy Archiwum.
+  const allActive = activeId === null && !adhoc && !archiveTab?.active;
 
   function submitNew() {
     if (newName.trim()) {
@@ -73,6 +81,15 @@ export default function ViewTabs({
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 4, borderBottom: `1px solid ${tokens.border}`, paddingBottom: 0 }}>
         {/* Zakładka „Wszystkie" — stan domyślny (brak filtrów). */}
         <Tab active={allActive} onClick={onSelectAll} label="Wszystkie" />
+
+        {/* Zakładka „Archiwum" — jak „Wszystkie", tylko rekordy zarchiwizowane. */}
+        {archiveTab && (
+          <Tab
+            active={archiveTab.active}
+            onClick={archiveTab.onSelect}
+            label={archiveTab.count > 0 ? `Archiwum (${archiveTab.count})` : "Archiwum"}
+          />
+        )}
 
         {/* Zakładki zapisanych widoków. */}
         {views.map((v) => {
