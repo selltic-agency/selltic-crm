@@ -30,7 +30,7 @@ import ViewTabs from "@/components/ViewTabs";
 import { Filter, Sort, buildFilterQuery } from "@/lib/filters";
 import { useSavedViews, type SeedView } from "@/lib/savedViews";
 import { loadViewPrefs, saveViewPrefs, planHydration } from "@/lib/viewPrefs";
-import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, type PropertyView } from "@/lib/properties";
+import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, appendPurposeHistory, type PropertyView } from "@/lib/properties";
 
 const DEFAULT_SORT: SortConfig = { key: "lead_score", direction: "desc" };
 
@@ -351,15 +351,7 @@ export default function ProspectingPage() {
       }
       // Cel kontaktu: historia (append-only), gdy dokładamy.
       if (view.key === "purposes" && mode === "add") {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        const vals = Array.isArray(value) ? (value as string[]) : [];
-        if (user && vals.length) {
-          await supabase.from("prospect_purposes").insert(
-            ids.flatMap((prospect_id) => vals.map((purpose) => ({ owner: user.id, prospect_id, purpose, source: "bulk" })))
-          );
-        }
+        await appendPurposeHistory(supabase, "prospects", ids, Array.isArray(value) ? (value as string[]) : []);
       }
       toast.success(ids.length === 1 ? "Zapisano." : `Zaktualizowano ${ids.length} leadów.`);
       load();

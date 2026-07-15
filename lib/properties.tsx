@@ -218,6 +218,32 @@ export async function applyBulkProperty(
   }
 }
 
+// Dopisuje historię „celu kontaktu" (append-only) po zbiorczej edycji w trybie
+// „dołóż". Tabela historii i kolumna FK zależą od encji: deals→deal_purposes/
+// deal_id, prospects→prospect_purposes/prospect_id. Wspólne dla Leadów i
+// Prospectingu (wcześniej ten sam blok był skopiowany w obu stronach).
+// Historia jest wtórna wobec samego zapisu właściwości — błąd tu logujemy,
+// ale nie przerywamy przepływu (spójnie z resztą kodu).
+export async function appendPurposeHistory(
+  supabase: SupabaseLike,
+  entity: EntityKind,
+  ids: string[],
+  purposes: string[]
+): Promise<void> {
+  if (ids.length === 0 || purposes.length === 0) return;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+  const table = entity === "deals" ? "deal_purposes" : "prospect_purposes";
+  const idField = entity === "deals" ? "deal_id" : "prospect_id";
+  const rows = ids.flatMap((id) =>
+    purposes.map((purpose) => ({ owner: user.id, [idField]: id, purpose, source: "bulk" }))
+  );
+  const { error } = await supabase.from(table).insert(rows);
+  if (error) console.error(`Nie zapisano historii celu kontaktu (${table}):`, error);
+}
+
 // ── Hook: właściwości dla encji (systemowe + własne) ──────────────────────
 export function useEntityProperties(entity: EntityKind) {
   const supabase = useMemo(() => createClient(), []);

@@ -19,6 +19,7 @@ import {
   CircleDot,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useToast } from "@/components/Toast";
 import { tokens, formatDateTime, formatPLN } from "@/lib/ui";
 import {
   type Activity,
@@ -45,6 +46,7 @@ const QUICK = [
 
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
   const reduce = useReducedMotion();
   const router = useRouter();
   const { stages, stageMeta } = useStages();
@@ -95,8 +97,14 @@ export default function DashboardPage() {
   }, [load]);
 
   async function toggleTask(task: Task) {
-    setTasks((list) => list.filter((t) => t.id !== task.id)); // znika z „na dziś”
-    await supabase.from("tasks").update({ done: true }).eq("id", task.id);
+    setTasks((list) => list.filter((t) => t.id !== task.id)); // optymistycznie znika z „na dziś”
+    const { error } = await supabase.from("tasks").update({ done: true }).eq("id", task.id);
+    if (error) {
+      // Nie chowaj cichej porażki: przywróć zadanie na liście i zgłoś błąd,
+      // inaczej użytkownik myśli, że odhaczył, a po odświeżeniu wraca.
+      setTasks((list) => (list.some((t) => t.id === task.id) ? list : [...list, task]));
+      toast.error("Nie udało się oznaczyć zadania jako wykonane.");
+    }
   }
 
   return (

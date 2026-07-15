@@ -259,12 +259,15 @@ export default function DealPage() {
       toast.error("Nie udało się zmienić etapu.");
       return;
     }
-    await supabase.from("activities").insert({
+    const { error: actErr } = await supabase.from("activities").insert({
       owner: deal.owner,
       deal_id: deal.id,
       type: "stage",
       body: `Etap zmieniony na: ${meta.label}`,
     });
+    // Zmiana etapu już się udała; wpis do osi czasu jest wtórny — nie blokuj
+    // UI, ale nie połykaj błędu po cichu (ułatwia diagnostykę luk w timeline).
+    if (actErr) console.error("Nie zapisano wpisu aktywności (zmiana etapu):", actErr);
     reloadFeed();
   }
 
@@ -387,13 +390,14 @@ export default function DealPage() {
       toast.error("Nie udało się dodać zadania.");
       return;
     }
-    await supabase.from("activities").insert({
+    const { error: actErr } = await supabase.from("activities").insert({
       owner: deal.owner,
       deal_id: deal.id,
       type: "task",
       body: title,
       meta: due_at ? { due_at } : null,
     });
+    if (actErr) console.error("Nie zapisano wpisu aktywności (zadanie):", actErr);
     await reloadFeed();
     toast.success("Zadanie dodane.");
   }

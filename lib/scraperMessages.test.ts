@@ -2,7 +2,7 @@
 // „już w bazie” (raportowanie deduplikacji na poziomie zadania scrapowania).
 // Uruchom: npx tsx lib/scraperMessages.test.ts
 import assert from "node:assert";
-import { formatFound } from "./scraperMessages";
+import { formatFound } from "./scraperMessages.ts";
 
 let passed = 0;
 function eq(name: string, got: string, want: string) {

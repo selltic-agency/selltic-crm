@@ -1,7 +1,7 @@
 // lib/viewPrefs.test.ts — weryfikacja trwałości stanu widoku (zadanie 6c).
 // Uruchom: npx tsx lib/viewPrefs.test.ts
 import assert from "node:assert";
-import { loadViewPrefs, saveViewPrefs, planHydration, type ViewPrefs } from "./viewPrefs";
+import { loadViewPrefs, saveViewPrefs, planHydration, type ViewPrefs } from "./viewPrefs.ts";
 
 // Minimalny mock localStorage + window dla środowiska Node.
 const store = new Map<string, string>();

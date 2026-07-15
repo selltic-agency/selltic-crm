@@ -20,6 +20,10 @@ type Hit = {
   subtitle: string;
 };
 
+// Kształty wierszy zwracanych przez zapytania wyszukiwarki (tylko wybrane kolumny).
+type DealHitRow = { id: string; name: string | null; email: string | null; company: string | null; phone: string | null };
+type ProspectHitRow = { id: string; name: string | null; phone: string | null; city: string | null };
+
 export default function GlobalSearch({
   onOpenContact,
   onOpenProspect,
@@ -80,13 +84,13 @@ export default function GlobalSearch({
           .limit(6),
       ]);
 
-      const dealHits: Hit[] = (dealsRes.data ?? []).map((d: any) => ({
+      const dealHits: Hit[] = (dealsRes.data ?? []).map((d: DealHitRow) => ({
         kind: "deal",
         id: d.id,
         title: d.name || "Bez nazwy",
         subtitle: d.email || d.company || d.phone || "—",
       }));
-      const prospectHits: Hit[] = (prospectsRes.data ?? []).map((p: any) => ({
+      const prospectHits: Hit[] = (prospectsRes.data ?? []).map((p: ProspectHitRow) => ({
         kind: "prospect",
         id: p.id,
         title: p.name || "Bez nazwy",
