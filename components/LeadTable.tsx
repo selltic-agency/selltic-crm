@@ -356,7 +356,17 @@ function renderCell(
   if (key === "value") return formatPLN(d.value);
   if (key === "opened_at") return formatDateTime(d.opened_at);
   if (key === "source") return d.source || "ręcznie";
-  if (key === "name") return <span style={{ fontWeight: 600 }}>{d.name || "—"}</span>;
+  if (key === "name")
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontWeight: 600 }}>{d.name || "—"}</span>
+        {d.incomplete && (
+          <span title="Niekompletny lead (porzucony formularz)" style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999, background: "#FDF1E3", color: tokens.warning }}>
+            NIEKOMPLETNY
+          </span>
+        )}
+      </span>
+    );
   if (key in d) {
     const v = (d as unknown as Record<string, unknown>)[key];
     return v == null || v === "" ? "—" : String(v);
