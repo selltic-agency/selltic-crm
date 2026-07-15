@@ -48,9 +48,22 @@ type Props = {
   preview?: boolean;
   // Wymuszony układ mobilny (podgląd „telefon” w edytorze).
   forceMobile?: boolean;
+  // ── Instrumentacja śledzenia (§3) — fire-and-forget, obsługiwane przez rodzica.
+  onStepView?: (stepIndex: number, totalSteps: number) => void;
+  onStepComplete?: (stepIndex: number, answers: Answers, totalSteps: number) => void;
+  onFirstAnswer?: () => void;
 };
 
-export default function FormRenderer({ form, gotoStepId, onSubmit, preview, forceMobile }: Props) {
+export default function FormRenderer({
+  form,
+  gotoStepId,
+  onSubmit,
+  preview,
+  forceMobile,
+  onStepView,
+  onStepComplete,
+  onFirstAnswer,
+}: Props) {
   const steps = form.steps ?? [];
   const theme = form.theme;
   const autoMobile = useIsMobile(680);
@@ -72,6 +85,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview, forc
   // Prefiks kraju per pole telefonu.
   const [phonePrefixes, setPhonePrefixes] = useState<Record<string, string>>({});
   const submittedRef = useRef(false);
+  const firstAnswerRef = useRef(false);
 
   // Wstrzyknij arkusz Google Fonts dla wybranej czcionki.
   useEffect(() => {
@@ -108,6 +122,24 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview, forc
   );
   const currentIndex = steps.findIndex((s) => s.id === current?.id);
   const progress = steps.length > 1 ? (currentIndex / (steps.length - 1)) * 100 : 0;
+
+  // §3 — zdarzenie „widok kroku” przy każdej zmianie kroku (także na starcie).
+  useEffect(() => {
+    if (preview || !current) return;
+    onStepView?.(currentIndex, steps.length);
+  }, [currentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // §3 — pierwsza udzielona odpowiedź (raz na sesję renderera).
+  useEffect(() => {
+    if (preview || firstAnswerRef.current) return;
+    const hasAny = Object.values(answers).some(
+      (v) => v != null && v !== "" && !(Array.isArray(v) && v.length === 0)
+    );
+    if (hasAny) {
+      firstAnswerRef.current = true;
+      onFirstAnswer?.();
+    }
+  }, [answers, preview, onFirstAnswer]);
 
   const fields = useMemo(() => (current ? stepFields(current) : []), [current]);
   const container = current ? isContainerStep(current) : false;
@@ -215,6 +247,9 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview, forc
     if (!current) return;
     if (!validateCurrent(true)) return;
 
+    // §3 — krok ukończony (autosave częściowych odpowiedzi po stronie rodzica).
+    if (!preview) onStepComplete?.(currentIndex, answers, steps.length);
+
     // Routing: domyślny cel kroku, ewentualnie nadpisany przez pole
     // rozgałęziające (pierwsze single_choice).
     let target = current.next || NEXT;
@@ -225,7 +260,7 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview, forc
       if (opt) target = opt.next || NEXT;
     }
     resolveTarget(target);
-  }, [current, answers, resolveTarget, validateCurrent]);
+  }, [current, answers, resolveTarget, validateCurrent, preview, onStepComplete, currentIndex, steps.length]);
 
   const back = useCallback(() => {
     setHistory((h) => {
@@ -241,8 +276,11 @@ export default function FormRenderer({ form, gotoStepId, onSubmit, preview, forc
 
   // Wybór jednokrotny z auto-przejściem (krok jedno-polowy).
   function chooseSingleAuto(field: FormField, label: string, next: string) {
-    setAnswers((a) => ({ ...a, [field.id]: label }));
+    const nextAnswers = { ...answers, [field.id]: label };
+    setAnswers(nextAnswers);
     setErrors({});
+    // §3 — wybór = ukończenie kroku; przekaż świeże odpowiedzi do autosave.
+    if (!preview) onStepComplete?.(currentIndex, nextAnswers, steps.length);
     resolveTarget(next || current.next || NEXT);
   }
 
