@@ -1,0 +1,44 @@
+# Wywołuje endpoint §2 (started → abandoned + tworzenie leadów niekompletnych)
+# co ~15 minut. Zastępuje cron Vercela (plan Hobby dopuszcza tylko zadania dzienne).
+#
+# Wymagane sekrety repozytorium (Settings → Secrets and variables → Actions):
+#   DEPLOY_URL   – bazowy URL produkcji BEZ ukośnika na końcu,
+#                  np. https://selltic-crm.vercel.app  (lub własna domena)
+#   CRON_SECRET  – ta sama wartość co zmienna środowiskowa CRON_SECRET w Vercel
+#
+# Uwaga: zadania „schedule” działają tylko z domyślnej gałęzi (main) i mogą być
+# opóźnione, gdy GitHub jest obciążony. Można też uruchomić ręcznie (workflow_dispatch).
+name: Abandon form sessions
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # co 15 minut (UTC)
+  workflow_dispatch: {} # umożliwia ręczne uruchomienie z zakładki Actions
+
+# Nie uruchamiaj kolejnego biegu, jeśli poprzedni jeszcze trwa.
+concurrency:
+  group: abandon-sessions
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger abandon-sessions cron
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$DEPLOY_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Ustaw sekrety DEPLOY_URL i CRON_SECRET w Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          code=$(curl -sS -m 60 -o /tmp/resp.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${DEPLOY_URL%/}/api/cron/abandon-sessions")
+          echo "HTTP ${code}"
+          echo "Response: $(cat /tmp/resp.json)"
+          if [ "$code" != "200" ]; then
+            echo "::error::Endpoint zwrócił HTTP ${code} (oczekiwano 200)."
+            exit 1
+          fi
