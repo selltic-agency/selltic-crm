@@ -1,4 +1,5 @@
 // lib/types.ts — współdzielone typy domeny (CRM + formularze).
+import type { FormSchema } from "./forms";
 
 // Etap to teraz dowolny klucz zdefiniowany w pipeline_stages (konfigurowalny).
 export type Stage = string;
@@ -69,6 +70,9 @@ export type Deal = {
   website_status?: WebsiteStatus | null;
   lead_score?: number | null;
   lead_score_breakdown?: Record<string, unknown> | null;
+  // §6 — lead z porzuconego wypełnienia formularza (dane kontaktowe, ale bez
+  // ukończenia). Filtrowalny i wizualnie odróżnialny w liście Leadów.
+  incomplete?: boolean;
 };
 
 // Prospekt = zimny lead z Google Maps (Faza 10), zanim wykaże zainteresowanie.
@@ -165,6 +169,11 @@ export type Submission = {
   meta: Record<string, unknown> | null;
   deal_id: string | null;
   created_at: string;
+  // §1 — migawki z chwili przechwycenia (render odpowiedzi używa migawki).
+  title_snapshot?: string | null;
+  schema_snapshot?: FormSchema | null;
+  session_id?: string | null;
+  incomplete?: boolean;
   // opcjonalne złączenia (z select ... forms(title), deals(...))
   forms?: { id: string; title: string } | null;
   deals?: { id: string; name: string | null; email: string | null; stage: string } | null;

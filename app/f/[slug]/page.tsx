@@ -1,13 +1,13 @@
 // app/f/[slug]/page.tsx — publiczna strona formularza.
-// Server Component: pobiera OPUBLIKOWANY formularz po slugu (polityka public read),
-// po czym renderuje go klienckim wrapperem PublicForm.
+// Server Component: pobiera OPUBLIKOWANY formularz po slugu, renderuje klienckim
+// wrapperem PublicForm. Zarchiwizowany formularz (§1) → ekran „nieaktywny” (410).
 // Tryb ?embed=1 ukrywa stopkę i włącza postMessage z wysokością.
 import type { Metadata } from "next";
-import { createSupabaseServer } from "@/lib/supabase/server";
+import { createSupabaseAdmin } from "@/lib/supabase/server";
+import { resolvePublicMetaConfig, type PublicMetaConfig } from "@/lib/server/meta";
 import type { FormSchema } from "@/lib/forms";
 import PublicForm from "./public-form";
 
-// Render zawsze świeży (publiczny odczyt, bez cache na sesji).
 export const dynamic = "force-dynamic";
 
 type PageProps = {
@@ -15,22 +15,26 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type PublishedForm = {
+type FormRow = {
   id: string;
+  owner: string;
   title: string;
   published: FormSchema | null;
   status: string;
+  archived_at: string | null;
 };
 
-async function fetchForm(slug: string): Promise<PublishedForm | null> {
-  const db = await createSupabaseServer();
+// Pobiera formularz przez service_role, ale RUCZNIE egzekwuje reguły publiczne
+// (opublikowany + niezarchiwizowany) — dzięki temu możemy odróżnić „zarchiwizowany”
+// (ekran 410) od „nie istnieje”.
+async function fetchForm(slug: string): Promise<FormRow | null> {
+  const db = createSupabaseAdmin();
   const { data } = await db
     .from("forms")
-    .select("id, title, published, status")
+    .select("id, owner, title, published, status, archived_at")
     .eq("slug", slug)
-    .eq("status", "published")
     .maybeSingle();
-  return (data as PublishedForm | null) ?? null;
+  return (data as FormRow | null) ?? null;
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -51,13 +55,21 @@ export default async function PublicFormPage({ params, searchParams }: PageProps
 
   const form = await fetchForm(slug);
 
-  if (!form || !form.published || !(form.published.steps?.length > 0)) {
+  // §1 — zarchiwizowany formularz jest publicznie nieaktywny (410).
+  if (form && form.archived_at) {
+    return <Inactive embed={embed} />;
+  }
+
+  if (!form || form.status !== "published" || !form.published || !(form.published.steps?.length > 0)) {
     return <Unavailable embed={embed} />;
   }
 
+  // §9b — publiczna konfiguracja Meta (tylko Pixel ID, NIGDY token CAPI).
+  const meta: PublicMetaConfig = await resolvePublicMetaConfig(createSupabaseAdmin(), form.id, form.owner);
+
   return (
     <main style={{ background: form.published.theme?.bg || "#FFFFFF", minHeight: "100dvh" }}>
-      <PublicForm formId={form.id} schema={form.published} embed={embed} />
+      <PublicForm formId={form.id} schema={form.published} embed={embed} meta={meta} />
       {!embed && (
         <footer
           style={{
@@ -72,12 +84,7 @@ export default async function PublicFormPage({ params, searchParams }: PageProps
             pointerEvents: "auto",
           }}
         >
-          <a
-            href="https://selltic-agency.pl"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "inherit", textDecoration: "none" }}
-          >
+          <a href="https://selltic-agency.pl" target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
             ⚡ Selltic
           </a>
         </footer>
@@ -86,8 +93,35 @@ export default async function PublicFormPage({ params, searchParams }: PageProps
   );
 }
 
+// §1 — ekran „formularz nie jest już aktywny” (zarchiwizowany).
+function Inactive({ embed }: { embed: boolean }) {
+  return (
+    <Screen embed={embed} emoji="🗄️" title="Ten formularz nie jest już aktywny">
+      Formularz został zarchiwizowany i nie przyjmuje już zgłoszeń.
+    </Screen>
+  );
+}
+
 // Ekran zastępczy, gdy formularz nie istnieje lub nie jest opublikowany.
 function Unavailable({ embed }: { embed: boolean }) {
+  return (
+    <Screen embed={embed} emoji="🔍" title="Formularz niedostępny">
+      Ten formularz nie istnieje lub nie został jeszcze opublikowany.
+    </Screen>
+  );
+}
+
+function Screen({
+  embed,
+  emoji,
+  title,
+  children,
+}: {
+  embed: boolean;
+  emoji: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <main
       style={{
@@ -101,13 +135,9 @@ function Unavailable({ embed }: { embed: boolean }) {
       }}
     >
       <div style={{ textAlign: "center", maxWidth: 360 }}>
-        <div style={{ fontSize: 40, marginBottom: 8 }}>🔍</div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 6px" }}>
-          Formularz niedostępny
-        </h1>
-        <p style={{ fontSize: 14, color: "#8A92A6", margin: 0 }}>
-          Ten formularz nie istnieje lub nie został jeszcze opublikowany.
-        </p>
+        <div style={{ fontSize: 40, marginBottom: 8 }}>{emoji}</div>
+        <h1 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 6px" }}>{title}</h1>
+        <p style={{ fontSize: 14, color: "#8A92A6", margin: 0 }}>{children}</p>
       </div>
     </main>
   );

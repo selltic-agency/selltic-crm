@@ -109,6 +109,13 @@ drop trigger if exists t_form_meta_touch on form_meta_settings;
 create trigger t_form_meta_touch before update on form_meta_settings
   for each row execute function touch_updated_at();
 
+-- ── §6. LEADY NIEKOMPLETNE (porzucone wypełnienia z danymi kontaktowymi) ──
+-- Lead z porzuconego formularza trafia do modułu Leady (NIE do Trybu dzwonienia,
+-- który jest zarezerwowany dla prospectingu). Flaga pozwala filtrować i wizualnie
+-- odróżnić takie leady.
+alter table deals add column if not exists incomplete boolean not null default false;
+create index if not exists idx_deals_incomplete on deals (owner) where incomplete = true;
+
 -- ── §2/§9. USTAWIENIA GLOBALNE (fallback dla per-form) + próg porzucenia ──
 alter table app_settings add column if not exists form_abandon_minutes int not null default 30;
 alter table app_settings add column if not exists meta_pixel_id text;
