@@ -1,12 +1,12 @@
 // app/api/cron/abandon-sessions/route.ts — §2. Przejście started → abandoned.
 // Chronione sekretem (CRON_SECRET). Klient NIGDY nie robi tego przejścia — tylko ten job.
 //
-// Harmonogram: Vercel Cron na planie Hobby dopuszcza tylko zadania RAZ DZIENNIE,
-// więc vercel.json wywołuje ten endpoint raz na dobę. Aby uzyskać docelową
-// kadencję ~15 min (§2), można albo przejść na plan Vercel Pro i ustawić
-// "*/15 * * * *", albo wywoływać ten sam URL zewnętrznym schedulerem
-// (np. cron-job.org / GitHub Actions) z nagłówkiem Authorization: Bearer <CRON_SECRET>.
-// Sam endpoint jest bezstanowy i można go bezpiecznie wołać dowolnie często.
+// Harmonogram: plan Vercel Hobby dopuszcza tylko zadania cron RAZ DZIENNIE,
+// dlatego kadencję ~15 min (§2) realizuje GitHub Actions
+// (.github/workflows/abandon-sessions.yml), wołając ten URL z nagłówkiem
+// Authorization: Bearer <CRON_SECRET>. Endpoint jest bezstanowy i idempotentny —
+// można go bezpiecznie wołać dowolnie często (na Vercel Pro wystarczy dodać
+// wpis "*/15 * * * *" w vercel.json zamiast Actions).
 //
 // Dodatkowo (§6): dla świeżo porzuconych sesji z e-mailem/telefonem tworzy leada
 // niekompletnego przez wspólną ścieżkę createLeadFromForm (moduł Leady, NIE Tryb
