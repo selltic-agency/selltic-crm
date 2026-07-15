@@ -4,7 +4,7 @@
 // Autozapis schematu (debounce 800ms); Publikuj/Aktualizuj kopiuje schema → published.
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Reorder, useDragControls } from "framer-motion";
 import {
@@ -75,13 +75,20 @@ import {
   hasValidationRules,
   defaultThankYouEmail,
   randomSlug,
+  BUILTIN_LEAD_PROPERTIES,
+  type FieldMapping,
 } from "@/lib/forms";
+import { compatibleTargetTypes, isCompatible, BUILTIN_TARGET_TYPE, type MapTargetType } from "@/lib/leadMapping";
+import { leadTitleTokens } from "@/lib/leadTitle";
+import { normalizeOptions, propLabel } from "@/lib/properties";
+import type { PropertyDef } from "@/lib/types";
 import { COUNTRY_PREFIXES, DEFAULT_PHONE_PREFIX } from "@/lib/phone";
 import FormRenderer from "@/components/FormRenderer";
 import ShareModal from "../share-modal";
 import { useToast } from "@/components/Toast";
 import FormStats from "@/components/forms/FormStats";
 import FormSubmissions from "@/components/forms/FormSubmissions";
+import MetaSettings from "@/components/forms/MetaSettings";
 import { BarChart3, Inbox as InboxIcon, PencilRuler } from "lucide-react";
 
 // ── Upload obrazków (bucket Supabase Storage) ────────────────────────────
@@ -132,6 +139,9 @@ const FIELD_TYPE_MENU: { type: FieldType; label: string }[] = [
 type SaveState = "idle" | "saving" | "saved";
 type EditorTab = "step" | "settings" | "appearance";
 
+// §7b — definicje właściwości (custom fields) dostępne do mapowania pól.
+const PropDefsCtx = createContext<PropertyDef[]>([]);
+
 export default function FormEditorPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -161,6 +171,14 @@ export default function FormEditorPage() {
   const [editorTab, setEditorTab] = useState<EditorTab>("step");
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
+  // §7b — właściwości CRM do mapowania pól (aktywne + zarchiwizowane, by ostrzec
+  // o usuniętych). Pobierane raz, współdzielone przez kontekst.
+  const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
+  useEffect(() => {
+    supabase.from("property_defs").select("*").order("position", { ascending: true }).then(({ data }) => {
+      setPropDefs((data as PropertyDef[]) ?? []);
+    });
+  }, [supabase]);
 
   // Undo/redo (item 7): stosy migawek JSON schematu. Migawka jest robiona po
   // krótkim debounce, więc jedna edycja = jeden krok cofnięcia (nie per znak).
@@ -431,6 +449,7 @@ export default function FormEditorPage() {
     : "minmax(190px, 1.7fr) minmax(0, 5fr) minmax(300px, 2.9fr)";
 
   return (
+    <PropDefsCtx.Provider value={propDefs}>
     <div
       style={{
         display: "flex",
@@ -808,6 +827,7 @@ export default function FormEditorPage() {
 
       {shareOpen && slug && <ShareModal slug={slug} title={schema.title} onClose={() => setShareOpen(false)} />}
     </div>
+    </PropDefsCtx.Provider>
   );
 }
 
@@ -1305,19 +1325,126 @@ function FieldEditor({
 
       {isChoice(field.type) && <OptionsEditor field={field} steps={steps} selfStepId={selfStepId} onPatch={onPatch} />}
 
-      <Field label="Mapowanie do kontaktu">
-        <select
-          value={field.map ?? ""}
-          onChange={(e) => onPatch({ map: (e.target.value || undefined) as FormField["map"] })}
-          style={inputStyle}
-        >
-          <option value="">Brak</option>
-          <option value="name">Imię / nazwa</option>
-          <option value="email">E-mail</option>
-          <option value="phone">Telefon</option>
-        </select>
-      </Field>
+      <PropertyMappingEditor field={field} onPatch={onPatch} />
     </Reorder.Item>
+  );
+}
+
+// §7b — mapowanie pola na właściwość CRM (wbudowaną lub własną). Oferuje tylko
+// właściwości ZGODNE typem (multi_select nie zmapuje się na number). Pola wyboru
+// mapowane na listy dostają mapowanie opcja-po-opcji z walidacją.
+function PropertyMappingEditor({ field, onPatch }: { field: FormField; onPatch: (patch: Partial<FormField>) => void }) {
+  const propDefs = useContext(PropDefsCtx);
+
+  // Zbuduj listę zgodnych celów (wbudowane + własne aktywne).
+  const targets = useMemo(() => {
+    const builtin = BUILTIN_LEAD_PROPERTIES
+      .filter((p) => isCompatible(field.type, BUILTIN_TARGET_TYPE[p.key]))
+      .map((p) => ({ value: `builtin:${p.key}`, label: p.label, group: "Wbudowane", type: BUILTIN_TARGET_TYPE[p.key] }));
+    const compatTypes = new Set(compatibleTargetTypes(field.type) as MapTargetType[]);
+    const custom = propDefs
+      .filter((d) => !d.archived_at && compatTypes.has(d.type as MapTargetType))
+      .map((d) => ({ value: `custom:${d.key}`, label: propLabel(d), group: "Własne", type: d.type as MapTargetType }));
+    return [...builtin, ...custom];
+  }, [field.type, propDefs]);
+
+  // Bieżąca wartość: nowe mapping albo legacy map (name/email/phone → builtin).
+  const current: string = field.mapping
+    ? `${field.mapping.target}:${field.mapping.property}`
+    : field.map
+    ? `builtin:${field.map}`
+    : "";
+
+  // Czy wybrana właściwość została usunięta (mapping wskazuje na nieistniejącą)?
+  const deletedCustom =
+    field.mapping?.target === "custom" && !propDefs.some((d) => d.key === field.mapping!.property && !d.archived_at);
+
+  function onSelect(value: string) {
+    if (!value) {
+      onPatch({ mapping: undefined, map: undefined });
+      return;
+    }
+    const [target, property] = value.split(":") as ["builtin" | "custom", string];
+    const mapping: FieldMapping = { target, property };
+    // Zachowaj legacy `map` dla wbudowanych pól kontaktu (spójność z heurystyką).
+    const legacy = target === "builtin" && (property === "name" || property === "email" || property === "phone")
+      ? (property as FormField["map"]) : undefined;
+    onPatch({ mapping, map: legacy });
+  }
+
+  // Docelowy typ wybranej właściwości (do mapowania opcji).
+  const selectedType: MapTargetType | null = field.mapping
+    ? field.mapping.target === "builtin"
+      ? BUILTIN_TARGET_TYPE[field.mapping.property] ?? null
+      : (propDefs.find((d) => d.key === field.mapping!.property)?.type as MapTargetType) ?? null
+    : null;
+
+  const needsOptionMap = isChoice(field.type) && (selectedType === "select" || selectedType === "multi_select");
+  const targetProp = field.mapping?.target === "custom"
+    ? propDefs.find((d) => d.key === field.mapping!.property)
+    : null;
+  const targetOptions = targetProp ? normalizeOptions(targetProp.options) : [];
+
+  return (
+    <Field label="Mapowanie do właściwości CRM">
+      <select value={current} onChange={(e) => onSelect(e.target.value)} style={inputStyle}>
+        <option value="">Brak (odpowiedź zapisana tylko w zgłoszeniu)</option>
+        <optgroup label="Wbudowane">
+          {targets.filter((t) => t.group === "Wbudowane").map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </optgroup>
+        {targets.some((t) => t.group === "Własne") && (
+          <optgroup label="Własne właściwości">
+            {targets.filter((t) => t.group === "Własne").map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+
+      {deletedCustom && (
+        <p style={{ fontSize: 12.5, color: tokens.warning, margin: "6px 0 0", fontWeight: 600 }}>
+          ⚠ Zmapowana właściwość została usunięta w Ustawieniach — wybierz inną lub usuń mapowanie.
+        </p>
+      )}
+
+      {/* Mapowanie opcja-po-opcji (wybór → lista). */}
+      {needsOptionMap && targetProp && (
+        <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: tokens.muted }}>Mapowanie opcji</span>
+          {(field.options ?? []).map((o) => {
+            const mappedKey = field.mapping?.optionMap?.[o.label] ?? "";
+            return (
+              <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{o.label}</span>
+                <span style={{ color: tokens.muted }}>→</span>
+                <select
+                  value={mappedKey}
+                  onChange={(e) => {
+                    const optionMap = { ...(field.mapping?.optionMap ?? {}) };
+                    if (e.target.value) optionMap[o.label] = e.target.value;
+                    else delete optionMap[o.label];
+                    onPatch({ mapping: { ...field.mapping!, optionMap } });
+                  }}
+                  style={{ ...inputStyle, flex: 1, width: "auto" }}
+                >
+                  <option value="">—</option>
+                  {targetOptions.map((to) => (
+                    <option key={to.key} value={to.key}>{to.label}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+          {(field.options ?? []).some((o) => !field.mapping?.optionMap?.[o.label]) && (
+            <p style={{ fontSize: 12.5, color: tokens.warning, margin: "2px 0 0", fontWeight: 600 }}>
+              ⚠ Nie wszystkie opcje są zmapowane — niezmapowane zostaną pominięte przy tworzeniu leadu.
+            </p>
+          )}
+        </div>
+      )}
+    </Field>
   );
 }
 
@@ -1743,9 +1870,51 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
     setSendingTest(false);
   }
 
+  // §7 — pola formularza + ostrzeżenie o braku mapowania kontaktu.
+  const allFields = useMemo(() => schema.steps.flatMap((s) => stepFields(s)), [schema.steps]);
+  const hasContactMap = allFields.some(
+    (f) => f.type === "email" || f.type === "phone" || f.map === "email" || f.map === "phone" ||
+      f.mapping?.property === "email" || f.mapping?.property === "phone"
+  );
+  const leadTitle = settings.defaultLeadTitle ?? "";
+  const tokens_ = useMemo(() => leadTitleTokens(allFields), [allFields]);
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <span style={paneTitle}>Ustawienia formularza</span>
+
+      {!hasContactMap && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "#FDF1E3", border: `1px solid ${tokens.warning}`, color: "#8a5a1a", fontSize: 13, fontWeight: 600 }}>
+          <AlertTriangle size={15} />
+          Żadne pole nie jest zmapowane na e-mail ani telefon — ten formularz nie utworzy kontaktowalnego leadu.
+        </div>
+      )}
+
+      {/* §7a — szablon domyślnego tytułu leadu */}
+      <Field label="Domyślny tytuł leadu (szablon, opcjonalnie)">
+        <input
+          value={leadTitle}
+          onChange={(e) => setSettings({ defaultLeadTitle: e.target.value })}
+          placeholder="np. {{field:...}} — {{form:title}}"
+          style={inputStyle}
+        />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          {tokens_.map((t) => (
+            <button
+              key={t.token}
+              type="button"
+              onClick={() => setSettings({ defaultLeadTitle: (leadTitle + " " + t.token).trim() })}
+              title={t.label}
+              style={{ fontSize: 12, padding: "4px 8px", borderRadius: 7, border: `1px solid ${tokens.border}`, background: "#fff", cursor: "pointer", color: tokens.accent }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <p style={{ fontSize: 12.5, color: tokens.muted, margin: "6px 0 0" }}>
+          Puste = domyślne zachowanie (imię/nazwa). Nierozwiązane pola degradują się łagodnie.
+        </p>
+      </Field>
 
       <Field label="Przekierowanie po wysłaniu (URL, opcjonalnie)">
         <input
@@ -1832,6 +2001,12 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
             </p>
           </>
         )}
+      </div>
+
+      {/* §9 — Meta Conversions (Pixel + CAPI) + webhook */}
+      <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 14, marginTop: 4 }}>
+        <span style={{ ...paneTitle, display: "block", marginBottom: 10 }}>Meta Conversions & webhook</span>
+        <MetaSettings formId={formId} />
       </div>
     </div>
   );
