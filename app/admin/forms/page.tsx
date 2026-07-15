@@ -1,240 +1,415 @@
-// app/admin/forms/page.tsx — lista formularzy (siatka kart).
+// app/admin/forms/page.tsx — §5. Lista formularzy jako sortowalna TABELA
+// (spójna gęstość/sortowanie z listą Leadów). Metryki pobierane jednym
+// złączonym zapytaniem z widoku form_metrics (bez N+1). Zakładki Active/Archive,
+// akcje Archiwizuj/Przywróć, menu ⋯ (bez „Usuń formularza”).
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, FileText, ExternalLink, Share2 } from "lucide-react";
+import {
+  Plus, FileText, ChevronUp, ChevronDown, MoreHorizontal, Pencil, Link2,
+  ExternalLink, Copy, BarChart3, Archive, RotateCcw, Inbox,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, primaryButton } from "@/lib/ui";
-import { blankForm, randomSlug, type FormRow } from "@/lib/forms";
+import { tokens, primaryButton, formatRelative } from "@/lib/ui";
+import { blankForm, randomSlug } from "@/lib/forms";
 import ShareModal from "./share-modal";
+import { useToast } from "@/components/Toast";
 
-type FormCard = Pick<FormRow, "id" | "title" | "slug" | "status" | "created_at">;
+type MetricsRow = {
+  id: string;
+  title: string;
+  slug: string | null;
+  status: string;
+  archived_at: string | null;
+  created_at: string;
+  views: number;
+  unique_users: number;
+  completions: number;
+  abandoned: number;
+  last_submission: string | null;
+  conversion_rate: number | null;
+};
+
+type SortKey = "title" | "status" | "views" | "unique_users" | "completions" | "abandoned" | "conversion_rate" | "last_submission";
+type Sort = { key: SortKey; dir: "asc" | "desc" };
 
 export default function FormsPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
-  const [forms, setForms] = useState<FormCard[]>([]);
+  const toast = useToast();
+  const [rows, setRows] = useState<MetricsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [shareForm, setShareForm] = useState<FormCard | null>(null);
+  const [tab, setTab] = useState<"active" | "archive">("active");
+  const [sort, setSort] = useState<Sort>({ key: "last_submission", dir: "desc" });
+  const [shareForm, setShareForm] = useState<{ slug: string; title: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("forms")
-      .select("id, title, slug, status, created_at")
+    // Pojedyncze zapytanie do widoku metryk (bez N+1 na wiersz).
+    const { data, error } = await supabase
+      .from("form_metrics")
+      .select("*")
       .order("created_at", { ascending: false });
-    setForms((data as FormCard[]) ?? []);
+    if (error) {
+      // Widok niedostępny (przed migracją) — fallback do surowej listy formularzy.
+      const { data: forms } = await supabase
+        .from("forms")
+        .select("id, title, slug, status, archived_at, created_at")
+        .order("created_at", { ascending: false });
+      setRows(((forms as MetricsRow[]) ?? []).map((f) => ({
+        ...f, views: 0, unique_users: 0, completions: 0, abandoned: 0, last_submission: null, conversion_rate: null,
+      })));
+    } else {
+      setRows((data as MetricsRow[]) ?? []);
+    }
     setLoading(false);
   }, [supabase]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(
+    () => rows.filter((r) => (tab === "archive" ? !!r.archived_at : !r.archived_at)),
+    [rows, tab]
+  );
+
+  const sorted = useMemo(() => {
+    const val = (r: MetricsRow): string | number => {
+      switch (sort.key) {
+        case "title": return (r.title || "").toLowerCase();
+        case "status": return statusRank(r);
+        case "last_submission": return r.last_submission ? new Date(r.last_submission).getTime() : 0;
+        case "conversion_rate": return r.conversion_rate ?? -1;
+        default: return r[sort.key] ?? 0;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (av === bv) return 0;
+      const res = av > bv ? 1 : -1;
+      return sort.dir === "asc" ? res : -res;
+    });
+  }, [filtered, sort]);
+
+  function toggleSort(key: SortKey) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
+  }
 
   async function newForm() {
     if (creating) return;
     setCreating(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setCreating(false);
-      return;
-    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setCreating(false); return; }
     const schema = blankForm();
     const { data, error } = await supabase
       .from("forms")
-      .insert({
-        owner: user.id,
-        title: schema.title,
-        slug: randomSlug(),
-        schema,
-        status: "draft",
-      })
-      .select("id")
-      .single();
+      .insert({ owner: user.id, title: schema.title, slug: randomSlug(), schema, status: "draft" })
+      .select("id").single();
     setCreating(false);
     if (!error && data) router.push(`/admin/forms/${data.id}`);
   }
 
-  async function remove(id: string) {
-    if (!confirm("Usunąć ten formularz? Tej operacji nie można cofnąć.")) return;
-    const snapshot = forms;
-    setForms((list) => list.filter((f) => f.id !== id));
-    const { error } = await supabase.from("forms").delete().eq("id", id);
-    if (error) setForms(snapshot);
+  async function duplicate(id: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: src } = await supabase.from("forms").select("title, schema").eq("id", id).single();
+    if (!src) return;
+    const { error } = await supabase.from("forms").insert({
+      owner: user.id, title: `${src.title} (kopia)`, slug: randomSlug(), schema: src.schema, status: "draft",
+    });
+    if (!error) { toast.success("Zduplikowano formularz"); load(); }
+  }
+
+  async function archive(id: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    setRows((list) => list.map((r) => (r.id === id ? { ...r, archived_at: new Date().toISOString() } : r)));
+    const { error } = await supabase.from("forms").update({ archived_at: new Date().toISOString(), archived_by: user?.id ?? null }).eq("id", id);
+    if (error) { toast.error("Nie udało się zarchiwizować"); load(); }
+    else toast.success("Formularz zarchiwizowany");
+  }
+
+  async function restore(id: string) {
+    setRows((list) => list.map((r) => (r.id === id ? { ...r, archived_at: null } : r)));
+    const { error } = await supabase.from("forms").update({ archived_at: null, archived_by: null }).eq("id", id);
+    if (error) { toast.error("Nie udało się przywrócić"); load(); }
+    else toast.success("Formularz przywrócony");
+  }
+
+  function copyLink(slug: string | null) {
+    if (!slug) return;
+    const url = `${window.location.origin}/f/${slug}`;
+    navigator.clipboard?.writeText(url).then(() => toast.success("Skopiowano link"));
   }
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Formularze</h1>
-        <button
-          onClick={newForm}
-          disabled={creating}
-          style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}
-        >
+        <button onClick={newForm} disabled={creating} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
           <Plus size={16} />
           {creating ? "Tworzenie…" : "Nowy formularz"}
         </button>
       </div>
 
+      {/* Zakładki Active / Archive */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+        {(["active", "archive"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              padding: "8px 16px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
+              background: tab === t ? tokens.accentSoft : "transparent",
+              color: tab === t ? tokens.accent : tokens.muted,
+            }}
+          >
+            {t === "active" ? "Aktywne" : "Archiwum"}
+            <span style={{ marginLeft: 8, opacity: 0.7 }}>
+              {rows.filter((r) => (t === "archive" ? r.archived_at : !r.archived_at)).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
-      ) : forms.length === 0 ? (
-        <div
-          style={{
-            background: tokens.card,
-            border: `1px dashed ${tokens.border}`,
-            borderRadius: tokens.radius,
-            padding: 40,
-            textAlign: "center",
-            color: tokens.muted,
-          }}
-        >
-          <FileText size={28} style={{ opacity: 0.5 }} />
-          <p style={{ fontSize: 14, margin: "10px 0 0" }}>
-            Brak formularzy. Utwórz pierwszy, klikając „Nowy formularz”.
-          </p>
-        </div>
+      ) : sorted.length === 0 ? (
+        <EmptyState tab={tab} />
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-            gap: 14,
-          }}
-        >
-          {forms.map((f) => (
-            <div
-              key={f.id}
-              onClick={() => router.push(`/admin/forms/${f.id}`)}
-              style={{
-                background: tokens.card,
-                border: `1px solid ${tokens.border}`,
-                borderRadius: tokens.radius,
-                padding: 18,
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-                minHeight: 130,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                <span
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 9,
-                    background: tokens.accentSoft,
-                    color: tokens.accent,
-                    display: "grid",
-                    placeItems: "center",
-                  }}
-                >
-                  <FileText size={18} />
-                </span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    remove(f.id);
-                  }}
-                  aria-label="Usuń"
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    border: `1px solid ${tokens.border}`,
-                    background: "#fff",
-                    display: "grid",
-                    placeItems: "center",
-                    cursor: "pointer",
-                  }}
-                >
-                  <Trash2 size={14} color={tokens.muted} />
-                </button>
-              </div>
-
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>{f.title || "Bez tytułu"}</div>
-                <div style={{ fontSize: 12, color: tokens.muted, marginTop: 2 }}>
-                  {new Date(f.created_at).toLocaleDateString("pl-PL", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                  })}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    padding: "3px 10px",
-                    borderRadius: 999,
-                    background: f.status === "published" ? "#E7F7EE" : tokens.bg,
-                    color: f.status === "published" ? tokens.success : tokens.muted,
-                  }}
-                >
-                  {f.status === "published" ? "Opublikowany" : "Szkic"}
-                </span>
-                {f.status === "published" && f.slug && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShareForm(f);
-                      }}
-                      aria-label="Udostępnij / kod osadzenia"
-                      title="Udostępnij"
-                      style={{
-                        border: "none",
-                        background: "none",
-                        padding: 0,
-                        cursor: "pointer",
-                        color: tokens.muted,
-                        display: "grid",
-                        placeItems: "center",
-                      }}
-                    >
-                      <Share2 size={15} />
-                    </button>
-                    <a
-                      href={`/f/${f.slug}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ color: tokens.muted, display: "grid", placeItems: "center" }}
-                      aria-label="Otwórz publiczny formularz"
-                    >
-                      <ExternalLink size={15} />
-                    </a>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "visible" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
+                  <SortHeader label="Nazwa" k="title" sort={sort} onSort={toggleSort} />
+                  <SortHeader label="Status" k="status" sort={sort} onSort={toggleSort} />
+                  <SortHeader label="Wyświetlenia" k="views" sort={sort} onSort={toggleSort} num />
+                  <SortHeader label="Unikalni" k="unique_users" sort={sort} onSort={toggleSort} num />
+                  <SortHeader label="Zgłoszenia" k="completions" sort={sort} onSort={toggleSort} num />
+                  <SortHeader label="Porzucone" k="abandoned" sort={sort} onSort={toggleSort} num />
+                  <SortHeader label="Konwersja" k="conversion_rate" sort={sort} onSort={toggleSort} num />
+                  <SortHeader label="Ostatnie" k="last_submission" sort={sort} onSort={toggleSort} />
+                  <th style={{ width: 44 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((r) => (
+                  <Row
+                    key={r.id}
+                    r={r}
+                    onOpen={() => router.push(`/admin/forms/${r.id}`)}
+                    onStats={() => router.push(`/admin/forms/${r.id}?tab=stats`)}
+                    onShare={() => r.slug && setShareForm({ slug: r.slug, title: r.title })}
+                    onCopy={() => copyLink(r.slug)}
+                    onDuplicate={() => duplicate(r.id)}
+                    onArchive={() => archive(r.id)}
+                    onRestore={() => restore(r.id)}
+                    onSubmissions={() => router.push(`/admin/forms/${r.id}?tab=submissions`)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {shareForm?.slug && (
-        <ShareModal
-          slug={shareForm.slug}
-          title={shareForm.title}
-          onClose={() => setShareForm(null)}
-        />
+        <ShareModal slug={shareForm.slug} title={shareForm.title} onClose={() => setShareForm(null)} />
       )}
     </div>
   );
 }
+
+function statusRank(r: MetricsRow): number {
+  if (r.archived_at) return 2;
+  return r.status === "published" ? 1 : 0;
+}
+
+function StatusBadge({ r }: { r: MetricsRow }) {
+  const archived = !!r.archived_at;
+  const published = r.status === "published";
+  const label = archived ? "Archiwum" : published ? "Opublikowany" : "Szkic";
+  const bg = archived ? tokens.bg : published ? "#E7F7EE" : tokens.bg;
+  const color = archived ? tokens.muted : published ? tokens.success : tokens.muted;
+  return (
+    <span style={{ fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 999, background: bg, color }}>
+      {label}
+    </span>
+  );
+}
+
+// Komórka liczbowa: 0 wyświetleń → kreski (świeży formularz nie ma czytać się
+// jak porażka). Reszta pokazuje liczbę.
+function numCell(value: number, hasViews: boolean): React.ReactNode {
+  if (!hasViews) return <span style={{ color: tokens.muted }}>—</span>;
+  return value.toLocaleString("pl-PL");
+}
+
+function Row({
+  r, onOpen, onStats, onShare, onCopy, onDuplicate, onArchive, onRestore, onSubmissions,
+}: {
+  r: MetricsRow;
+  onOpen: () => void; onStats: () => void; onShare: () => void; onCopy: () => void;
+  onDuplicate: () => void; onArchive: () => void; onRestore: () => void; onSubmissions: () => void;
+}) {
+  const archived = !!r.archived_at;
+  const hasViews = r.views > 0;
+  const muted = archived ? { opacity: 0.6 } : {};
+
+  return (
+    <tr
+      style={{ borderBottom: `1px solid ${tokens.border}`, ...muted }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <td style={{ ...tdStyle, cursor: "pointer" }} onClick={onOpen}>
+        <div style={{ fontWeight: 600 }}>{r.title || "Bez tytułu"}</div>
+        {r.slug && <div style={{ fontSize: 12, color: tokens.muted, marginTop: 2 }}>/{r.slug}</div>}
+      </td>
+      <td style={tdStyle}><StatusBadge r={r} /></td>
+      <td style={{ ...tdStyle, textAlign: "right" }}>{numCell(r.views, hasViews)}</td>
+      <td style={{ ...tdStyle, textAlign: "right" }}>{numCell(r.unique_users, hasViews)}</td>
+      <td style={{ ...tdStyle, textAlign: "right" }}>{numCell(r.completions, hasViews)}</td>
+      <td style={{ ...tdStyle, textAlign: "right" }}>{numCell(r.abandoned, hasViews)}</td>
+      <td style={{ ...tdStyle, textAlign: "right" }}>
+        {hasViews && r.conversion_rate != null ? <ConversionBar pct={r.conversion_rate} /> : <span style={{ color: tokens.muted }}>—</span>}
+      </td>
+      <td style={tdStyle}>
+        {r.last_submission ? formatRelative(r.last_submission) : <span style={{ color: tokens.muted }}>—</span>}
+      </td>
+      <td style={{ ...tdStyle, textAlign: "center", overflow: "visible" }} onClick={(e) => e.stopPropagation()}>
+        <RowMenu
+          archived={archived}
+          hasSlug={!!r.slug}
+          slug={r.slug}
+          onOpen={onOpen} onStats={onStats} onShare={onShare} onCopy={onCopy}
+          onDuplicate={onDuplicate} onArchive={onArchive} onRestore={onRestore} onSubmissions={onSubmissions}
+        />
+      </td>
+    </tr>
+  );
+}
+
+function ConversionBar({ pct }: { pct: number }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{pct.toFixed(1)}%</span>
+      <span style={{ width: 44, height: 6, borderRadius: 999, background: tokens.border, overflow: "hidden", display: "inline-block" }}>
+        <span style={{ display: "block", height: "100%", width: `${clamped}%`, background: tokens.accent }} />
+      </span>
+    </div>
+  );
+}
+
+function RowMenu({
+  archived, hasSlug, slug, onOpen, onStats, onShare, onCopy, onDuplicate, onArchive, onRestore, onSubmissions,
+}: {
+  archived: boolean; hasSlug: boolean; slug: string | null;
+  onOpen: () => void; onStats: () => void; onShare: () => void; onCopy: () => void;
+  onDuplicate: () => void; onArchive: () => void; onRestore: () => void; onSubmissions: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const item = (icon: React.ReactNode, label: string, action: () => void, danger = false) => (
+    <button
+      onClick={() => { setOpen(false); action(); }}
+      style={{
+        display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+        padding: "9px 12px", border: "none", background: "transparent", cursor: "pointer",
+        fontSize: 13, color: danger ? tokens.danger : tokens.text,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      {icon}{label}
+    </button>
+  );
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Więcej akcji"
+        style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
+      >
+        <MoreHorizontal size={16} color={tokens.muted} />
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute", right: 0, top: 36, zIndex: 30, width: 200,
+            background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 12,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.12)", padding: 4, overflow: "hidden",
+          }}
+        >
+          {archived ? (
+            <>
+              {item(<Inbox size={15} />, "Zobacz zgłoszenia", onSubmissions)}
+              {item(<RotateCcw size={15} />, "Przywróć", onRestore)}
+            </>
+          ) : (
+            <>
+              {item(<Pencil size={15} />, "Edytuj", onOpen)}
+              {hasSlug && item(<Link2 size={15} />, "Kopiuj link", onCopy)}
+              {hasSlug && item(<ExternalLink size={15} />, "Podgląd", () => slug && window.open(`/f/${slug}`, "_blank"))}
+              {item(<Copy size={15} />, "Duplikuj", onDuplicate)}
+              {item(<BarChart3 size={15} />, "Statystyki", onStats)}
+              {item(<Archive size={15} />, "Archiwizuj", onArchive, true)}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ tab }: { tab: "active" | "archive" }) {
+  return (
+    <div style={{ background: tokens.card, border: `1px dashed ${tokens.border}`, borderRadius: tokens.radius, padding: 40, textAlign: "center", color: tokens.muted }}>
+      <FileText size={28} style={{ opacity: 0.5 }} />
+      <p style={{ fontSize: 14, margin: "10px 0 0" }}>
+        {tab === "archive" ? "Brak zarchiwizowanych formularzy." : "Brak formularzy. Utwórz pierwszy, klikając „Nowy formularz”."}
+      </p>
+    </div>
+  );
+}
+
+function SortHeader({
+  label, k, sort, onSort, num,
+}: {
+  label: string; k: SortKey; sort: Sort; onSort: (k: SortKey) => void; num?: boolean;
+}) {
+  return (
+    <th
+      onClick={() => onSort(k)}
+      style={{
+        textAlign: num ? "right" : "left", padding: "12px 16px", fontSize: 12, fontWeight: 700,
+        color: tokens.muted, cursor: "pointer", whiteSpace: "nowrap", userSelect: "none",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: num ? "flex-end" : "flex-start" }}>
+        {label.toUpperCase()}
+        {sort.key === k && (sort.dir === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+      </div>
+    </th>
+  );
+}
+
+const tdStyle: React.CSSProperties = {
+  padding: "14px 16px",
+  fontSize: 14,
+  color: tokens.text,
+  whiteSpace: "nowrap",
+};

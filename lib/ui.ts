@@ -31,6 +31,24 @@ export function formatDateTime(iso: string | null | undefined): string {
   });
 }
 
+// Data względna ("2 godziny temu", "wczoraj", "3 dni temu"). Fallback do daty.
+export function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diffMs = Date.now() - d.getTime();
+  const sec = Math.round(diffMs / 1000);
+  const min = Math.round(sec / 60);
+  const hr = Math.round(min / 60);
+  const day = Math.round(hr / 24);
+  if (sec < 45) return "przed chwilą";
+  if (min < 60) return `${min} min temu`;
+  if (hr < 24) return `${hr} godz. temu`;
+  if (day === 1) return "wczoraj";
+  if (day < 30) return `${day} dni temu`;
+  return d.toLocaleDateString("pl-PL", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 // Kwoty w PLN.
 export function formatPLN(value: number): string {
   return `${Number(value || 0).toLocaleString("pl-PL")} zł`;
