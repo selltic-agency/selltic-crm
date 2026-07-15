@@ -73,8 +73,38 @@ export type FormField = {
   validation?: FieldValidation;
   phonePrefix?: string; // domyślny prefiks kraju dla pola „phone”
   options?: StepOption[];
-  map?: "name" | "email" | "phone"; // mapowanie odpowiedzi → kontakt (Faza 5)
+  map?: "name" | "email" | "phone"; // LEGACY: proste mapowanie odpowiedzi → kontakt (Faza 5)
+  // §7b: jawne, konfigurowalne mapowanie pola → właściwość CRM (wbudowana lub
+  // własna z property_defs). Zastępuje heurystykę. Snapshotowane wraz ze
+  // schematem, więc usunięcie właściwości nie psuje istniejących formularzy.
+  mapping?: FieldMapping;
 };
+
+// §7b. Mapowanie pola formularza na właściwość leadu/kontaktu.
+export type FieldMapping = {
+  // Klucz właściwości: wbudowanej (name|email|phone|company|value) albo własnej
+  // (klucz z property_defs).
+  property: string;
+  target: "builtin" | "custom";
+  // Dla pól wyboru mapowanych na listę (select/multi_select): mapowanie
+  // opcja-po-opcji (etykieta opcji formularza → klucz opcji właściwości).
+  optionMap?: Record<string, string>;
+};
+
+// §7b. Wbudowane właściwości leadu, na które można mapować pola.
+export type BuiltinLeadProperty = {
+  key: "name" | "email" | "phone" | "company" | "value";
+  label: string;
+  type: "text" | "email" | "phone" | "number";
+};
+
+export const BUILTIN_LEAD_PROPERTIES: BuiltinLeadProperty[] = [
+  { key: "name", label: "Imię / nazwa", type: "text" },
+  { key: "email", label: "E-mail", type: "email" },
+  { key: "phone", label: "Telefon", type: "phone" },
+  { key: "company", label: "Firma", type: "text" },
+  { key: "value", label: "Wartość (zł)", type: "number" },
+];
 
 export type Step = {
   id: string;
@@ -120,6 +150,9 @@ export type FormSettings = {
   redirectUrl?: string; // pusty = domyślny ekran „dziękujemy”
   extraLink?: string; // np. link do konsultacji / VSL, wstawiany przez {{extra_link}}
   thankYouEmail?: ThankYouEmail;
+  // §7a. Szablon domyślnego tytułu leadu, np. „{{field:<id>}} — {{form:title}}”.
+  // Pusty → zachowanie domyślne (imię/nazwa z ekstrakcji). Snapshotowany ze schematem.
+  defaultLeadTitle?: string;
 };
 
 export type FormSchema = {
