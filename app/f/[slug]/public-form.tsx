@@ -80,17 +80,15 @@ export default function PublicForm({ formId, schema, embed, meta }: Props) {
   }, [embed, formId]);
 
   // ── Callbacki instrumentacji ──
-  const onStepView = useCallback(
-    (stepIndex: number, total: number) => {
-      currentStepRef.current = stepIndex;
-      trackerRef.current?.stepView(stepIndex, total);
-      pixelTrack("FormStep", { step_index: stepIndex }, undefined, true); // custom
-    },
-    []
-  );
+  const onStepView = useCallback((stepIndex: number, total: number) => {
+    currentStepRef.current = stepIndex;
+    trackerRef.current?.stepView(stepIndex, total);
+  }, []);
 
   const onStepComplete = useCallback((stepIndex: number, answers: Answers, total: number) => {
     trackerRef.current?.stepComplete(stepIndex, answers, total);
+    // §9b — Pixel „FormStep” po ukończeniu kroku, z indeksem kroku.
+    pixelTrack("FormStep", { step_index: stepIndex }, undefined, true); // custom
   }, []);
 
   const onFirstAnswer = useCallback(() => {

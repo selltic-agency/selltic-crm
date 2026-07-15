@@ -15,7 +15,7 @@ import {
   type Step,
 } from "@/lib/forms";
 import { createLeadFromForm } from "@/lib/server/leads";
-import { resolveMetaConfig, fireCapiLead, fireWebhook } from "@/lib/server/meta";
+import { fireCapiLead, fireWebhook } from "@/lib/server/meta";
 
 // Walidacja telefonu po stronie serwera (spójna z frontendem).
 function validatePhones(answers: Record<string, unknown>, steps: Step[]): string | null {
