@@ -72,6 +72,7 @@ import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
 import { normalizeOptions, propLabel, type PropertyView } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
 import { SendEmailModal } from "@/components/email/SendEmailModal";
+import StageSelector from "@/components/StageSelector";
 
 // Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
 // (28+28) trzeba odjąć od 100vh, żeby dwa panele zmieściły się bez
@@ -464,8 +465,6 @@ export default function DealPage() {
   }
 
   const dealName = deal.name || "Bez nazwy";
-  const currentStage = stageMeta(deal.stage);
-
   // ── Kontener strony ────────────────────────────────────────────────────
   // Desktop: 100vh, dwie kolumny, każdy panel przewija się w środku.
   // Wąski ekran: panele jeden pod drugim, przewija się cała strona.
@@ -513,24 +512,44 @@ export default function DealPage() {
               </button>
             )}
           </div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: "10px 0 8px", lineHeight: 1.25 }}>
-            {dealName}
-          </h1>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, margin: "10px 0 10px" }}>
+            <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.25 }}>
+              {dealName}
+              {deal.incomplete && (
+                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#FDF1E3", color: tokens.warning, verticalAlign: "middle" }}>
+                  Niekompletny
+                </span>
+              )}
+            </h1>
+            {/* §8 — akcje główne w przypiętym nagłówku (telefon, e-mail) */}
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              <a
+                href={deal.phone ? `tel:${deal.phone}` : undefined}
+                aria-label="Zadzwoń"
+                title={deal.phone ? "Zadzwoń" : "Brak numeru"}
+                style={{
+                  width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center",
+                  border: `1px solid ${tokens.border}`, background: "#fff",
+                  color: deal.phone ? tokens.accent : tokens.muted, opacity: deal.phone ? 1 : 0.5,
+                  cursor: deal.phone ? "pointer" : "not-allowed", textDecoration: "none",
+                }}
+              >
+                <Phone size={16} />
+              </a>
+              <button
+                onClick={() => setEmailOpen(true)}
+                aria-label="Wyślij e-mail"
+                title="Wyślij e-mail"
+                style={{ width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", border: `1px solid ${tokens.border}`, background: "#fff", color: tokens.accent, cursor: "pointer" }}
+              >
+                <Mail size={16} />
+              </button>
+            </div>
+          </div>
+
+          {/* §8 — selektor etapu (HubSpot-style) w przypiętym nagłówku */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "3px 11px",
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 700,
-                color: "#fff",
-                background: currentStage.color,
-              }}
-            >
-              {currentStage.label}
-            </span>
+            <StageSelector stages={stages} value={deal.stage} onChange={changeStage} />
             {deal.category && <CategoryBadge categoryKey={deal.category} />}
             {(deal.purposes?.length ?? 0) > 0 && <PurposeBadges purposeKeys={deal.purposes} />}
             <span style={{ fontSize: 12.5, color: tokens.muted }}>
@@ -605,32 +624,7 @@ export default function DealPage() {
             style={{ marginBottom: 22 }}
           />
 
-          {/* Etap lejka */}
-          <SectionTitle>Etap</SectionTitle>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 22 }}>
-            {stages.map((s) => {
-              const active = deal.stage === s.key;
-              return (
-                <button
-                  key={s.key}
-                  onClick={() => changeStage(s.key)}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: 999,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    border: `1px solid ${active ? s.color : tokens.border}`,
-                    background: active ? s.color : "#fff",
-                    color: active ? "#fff" : tokens.muted,
-                    transition: `all .15s ${tokens.ease}`,
-                  }}
-                >
-                  {s.label}
-                </button>
-              );
-            })}
-          </div>
+          {/* Etap przeniesiony do przypiętego nagłówka (§8) — brak duplikatu tutaj. */}
 
           {/* Właściwości deala (wbudowane + konfigurowalne) — edycja wsadowa:
               zmień dowolną liczbę pól i zapisz je jednym kliknięciem. Kolejność
