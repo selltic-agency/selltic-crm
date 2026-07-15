@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Reorder, useDragControls } from "framer-motion";
 import {
   ArrowLeft,
@@ -80,6 +80,9 @@ import { COUNTRY_PREFIXES, DEFAULT_PHONE_PREFIX } from "@/lib/phone";
 import FormRenderer from "@/components/FormRenderer";
 import ShareModal from "../share-modal";
 import { useToast } from "@/components/Toast";
+import FormStats from "@/components/forms/FormStats";
+import FormSubmissions from "@/components/forms/FormSubmissions";
+import { BarChart3, Inbox as InboxIcon, PencilRuler } from "lucide-react";
 
 // ── Upload obrazków (bucket Supabase Storage) ────────────────────────────
 const IMAGE_BUCKET = "form-assets";
@@ -137,6 +140,13 @@ export default function FormEditorPage() {
   const toast = useToast();
   const isMobile = useIsMobile(900);
   const [mobilePane, setMobilePane] = useState<"steps" | "editor" | "preview">("editor");
+
+  // Widok najwyższego poziomu: Kreator / Statystyki / Zgłoszenia (§5/§6).
+  const searchParams = useSearchParams();
+  const [view, setView] = useState<"build" | "stats" | "submissions">(() => {
+    const t = searchParams.get("tab");
+    return t === "stats" || t === "submissions" ? t : "build";
+  });
 
   const [schema, setSchema] = useState<FormSchema | null>(null);
   const [published, setPublished] = useState<FormSchema | null>(null);
@@ -492,6 +502,18 @@ export default function FormEditorPage() {
         </button>
       </div>
 
+      {/* ── Przełącznik widoku: Kreator / Statystyki / Zgłoszenia ── */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: `1px solid ${tokens.border}`, paddingBottom: 2 }}>
+        <ViewTab active={view === "build"} onClick={() => setView("build")} icon={PencilRuler} label="Kreator" />
+        <ViewTab active={view === "stats"} onClick={() => setView("stats")} icon={BarChart3} label="Statystyki" />
+        <ViewTab active={view === "submissions"} onClick={() => setView("submissions")} icon={InboxIcon} label="Zgłoszenia" />
+      </div>
+
+      {view === "stats" && <FormStats formId={id} />}
+      {view === "submissions" && <FormSubmissions formId={id} />}
+
+      {view === "build" && (
+      <>
       {/* ── Ostrzeżenie walidacji (item 7) ──────────────────── */}
       {stepsWithIssues.length > 0 && (
         <div
@@ -781,6 +803,8 @@ export default function FormEditorPage() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {shareOpen && slug && <ShareModal slug={slug} title={schema.title} onClose={() => setShareOpen(false)} />}
     </div>
@@ -963,6 +987,28 @@ function TabButton({
       }}
     >
       <Icon size={14} />
+      {label}
+    </button>
+  );
+}
+
+// Zakładka widoku najwyższego poziomu (Kreator / Statystyki / Zgłoszenia).
+function ViewTab({
+  active, onClick, icon: Icon, label,
+}: {
+  active: boolean; onClick: () => void; icon: typeof Type; label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 7, padding: "9px 14px",
+        border: "none", borderBottom: `2px solid ${active ? tokens.accent : "transparent"}`,
+        background: "transparent", cursor: "pointer", fontSize: 14, fontWeight: 600,
+        color: active ? tokens.accent : tokens.muted, marginBottom: -2,
+      }}
+    >
+      <Icon size={15} />
       {label}
     </button>
   );
