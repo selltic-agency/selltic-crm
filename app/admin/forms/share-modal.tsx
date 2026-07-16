@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, Copy, Check, ExternalLink } from "lucide-react";
 import { tokens } from "@/lib/ui";
+import { publicFormUrl } from "@/lib/publicUrl";
 
 type Props = {
   slug: string;
@@ -30,7 +31,9 @@ export default function ShareModal({ slug, title, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const publicUrl = origin ? `${origin}/f/${slug}` : `/f/${slug}`;
+  // Publiczny link: dedykowana subdomena (np. go.selltic-agency.pl/<slug>),
+  // a gdy nie skonfigurowano — <origin>/f/<slug>.
+  const publicUrl = publicFormUrl(slug, origin);
   const iframeId = `selltic-form-${slug}`;
 
   const embedCode = useMemo(

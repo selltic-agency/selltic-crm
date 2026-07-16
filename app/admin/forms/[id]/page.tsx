@@ -52,9 +52,11 @@ import {
   type StepType,
   type FieldType,
   type FormField,
+  type StepOption,
   type FormStatus,
   type FieldValidation,
   type FormSettings,
+  type FormBranding,
   type ThankYouEmail,
   NEXT,
   SUBMIT,
@@ -137,7 +139,11 @@ const FIELD_TYPE_MENU: { type: FieldType; label: string }[] = [
 ];
 
 type SaveState = "idle" | "saving" | "saved";
-type EditorTab = "step" | "settings" | "appearance";
+// Zakres edycji: „form” = ustawienia całego formularza (marka / wygląd / opcje),
+// „step” = ustawienia zaznaczonego kroku / pytania. Rozdzielenie tych dwóch
+// światów to główny cel redesignu — ogólne właściwości formularza są wyraźnie
+// oddzielone od ustawień pojedynczego pytania.
+type FormTab = "brand" | "design" | "settings";
 
 // §7b — definicje właściwości (custom fields) dostępne do mapowania pól.
 const PropDefsCtx = createContext<PropertyDef[]>([]);
@@ -168,7 +174,9 @@ export default function FormEditorPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [editorTab, setEditorTab] = useState<EditorTab>("step");
+  // Zakres edytora + aktywna zakładka ustawień formularza.
+  const [scope, setScope] = useState<"form" | "step">("step");
+  const [formTab, setFormTab] = useState<FormTab>("brand");
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
   // §7b — właściwości CRM do mapowania pól (aktywne + zarchiwizowane, by ostrzec
@@ -321,7 +329,7 @@ export default function FormEditorPage() {
       return { ...s, steps };
     });
     setActiveId(step.id);
-    setEditorTab("step");
+    setScope("step");
   }
 
   function moveStep(stepId: string, dir: -1 | 1) {
@@ -365,7 +373,7 @@ export default function FormEditorPage() {
       return { ...s, steps };
     });
     setActiveId(copy.id);
-    setEditorTab("step");
+    setScope("step");
     toast.success("Krok zduplikowany.");
   }
 
@@ -605,8 +613,58 @@ export default function FormEditorPage() {
             ...(isMobile ? { display: mobilePane === "steps" ? "block" : "none", flex: 1, minHeight: 0 } : {}),
           }}
         >
+          {/* Ustawienia całego formularza — wyraźnie oddzielone od kroków. */}
+          <div style={{ marginBottom: 14 }}>
+            <span style={{ ...paneTitle, display: "block", marginBottom: 8 }}>Formularz</span>
+            <button
+              onClick={() => {
+                setScope("form");
+                if (isMobile) setMobilePane("editor");
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                width: "100%",
+                textAlign: "left",
+                padding: "10px 10px",
+                borderRadius: 10,
+                cursor: "pointer",
+                border: `1px solid ${scope === "form" ? tokens.accent : tokens.border}`,
+                background: scope === "form" ? tokens.accentSoft : "#fff",
+              }}
+            >
+              <span
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  flexShrink: 0,
+                  display: "grid",
+                  placeItems: "center",
+                  background: scope === "form" ? tokens.accent : tokens.bg,
+                  color: scope === "form" ? "#fff" : tokens.muted,
+                  overflow: "hidden",
+                }}
+              >
+                {schema.branding?.logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={schema.branding.logo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <Palette size={15} />
+                )}
+              </span>
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: scope === "form" ? tokens.accent : tokens.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  Marka · wygląd · ustawienia
+                </span>
+                <span style={{ display: "block", fontSize: 11.5, color: tokens.muted }}>Ustawienia ogólne formularza</span>
+              </span>
+            </button>
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={paneTitle}>Kroki</span>
+            <span style={paneTitle}>Kroki i pytania</span>
             <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj krok">
               <Plus size={16} color={tokens.accent} />
             </button>
@@ -672,11 +730,11 @@ export default function FormEditorPage() {
                 step={st}
                 index={i}
                 total={schema.steps.length}
-                active={st.id === active.id}
+                active={scope === "step" && st.id === active.id}
                 issues={stepIssues(st)}
                 onSelect={() => {
                   setActiveId(st.id);
-                  setEditorTab("step");
+                  setScope("step");
                   if (isMobile) setMobilePane("editor");
                 }}
                 onMove={moveStep}
@@ -687,7 +745,8 @@ export default function FormEditorPage() {
           </Reorder.Group>
         </div>
 
-        {/* Środek: edytor kroku / ustawienia / wygląd (zakładki — item 3) */}
+        {/* Środek: ustawienia całego formularza (marka/wygląd/ustawienia) LUB
+            edytor zaznaczonego kroku. Te dwa światy są celowo rozdzielone. */}
         <div
           style={{
             ...pane,
@@ -695,20 +754,21 @@ export default function FormEditorPage() {
             ...(isMobile ? { display: mobilePane === "editor" ? "block" : "none", flex: 1, minHeight: 0 } : {}),
           }}
         >
-          <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-            <TabButton active={editorTab === "step"} onClick={() => setEditorTab("step")} icon={Layers} label="Krok" />
-            <TabButton
-              active={editorTab === "settings"}
-              onClick={() => setEditorTab("settings")}
-              icon={SlidersHorizontal}
-              label="Ustawienia formularza"
-            />
-            <TabButton active={editorTab === "appearance"} onClick={() => setEditorTab("appearance")} icon={Palette} label="Wygląd" />
-          </div>
+          {scope === "form" ? (
+            <>
+              <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+                <TabButton active={formTab === "brand"} onClick={() => setFormTab("brand")} icon={ImageIcon} label="Marka" />
+                <TabButton active={formTab === "design"} onClick={() => setFormTab("design")} icon={Palette} label="Wygląd" />
+                <TabButton active={formTab === "settings"} onClick={() => setFormTab("settings")} icon={SlidersHorizontal} label="Ustawienia" />
+              </div>
 
-          {editorTab === "step" && <StepEditor step={active} steps={schema.steps} onPatch={(patch) => patchStep(active.id, patch)} formId={id} />}
-          {editorTab === "settings" && <SettingsPanel schema={schema} onPatch={patchSchema} formId={id} />}
-          {editorTab === "appearance" && <ThemePanel schema={schema} onPatch={patchSchema} />}
+              {formTab === "brand" && <BrandPanel schema={schema} onPatch={patchSchema} formId={id} />}
+              {formTab === "design" && <ThemePanel schema={schema} onPatch={patchSchema} />}
+              {formTab === "settings" && <SettingsPanel schema={schema} onPatch={patchSchema} formId={id} />}
+            </>
+          ) : (
+            <StepEditor step={active} steps={schema.steps} onPatch={(patch) => patchStep(active.id, patch)} formId={id} />
+          )}
         </div>
 
         {/* Prawy: podgląd */}
@@ -1477,7 +1537,17 @@ function RequiredToggle({ checked, onChange }: { checked: boolean; onChange: (v:
 }
 
 /* ── Pole obrazka: URL LUB upload do Supabase Storage + podgląd ─────────── */
-function ImageField({ value, onChange, formId }: { value: string; onChange: (url: string) => void; formId: string }) {
+function ImageField({
+  value,
+  onChange,
+  formId,
+  label = "Obraz (opcjonalnie)",
+}: {
+  value: string;
+  onChange: (url: string) => void;
+  formId: string;
+  label?: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1510,7 +1580,7 @@ function ImageField({ value, onChange, formId }: { value: string; onChange: (url
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
-      <span style={{ fontSize: 13, fontWeight: 600 }}>Obraz (opcjonalnie)</span>
+      <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <div
           style={{
@@ -1613,7 +1683,7 @@ function OptionsEditor({
 }) {
   const options = field.options ?? [];
 
-  function update(optId: string, patch: Partial<{ label: string; next: string }>) {
+  function update(optId: string, patch: Partial<StepOption>) {
     onPatch({ options: options.map((o) => (o.id === optId ? { ...o, ...patch } : o)) });
   }
   function add() {
@@ -1637,24 +1707,41 @@ function OptionsEditor({
     <div style={{ display: "grid", gap: 8 }}>
       <span style={{ fontSize: 13, fontWeight: 600 }}>Opcje</span>
       {options.map((o, i) => (
-        <div key={o.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
-            <button onClick={() => move(o.id, -1)} disabled={i === 0} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w górę">
-              <ChevronUp size={12} />
-            </button>
-            <button onClick={() => move(o.id, 1)} disabled={i === options.length - 1} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w dół">
-              <ChevronDown size={12} />
+        <div
+          key={o.id}
+          style={{ display: "grid", gap: 6, padding: 8, borderRadius: 10, border: `1px solid ${tokens.border}`, background: "#fff" }}
+        >
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+              <button onClick={() => move(o.id, -1)} disabled={i === 0} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w górę">
+                <ChevronUp size={12} />
+              </button>
+              <button onClick={() => move(o.id, 1)} disabled={i === options.length - 1} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w dół">
+                <ChevronDown size={12} />
+              </button>
+            </div>
+            <input
+              value={o.icon ?? ""}
+              onChange={(e) => update(o.id, { icon: e.target.value || undefined })}
+              placeholder="🙂"
+              aria-label="Ikona (emoji)"
+              title="Ikona opcji (emoji)"
+              style={{ ...inputStyle, width: 46, flexShrink: 0, textAlign: "center", padding: "10px 4px" }}
+            />
+            <input value={o.label} onChange={(e) => update(o.id, { label: e.target.value })} placeholder="Etykieta opcji" style={{ ...inputStyle, flex: "1 1 100px", minWidth: 0 }} />
+            <button onClick={() => remove(o.id)} style={miniBtn} aria-label="Usuń opcję">
+              <Trash2 size={14} />
             </button>
           </div>
-          <input value={o.label} onChange={(e) => update(o.id, { label: e.target.value })} style={{ ...inputStyle, flex: "1 1 100px", minWidth: 0 }} />
+          <input
+            value={o.description ?? ""}
+            onChange={(e) => update(o.id, { description: e.target.value || undefined })}
+            placeholder="Podtytuł opcji (opcjonalnie)"
+            style={{ ...inputStyle, fontSize: 13 }}
+          />
           {branching && (
-            <div style={{ flex: "1 1 130px", minWidth: 0 }}>
-              <NextSelect value={o.next} steps={steps} selfId={selfStepId} onChange={(v) => update(o.id, { next: v })} />
-            </div>
+            <NextSelect value={o.next} steps={steps} selfId={selfStepId} onChange={(v) => update(o.id, { next: v })} />
           )}
-          <button onClick={() => remove(o.id)} style={miniBtn} aria-label="Usuń opcję">
-            <Trash2 size={14} />
-          </button>
         </div>
       ))}
       <button onClick={add} style={{ ...ghostButton, justifySelf: "start", display: "flex", alignItems: "center", gap: 6, padding: "7px 12px" }}>
@@ -1759,10 +1846,74 @@ function NextSelect({ value, steps, selfId, onChange }: { value: string; steps: 
   );
 }
 
-/* ── Panel wyglądu (motyw) ──────────────────────────────────── */
+/* ── Panel marki: logo/awatar + nazwa + podtytuł (nagłówek formularza) ─── */
+function BrandPanel({
+  schema,
+  onPatch,
+  formId,
+}: {
+  schema: FormSchema;
+  onPatch: (patch: Partial<FormSchema>) => void;
+  formId: string;
+}) {
+  const b: FormBranding = schema.branding ?? {};
+  const setB = (patch: Partial<FormBranding>) => onPatch({ branding: { ...b, ...patch } });
+  const headerOn = b.showHeader !== false && (!!b.logo || !!b.name || !!b.tagline || b.showHeader === true);
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <span style={paneTitle}>Marka</span>
+      <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>
+        Nagłówek marki (logo, nazwa, podtytuł) pojawia się na górze formularza — nadaje mu wiarygodny, „ludzki” charakter.
+      </p>
+
+      <ToggleRow
+        label="Pokaż nagłówek marki"
+        checked={b.showHeader !== false}
+        onChange={(v) => setB({ showHeader: v })}
+      />
+
+      {b.showHeader !== false && (
+        <>
+          <ImageField value={b.logo ?? ""} onChange={(url) => setB({ logo: url })} formId={formId} label="Logo / awatar" />
+
+          <Field label="Nazwa marki">
+            <input
+              value={b.name ?? ""}
+              onChange={(e) => setB({ name: e.target.value })}
+              placeholder="np. Liam · uczyangielskiego.pl"
+              style={inputStyle}
+            />
+          </Field>
+
+          <Field label="Podtytuł (opcjonalnie)">
+            <input
+              value={b.tagline ?? ""}
+              onChange={(e) => setB({ tagline: e.target.value })}
+              placeholder="np. Wyluzowany kumpel od rozmów i podróży"
+              style={inputStyle}
+            />
+          </Field>
+
+          <ToggleRow
+            label="Pokaż awatar przy każdym pytaniu"
+            checked={!!b.showAvatarOnSteps}
+            onChange={(v) => setB({ showAvatarOnSteps: v })}
+          />
+        </>
+      )}
+      {!headerOn && b.showHeader !== false && (
+        <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>Dodaj logo lub nazwę, aby nagłówek marki był widoczny.</p>
+      )}
+    </div>
+  );
+}
+
+/* ── Panel wyglądu (motyw + styl) ───────────────────────────── */
 function ThemePanel({ schema, onPatch }: { schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void }) {
   const t = schema.theme;
   const setTheme = (patch: Partial<FormSchema["theme"]>) => onPatch({ theme: { ...t, ...patch } });
+  const surface = t.surface ?? "full";
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -1778,20 +1929,70 @@ function ThemePanel({ schema, onPatch }: { schema: FormSchema; onPatch: (patch: 
         </select>
       </Field>
 
-      <div style={{ display: "flex", gap: 12 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <ColorField label="Akcent" value={t.primary} onChange={(v) => setTheme({ primary: v })} />
-        <ColorField label="Tło" value={t.bg} onChange={(v) => setTheme({ bg: v })} />
+        <ColorField label="Tło strony" value={t.bg} onChange={(v) => setTheme({ bg: v })} />
         <ColorField label="Tekst" value={t.text} onChange={(v) => setTheme({ text: v })} />
+        {surface === "card" && (
+          <ColorField label="Tło karty" value={t.cardBg ?? "#FFFFFF"} onChange={(v) => setTheme({ cardBg: v })} />
+        )}
       </div>
 
-      <Field label="Układ">
+      <Field label="Powierzchnia formularza">
+        <select value={surface} onChange={(e) => setTheme({ surface: e.target.value as FormSchema["theme"]["surface"] })} style={inputStyle}>
+          <option value="card">Karta (wyśrodkowana, z cieniem)</option>
+          <option value="full">Pełne tło (na całą stronę)</option>
+        </select>
+      </Field>
+
+      <Field label="Styl opcji wyboru">
+        <select value={t.optionStyle ?? "list"} onChange={(e) => setTheme({ optionStyle: e.target.value as FormSchema["theme"]["optionStyle"] })} style={inputStyle}>
+          <option value="cards">Karty (ikona + podtytuł)</option>
+          <option value="list">Lista (skróty A/B/C)</option>
+        </select>
+      </Field>
+
+      <Field label="Pasek postępu">
+        <select value={t.progress ?? "bar"} onChange={(e) => setTheme({ progress: e.target.value as FormSchema["theme"]["progress"] })} style={inputStyle}>
+          <option value="bar">Pasek</option>
+          <option value="dots">Kropki / segmenty</option>
+          <option value="none">Ukryty</option>
+        </select>
+      </Field>
+
+      <Field label="Zaokrąglenie rogów">
+        <select value={String(t.radius ?? 12)} onChange={(e) => setTheme({ radius: Number(e.target.value) })} style={inputStyle}>
+          <option value="6">Ostre (6 px)</option>
+          <option value="12">Standardowe (12 px)</option>
+          <option value="18">Miękkie (18 px)</option>
+          <option value="24">Zaokrąglone (24 px)</option>
+        </select>
+      </Field>
+
+      <Field label="Układ treści">
         <select value={t.layout} onChange={(e) => setTheme({ layout: e.target.value as FormSchema["theme"]["layout"] })} style={inputStyle}>
           <option value="center">Wyśrodkowany</option>
           <option value="left">Do lewej</option>
-          <option value="split">Podział (obraz po lewej)</option>
+          <option value="split">Podział (obraz po lewej — tylko pełne tło)</option>
         </select>
       </Field>
+
+      <ToggleRow
+        label="Numer kroku („KROK 3”) nad pytaniem"
+        checked={!!t.showStepNumber}
+        onChange={(v) => setTheme({ showStepNumber: v })}
+      />
     </div>
+  );
+}
+
+/* ── Przełącznik on/off (spójny wygląd) ─────────────────────── */
+function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} style={{ width: 16, height: 16, accentColor: tokens.accent }} />
+      {label}
+    </label>
   );
 }
 
