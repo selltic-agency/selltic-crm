@@ -220,8 +220,14 @@ export default function FormsPage() {
           ))}
         </div>
       ) : (
+        // Bez overflow-x: auto. Ustawienie overflow-x na auto zmusza przeglądarkę
+        // do policzenia overflow-y również jako auto (reguła CSS), przez co
+        // rozwijane menu wiersza (⋯), wyższe niż krótka tabela, było przycinane,
+        // a kontener zyskiwał pionowy pasek i puste białe pudełko. Widok kart
+        // (compact) obsługuje węższe obszary, więc na desktopie tabela zawsze się
+        // mieści i poziome przewijanie nie jest już potrzebne.
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "visible" }}>
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflow: "visible" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.bg }}>
