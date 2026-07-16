@@ -13,9 +13,15 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { tokens, primaryButton, formatRelative } from "@/lib/ui";
 import { blankForm, randomSlug } from "@/lib/forms";
-import { useIsMobile } from "@/lib/responsive";
 import ShareModal from "./share-modal";
 import { useToast } from "@/components/Toast";
+
+// Poniżej tej szerokości dostępnego obszaru tabela (min-width 900) nie mieści
+// się i zwija do przewijanego w bok pudełka — wtedy przełączamy na listę kart.
+// Liczy się realna szerokość kontenera, nie okna: na desktopie po odjęciu
+// sidebara (230px) obszar treści bywa węższy niż okno, więc sam useIsMobile
+// (mierzący viewport) nie wystarczał.
+const TABLE_MIN_WIDTH = 900;
 
 type MetricsRow = {
   id: string;
@@ -39,7 +45,21 @@ export default function FormsPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const toast = useToast();
-  const isMobile = useIsMobile();
+  // Przełączanie tabela ↔ karty na podstawie ZMIERZONEJ szerokości obszaru
+  // listy (ResizeObserver), a nie szerokości okna — dzięki temu zwinięty
+  // sidebar, węższe okno na desktopie i telefon są obsłużone tą samą regułą.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setCompact(w < TABLE_MIN_WIDTH);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [rows, setRows] = useState<MetricsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -145,7 +165,7 @@ export default function FormsPage() {
   }
 
   return (
-    <div>
+    <div ref={listRef}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Formularze</h1>
         <button onClick={newForm} disabled={creating} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
@@ -178,10 +198,11 @@ export default function FormsPage() {
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : sorted.length === 0 ? (
         <EmptyState tab={tab} />
-      ) : isMobile ? (
-        // Na telefonie tabela (minWidth 900) zwężała się do przewijanego w bok
-        // pudełka pokazującego tylko fragment kolumn. Zamiast tego renderujemy
-        // listę kart wypełniających szerokość ekranu.
+      ) : compact ? (
+        // Gdy dostępny obszar jest węższy niż tabela (telefon albo węższe okno
+        // na desktopie), tabela zwijała się do przewijanego w bok pudełka
+        // pokazującego tylko fragment kolumn. Zamiast tego renderujemy listę
+        // kart wypełniających całą szerokość.
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {sorted.map((r) => (
             <MobileCard
