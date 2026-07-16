@@ -46,6 +46,8 @@ export type { NextAction };
 export type StepOption = {
   id: string;
   label: string;
+  description?: string; // podtytuł opcji (druga linia w karcie wyboru)
+  icon?: string; // emoji lub krótki znak wyświetlany na karcie opcji
   next: string; // NEXT | SUBMIT | stepId
 };
 
@@ -128,12 +130,40 @@ export type Step = {
 
 export type FormLayout = "center" | "left" | "split";
 
+// Styl kontenera formularza: „card” = wyśrodkowana karta z cieniem (jak w
+// referencyjnym, brandowanym formularzu), „full” = treść na pełnym tle.
+export type FormSurface = "card" | "full";
+// Styl opcji wyboru: „list” = lista z literowym skrótem (A/B/C),
+// „cards” = duże karty z ikoną + podtytułem (brandowany wygląd).
+export type OptionStyle = "list" | "cards";
+// Styl paska postępu na górze formularza.
+export type ProgressStyle = "bar" | "dots" | "none";
+
 export type FormTheme = {
   font: string;
   primary: string;
-  bg: string;
+  bg: string; // tło strony (za kartą)
   text: string;
   layout: FormLayout;
+  // ── Rozszerzenia wyglądu (redesign — brandowany, realistyczny formularz).
+  //    Wszystkie opcjonalne: istniejące, opublikowane formularze renderują się
+  //    bez zmian (fallbacki w rendererze).
+  cardBg?: string; // tło karty formularza (gdy surface = "card")
+  surface?: FormSurface; // "card" (domyślnie dla nowych) | "full"
+  optionStyle?: OptionStyle; // "list" (domyślnie) | "cards"
+  progress?: ProgressStyle; // "bar" (domyślnie) | "dots" | "none"
+  radius?: number; // promień zaokrągleń kart/przycisków (px)
+  showStepNumber?: boolean; // etykieta „KROK X” nad pytaniem
+};
+
+// Marka formularza — nagłówek z awatarem/logo, nazwą i podtytułem (jak w
+// referencyjnym formularzu „Liam · uczyangielskiego.pl”). Wszystko opcjonalne.
+export type FormBranding = {
+  logo?: string; // URL awatara/logo (okrągły, w nagłówku)
+  name?: string; // nazwa marki, np. „Liam · uczyangielskiego.pl”
+  tagline?: string; // krótki podtytuł pod nazwą
+  showHeader?: boolean; // pokaż nagłówek marki na każdym kroku
+  showAvatarOnSteps?: boolean; // pokaż awatar obok pytania (jak w referencji)
 };
 
 // Treść automatycznego maila „dziękujemy” (Faza: e-mail po zgłoszeniu).
@@ -158,6 +188,7 @@ export type FormSettings = {
 export type FormSchema = {
   title: string;
   theme: FormTheme;
+  branding?: FormBranding; // nagłówek marki (opcjonalny)
   steps: Step[];
   settings?: FormSettings;
 };
@@ -450,8 +481,8 @@ export function blankField(type: FieldType): FormField {
         ...base,
         question: "Wybierz opcję",
         options: [
-          { id: uid(), label: "Opcja A", next: NEXT },
-          { id: uid(), label: "Opcja B", next: NEXT },
+          { id: uid(), label: "Opcja A", icon: "✨", next: NEXT },
+          { id: uid(), label: "Opcja B", icon: "🚀", next: NEXT },
         ],
       };
     case "multi_choice":
@@ -459,8 +490,8 @@ export function blankField(type: FieldType): FormField {
         ...base,
         question: "Wybierz jedną lub więcej",
         options: [
-          { id: uid(), label: "Opcja A", next: NEXT },
-          { id: uid(), label: "Opcja B", next: NEXT },
+          { id: uid(), label: "Opcja A", icon: "✨", next: NEXT },
+          { id: uid(), label: "Opcja B", icon: "🚀", next: NEXT },
         ],
       };
   }
@@ -494,15 +525,45 @@ export function blankForm(title = "Nowy formularz"): FormSchema {
     theme: {
       font: "Inter",
       primary: "#6C5CE7",
-      bg: "#FFFFFF",
+      bg: "#F4F1EC",
       text: "#1A1D26",
       layout: "center",
+      // Nowe formularze startują z brandowanym, „realistycznym” wyglądem.
+      cardBg: "#FFFFFF",
+      surface: "card",
+      optionStyle: "cards",
+      progress: "bar",
+      radius: 16,
+      showStepNumber: true,
+    },
+    branding: {
+      showHeader: true,
+      showAvatarOnSteps: false,
     },
     steps: [
       { ...blankStep("welcome"), next: NEXT },
       { ...blankStep("end") },
     ],
   };
+}
+
+// ── Domyślne / fallback wartości wyglądu (pojedyncze źródło prawdy dla
+//    renderera i edytora). Stare formularze bez tych pól dostają neutralne,
+//    zgodne wstecznie wartości; nowe formularze mają je zapisane wprost.
+export function themeSurface(t: FormTheme): FormSurface {
+  return t.surface ?? "full";
+}
+export function themeOptionStyle(t: FormTheme): OptionStyle {
+  return t.optionStyle ?? "list";
+}
+export function themeProgress(t: FormTheme): ProgressStyle {
+  return t.progress ?? "bar";
+}
+export function themeRadius(t: FormTheme): number {
+  return t.radius ?? 12;
+}
+export function themeCardBg(t: FormTheme): string {
+  return t.cardBg || t.bg || "#FFFFFF";
 }
 
 export function randomSlug(): string {

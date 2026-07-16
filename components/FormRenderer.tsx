@@ -16,6 +16,8 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import {
   type FormSchema,
   type FormField,
+  type StepOption,
+  type OptionStyle,
   NEXT,
   googleFontHref,
   isChoice,
@@ -25,6 +27,11 @@ import {
   isContainerStep,
   validateFieldValue,
   resolveNextAction,
+  themeSurface,
+  themeOptionStyle,
+  themeProgress,
+  themeRadius,
+  themeCardBg,
 } from "@/lib/forms";
 import {
   COUNTRY_PREFIXES,
@@ -323,32 +330,312 @@ export default function FormRenderer({
     return <div style={{ padding: 40, color: "#8A92A6" }}>Brak kroków.</div>;
   }
 
-  // Na wąskim ekranie układ „split” składamy do jednej kolumny.
-  const isSplit = theme.layout === "split" && !!current.image && !isMobile;
-  const align = theme.layout === "left" ? "left" : isSplit ? "left" : "center";
+  // ── Styl / wygląd (redesign) ──────────────────────────────────────────
+  const surface = themeSurface(theme); // "card" | "full"
+  const optStyle = themeOptionStyle(theme); // "list" | "cards"
+  const progressStyle = themeProgress(theme); // "bar" | "dots" | "none"
+  const radius = themeRadius(theme);
+  const cardBg = themeCardBg(theme);
+  const branding = form.branding;
+  const isCard = surface === "card";
+
+  // Układ „split” (obraz po lewej) tylko w trybie pełnoekranowym.
+  const isSplit = !isCard && theme.layout === "split" && !!current.image && !isMobile;
+  const align: "left" | "center" = theme.layout === "left" ? "left" : isSplit ? "left" : "center";
 
   const accent = theme.primary || "#6C5CE7";
   const text = theme.text || "#1A1D26";
   const bg = theme.bg || "#FFFFFF";
   const fontFamily = `"${theme.font || "Inter"}", system-ui, sans-serif`;
+  const cardRadius = Math.min(28, radius + 8);
+  const cardMaxWidth = 560;
 
   const btn: React.CSSProperties = {
     background: accent,
     color: "#fff",
     border: "none",
-    borderRadius: 10,
-    padding: "12px 22px",
+    borderRadius: radius,
+    padding: "13px 24px",
     fontSize: 16,
     fontWeight: 600,
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
+    boxShadow: `0 8px 20px ${accent}33`,
   };
 
   // Nagłówek kroku: dla kontenera pokazujemy tylko, gdy podano tekst.
   const heading = current.question || (container ? "" : "—");
 
+  const canBack = history.length > 0 && current.type !== "end";
+  const showCounter = current.type !== "end" && current.type !== "welcome" && steps.length > 2;
+  const showKrok = !!theme.showStepNumber && current.type !== "end" && current.type !== "welcome" && current.type !== "statement";
+  const showStepAvatar = !!branding?.showAvatarOnSteps && !!branding?.logo && current.type !== "welcome" && current.type !== "end";
+
+  // ── Nagłówek marki (awatar + nazwa + podtytuł) ────────────────────────
+  const brandHeader =
+    branding?.showHeader && (branding.logo || branding.name) ? (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          width: "100%",
+          maxWidth: cardMaxWidth,
+          margin: "0 auto",
+          marginBottom: isCard ? 14 : 22,
+          padding: "0 2px",
+          boxSizing: "border-box",
+        }}
+      >
+        {branding.logo && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={branding.logo}
+            alt=""
+            style={{ width: 46, height: 46, borderRadius: "50%", objectFit: "cover", border: `2px solid ${accent}`, flexShrink: 0 }}
+          />
+        )}
+        <div style={{ minWidth: 0 }}>
+          {branding.name && (
+            <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.2, color: text }}>{branding.name}</div>
+          )}
+          {branding.tagline && (
+            <div style={{ fontSize: 13.5, opacity: 0.6, lineHeight: 1.3, color: text }}>{branding.tagline}</div>
+          )}
+        </div>
+      </div>
+    ) : null;
+
+  // ── Pasek / kropki postępu + wstecz + licznik (górny pasek kroku) ─────
+  const topBar =
+    canBack || showCounter || progressStyle !== "none" ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22 }}>
+        {canBack ? (
+          <button
+            onClick={back}
+            aria-label="Wstecz"
+            style={{
+              flexShrink: 0,
+              width: 34,
+              height: 34,
+              borderRadius: "50%",
+              border: `1px solid rgba(0,0,0,0.10)`,
+              background: "transparent",
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+              color: text,
+            }}
+          >
+            <ArrowLeft size={17} />
+          </button>
+        ) : (
+          progressStyle !== "none" && <span style={{ width: 0 }} />
+        )}
+
+        {progressStyle === "bar" && (
+          <div style={{ flex: 1, height: 8, borderRadius: 999, background: "rgba(0,0,0,0.07)", overflow: "hidden" }}>
+            <motion.div animate={{ width: `${progress}%` }} transition={spring} style={{ height: "100%", background: accent, borderRadius: 999 }} />
+          </div>
+        )}
+        {progressStyle === "dots" && (
+          <div style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
+            {steps.map((s, i) => (
+              <span
+                key={s.id}
+                style={{
+                  height: 7,
+                  flex: 1,
+                  maxWidth: 40,
+                  borderRadius: 999,
+                  background: i <= currentIndex ? accent : "rgba(0,0,0,0.10)",
+                  transition: "background .2s ease",
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {progressStyle === "none" && <div style={{ flex: 1 }} />}
+
+        {showCounter && (
+          <span style={{ flexShrink: 0, fontSize: 13, fontWeight: 700, opacity: 0.55 }}>
+            {Math.min(currentIndex + 1, steps.length)} / {steps.length}
+          </span>
+        )}
+      </div>
+    ) : null;
+
+  // ── Treść kroku (współdzielona przez tryb „card” i „full”) ────────────
+  const stepContent = (
+    <AnimatePresence mode="wait" custom={dir}>
+      <motion.div
+        key={current.id}
+        custom={dir}
+        variants={{
+          enter: (d: "fwd" | "back") => ({ opacity: 0, y: reduce ? 0 : d === "fwd" ? 28 : -28 }),
+          center: { opacity: 1, y: 0 },
+          exit: (d: "fwd" | "back") => ({ opacity: 0, y: reduce ? 0 : d === "fwd" ? -28 : 28 }),
+        }}
+        initial="enter"
+        animate="center"
+        exit="exit"
+        transition={spring}
+        style={{ textAlign: align as React.CSSProperties["textAlign"] }}
+      >
+        {showStepAvatar && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={branding!.logo}
+            alt=""
+            style={{
+              width: 54,
+              height: 54,
+              borderRadius: "50%",
+              objectFit: "cover",
+              border: `2px solid ${accent}`,
+              display: "block",
+              margin: align === "center" ? "0 auto 14px" : "0 0 14px",
+            }}
+          />
+        )}
+
+        {!isSplit && current.image && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={current.image}
+            alt=""
+            style={{
+              maxWidth: "100%",
+              maxHeight: 200,
+              borderRadius: radius,
+              objectFit: "cover",
+              margin: align === "center" ? "0 auto 20px" : "0 0 20px",
+              display: "block",
+            }}
+          />
+        )}
+
+        {showKrok && (
+          <div style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", color: accent, marginBottom: 8 }}>
+            Krok {Math.min(currentIndex + 1, steps.length)}
+          </div>
+        )}
+
+        {heading && (
+          <h2 style={{ fontSize: isMobile ? 24 : 29, fontWeight: 800, margin: "0 0 10px", lineHeight: 1.18, letterSpacing: -0.3 }}>
+            {heading}
+          </h2>
+        )}
+        {current.description && (
+          <p style={{ fontSize: 16, opacity: 0.68, margin: "0 0 24px", lineHeight: 1.45 }}>{current.description}</p>
+        )}
+
+        {/* Pola wejściowe (jedno lub wiele — item 6). */}
+        {isInputStep(current) && (
+          <motion.div animate={shake} style={{ display: "grid", gap: 22 }}>
+            {fields.map((f) => (
+              <FieldControl
+                key={f.id}
+                field={f}
+                showLabel={container}
+                optionStyle={optStyle}
+                radius={radius}
+                value={answers[f.id]}
+                error={errors[f.id] ?? null}
+                accent={accent}
+                text={text}
+                align={align}
+                autoFocusFirst={fields[0]?.id === f.id}
+                phonePrefix={phonePrefixes[f.id] || f.phonePrefix || DEFAULT_PHONE_PREFIX}
+                onPhonePrefix={(prefix) => {
+                  setPhonePrefixes((p) => ({ ...p, [f.id]: prefix }));
+                  const local = splitPhone((answers[f.id] as string) || "", prefix).local;
+                  setFieldAnswer(f.id, local.trim() ? `${prefix} ${local}` : "");
+                }}
+                onChange={(val) => setFieldAnswer(f.id, val)}
+                onBlurValidate={() => {
+                  if (isChoice(f.type)) return;
+                  const raw = (answers[f.id] as string) || "";
+                  // Domknij format telefonu, jeśli poprawny.
+                  if (f.type === "phone") {
+                    const prefix = phonePrefixes[f.id] || f.phonePrefix || DEFAULT_PHONE_PREFIX;
+                    const local = splitPhone(raw, prefix).local;
+                    if (local.trim() && !validateFieldValue(f, `${prefix} ${local}`)) {
+                      setFieldAnswer(f.id, formatPhoneValue(prefix, local));
+                    }
+                  }
+                  setErrors((e) => ({ ...e, [f.id]: validateFieldValue(f, raw) }));
+                }}
+                onChooseSingle={
+                  autoAdvanceChoice ? (label, next) => chooseSingleAuto(f, label, next) : undefined
+                }
+                onToggleMulti={(label) => toggleMulti(f.id, label)}
+                reduce={!!reduce}
+                spring={spring}
+              />
+            ))}
+          </motion.div>
+        )}
+
+        {/* Przyciski akcji (nie dla auto-przejścia ani end). */}
+        {!autoAdvanceChoice && current.type !== "end" && (
+          <div style={{ marginTop: 26, display: "flex", justifyContent: align === "center" ? "center" : "flex-start" }}>
+            <button onClick={advance} style={btn}>
+              {current.type === "welcome" ? current.cta || "Dalej" : "Dalej"}
+              <ArrowRight size={18} />
+            </button>
+          </div>
+        )}
+
+        {current.type === "end" && !preview && (
+          <p style={{ fontSize: 14, opacity: 0.6, marginTop: 18 }}>Możesz zamknąć to okno.</p>
+        )}
+      </motion.div>
+    </AnimatePresence>
+  );
+
+  // ── Tryb KARTY: wyśrodkowana, brandowana karta na tle strony ──────────
+  if (isCard) {
+    return (
+      <div
+        style={{
+          height: "100%",
+          minHeight: 460,
+          background: bg,
+          color: text,
+          fontFamily,
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: isMobile ? "24px 16px" : "40px 24px",
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={{ width: "100%", maxWidth: cardMaxWidth, margin: "0 auto" }}>
+          {brandHeader}
+          <div
+            style={{
+              position: "relative",
+              background: cardBg,
+              borderRadius: cardRadius,
+              boxShadow: "0 18px 50px rgba(15,18,28,0.10), 0 2px 6px rgba(15,18,28,0.05)",
+              padding: isMobile ? "22px 20px 26px" : "28px 32px 34px",
+              boxSizing: "border-box",
+            }}
+          >
+            {topBar}
+            {stepContent}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Tryb PEŁNY: treść na całym tle (klasyczny, „na całą stronę”) ───────
   return (
     <div
       style={{
@@ -363,17 +650,15 @@ export default function FormRenderer({
         overflow: "hidden",
       }}
     >
-      {/* Pasek postępu + „Krok X z Y” (item 7) */}
-      <div style={{ height: 4, background: "rgba(0,0,0,0.06)", flexShrink: 0 }}>
-        <motion.div
-          animate={{ width: `${progress}%` }}
-          transition={spring}
-          style={{ height: "100%", background: accent }}
-        />
-      </div>
+      {/* Pasek postępu na samej górze */}
+      {progressStyle !== "none" && (
+        <div style={{ height: 4, background: "rgba(0,0,0,0.06)", flexShrink: 0 }}>
+          <motion.div animate={{ width: `${progress}%` }} transition={spring} style={{ height: "100%", background: accent }} />
+        </div>
+      )}
 
       {/* Przycisk wstecz */}
-      {history.length > 0 && current.type !== "end" && (
+      {canBack && (
         <button
           onClick={back}
           aria-label="Wstecz"
@@ -398,18 +683,8 @@ export default function FormRenderer({
       )}
 
       {/* Wskaźnik postępu tekstowy — dyskretnie w prawym górnym rogu. */}
-      {current.type !== "end" && current.type !== "welcome" && steps.length > 2 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 18,
-            right: 18,
-            zIndex: 2,
-            fontSize: 12,
-            fontWeight: 600,
-            opacity: 0.55,
-          }}
-        >
+      {showCounter && (
+        <div style={{ position: "absolute", top: 18, right: 18, zIndex: 2, fontSize: 12, fontWeight: 600, opacity: 0.55 }}>
           Krok {Math.min(currentIndex + 1, steps.length)} z {steps.length}
         </div>
       )}
@@ -426,122 +701,21 @@ export default function FormRenderer({
       >
         {isSplit && current.image && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={current.image}
-            alt=""
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+          <img src={current.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         )}
 
-        <AnimatePresence mode="wait" custom={dir}>
-          <motion.div
-            key={current.id}
-            custom={dir}
-            variants={{
-              enter: (d: "fwd" | "back") => ({ opacity: 0, y: reduce ? 0 : d === "fwd" ? 28 : -28 }),
-              center: { opacity: 1, y: 0 },
-              exit: (d: "fwd" | "back") => ({ opacity: 0, y: reduce ? 0 : d === "fwd" ? -28 : 28 }),
-            }}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={spring}
-            style={{
-              width: "100%",
-              maxWidth: 520,
-              margin: isSplit ? 0 : "0 auto",
-              padding: isMobile ? "32px 18px" : "48px 32px",
-              textAlign: align as React.CSSProperties["textAlign"],
-            }}
-          >
-            {!isSplit && current.image && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={current.image}
-                alt=""
-                style={{
-                  maxWidth: "100%",
-                  maxHeight: 200,
-                  borderRadius: 12,
-                  marginBottom: 20,
-                  objectFit: "cover",
-                  margin: align === "center" ? "0 auto 20px" : "0 0 20px",
-                  display: "block",
-                }}
-              />
-            )}
-
-            {heading && (
-              <h2 style={{ fontSize: isMobile ? 23 : 28, fontWeight: 700, margin: "0 0 10px", lineHeight: 1.2 }}>
-                {heading}
-              </h2>
-            )}
-            {current.description && (
-              <p style={{ fontSize: 16, opacity: 0.7, margin: "0 0 22px" }}>{current.description}</p>
-            )}
-
-            {/* Pola wejściowe (jedno lub wiele — item 6). */}
-            {isInputStep(current) && (
-              <motion.div animate={shake} style={{ display: "grid", gap: 22 }}>
-                {fields.map((f) => (
-                  <FieldControl
-                    key={f.id}
-                    field={f}
-                    showLabel={container}
-                    value={answers[f.id]}
-                    error={errors[f.id] ?? null}
-                    accent={accent}
-                    text={text}
-                    align={align}
-                    autoFocusFirst={fields[0]?.id === f.id}
-                    phonePrefix={phonePrefixes[f.id] || f.phonePrefix || DEFAULT_PHONE_PREFIX}
-                    onPhonePrefix={(prefix) => {
-                      setPhonePrefixes((p) => ({ ...p, [f.id]: prefix }));
-                      const local = splitPhone((answers[f.id] as string) || "", prefix).local;
-                      setFieldAnswer(f.id, local.trim() ? `${prefix} ${local}` : "");
-                    }}
-                    onChange={(val) => setFieldAnswer(f.id, val)}
-                    onBlurValidate={() => {
-                      if (isChoice(f.type)) return;
-                      const raw = (answers[f.id] as string) || "";
-                      // Domknij format telefonu, jeśli poprawny.
-                      if (f.type === "phone") {
-                        const prefix = phonePrefixes[f.id] || f.phonePrefix || DEFAULT_PHONE_PREFIX;
-                        const local = splitPhone(raw, prefix).local;
-                        if (local.trim() && !validateFieldValue(f, `${prefix} ${local}`)) {
-                          setFieldAnswer(f.id, formatPhoneValue(prefix, local));
-                        }
-                      }
-                      setErrors((e) => ({ ...e, [f.id]: validateFieldValue(f, raw) }));
-                    }}
-                    onChooseSingle={
-                      autoAdvanceChoice
-                        ? (label, next) => chooseSingleAuto(f, label, next)
-                        : undefined
-                    }
-                    onToggleMulti={(label) => toggleMulti(f.id, label)}
-                    reduce={!!reduce}
-                    spring={spring}
-                  />
-                ))}
-              </motion.div>
-            )}
-
-            {/* Przyciski akcji (nie dla auto-przejścia ani end). */}
-            {!autoAdvanceChoice && current.type !== "end" && (
-              <div style={{ marginTop: 24, display: "flex", justifyContent: align === "center" ? "center" : "flex-start" }}>
-                <button onClick={advance} style={btn}>
-                  {current.type === "welcome" ? current.cta || "Dalej" : "Dalej"}
-                  <ArrowRight size={18} />
-                </button>
-              </div>
-            )}
-
-            {current.type === "end" && !preview && (
-              <p style={{ fontSize: 14, opacity: 0.6, marginTop: 18 }}>Możesz zamknąć to okno.</p>
-            )}
-          </motion.div>
-        </AnimatePresence>
+        <div
+          style={{
+            width: "100%",
+            maxWidth: cardMaxWidth,
+            margin: isSplit ? 0 : "0 auto",
+            padding: isMobile ? "32px 18px" : "48px 32px",
+            boxSizing: "border-box",
+          }}
+        >
+          {brandHeader}
+          {stepContent}
+        </div>
       </div>
     </div>
   );
@@ -551,6 +725,8 @@ export default function FormRenderer({
 function FieldControl({
   field,
   showLabel,
+  optionStyle,
+  radius,
   value,
   error,
   accent,
@@ -568,6 +744,8 @@ function FieldControl({
 }: {
   field: FormField;
   showLabel: boolean;
+  optionStyle: OptionStyle;
+  radius: number;
   value: string | string[] | undefined;
   error: string | null;
   accent: string;
@@ -586,6 +764,7 @@ function FieldControl({
   const strVal = (value as string) || "";
   const arrVal = (value as string[]) || [];
   const invalid = !!error;
+  const cards = optionStyle === "cards";
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
@@ -662,34 +841,27 @@ function FieldControl({
         />
       )}
 
-      {field.type === "single_choice" && (
-        <div style={{ display: "grid", gap: 10 }}>
-          {(field.options ?? []).map((o, i) => (
-            <motion.button
-              key={o.id}
-              onClick={() =>
-                onChooseSingle ? onChooseSingle(o.label, o.next) : onChange(o.label)
-              }
-              initial={{ opacity: 0, y: reduce ? 0 : 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={reduce ? { duration: 0 } : { ...spring, delay: 0.08 + i * 0.06 }}
-              style={optionStyle(accent, text, strVal === o.label)}
-            >
-              <span style={keyBadge(accent)}>{String.fromCharCode(65 + i)}</span>
-              {o.label}
-            </motion.button>
-          ))}
-        </div>
-      )}
-
-      {field.type === "multi_choice" && (
+      {isChoice(field.type) && (
         <div style={{ display: "grid", gap: 10 }}>
           {(field.options ?? []).map((o, i) => {
-            const sel = arrVal.includes(o.label);
-            return (
-              <button key={o.id} onClick={() => onToggleMulti(o.label)} style={optionStyle(accent, text, sel)}>
-                <span style={keyBadge(accent)}>{String.fromCharCode(65 + i)}</span>
-                {o.label}
+            const selected = field.type === "multi_choice" ? arrVal.includes(o.label) : strVal === o.label;
+            const inner = <OptionInner option={o} index={i} accent={accent} selected={selected} cards={cards} radius={radius} />;
+            const style = optionRowStyle(accent, text, selected, radius, cards);
+            return field.type === "single_choice" ? (
+              <motion.button
+                key={o.id}
+                type="button"
+                onClick={() => (onChooseSingle ? onChooseSingle(o.label, o.next) : onChange(o.label))}
+                initial={{ opacity: 0, y: reduce ? 0 : 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={reduce ? { duration: 0 } : { ...spring, delay: 0.06 + i * 0.05 }}
+                style={style}
+              >
+                {inner}
+              </motion.button>
+            ) : (
+              <button key={o.id} type="button" onClick={() => onToggleMulti(o.label)} style={style}>
+                {inner}
               </button>
             );
           })}
@@ -715,36 +887,72 @@ function fieldStyle(text: string, invalid = false): React.CSSProperties {
   };
 }
 
-function optionStyle(accent: string, text: string, selected: boolean): React.CSSProperties {
+// Wnętrze karty opcji: kafelek (emoji lub litera A/B/C) + etykieta + podtytuł.
+function OptionInner({
+  option,
+  index,
+  accent,
+  selected,
+  cards,
+  radius,
+}: {
+  option: StepOption;
+  index: number;
+  accent: string;
+  selected: boolean;
+  cards: boolean;
+  radius: number;
+}) {
+  return (
+    <>
+      <span style={optionTile(accent, !!option.icon, cards, selected, radius)}>
+        {option.icon ? option.icon : String.fromCharCode(65 + index)}
+      </span>
+      <span style={{ display: "grid", gap: 2, minWidth: 0, flex: 1 }}>
+        <span style={{ fontWeight: 600, fontSize: cards ? 16.5 : 16, lineHeight: 1.25 }}>{option.label}</span>
+        {option.description && (
+          <span style={{ fontSize: 13.5, opacity: 0.6, lineHeight: 1.3, fontWeight: 400 }}>{option.description}</span>
+        )}
+      </span>
+    </>
+  );
+}
+
+function optionRowStyle(accent: string, text: string, selected: boolean, radius: number, cards: boolean): React.CSSProperties {
   return {
     display: "flex",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
     width: "100%",
     textAlign: "left",
-    padding: "14px 16px",
+    padding: cards ? "14px 16px" : "13px 15px",
     fontSize: 16,
     fontWeight: 500,
-    borderRadius: 12,
+    borderRadius: radius,
     cursor: "pointer",
-    border: `1.5px solid ${selected ? accent : "rgba(0,0,0,0.14)"}`,
-    background: selected ? `${accent}14` : "rgba(255,255,255,0.7)",
+    border: `1.5px solid ${selected ? accent : "rgba(0,0,0,0.12)"}`,
+    background: selected ? `${accent}12` : "#fff",
     color: text,
+    boxShadow: selected ? `0 0 0 3px ${accent}22` : "0 1px 2px rgba(15,18,28,0.04)",
     transition: "all .15s cubic-bezier(.22,1,.36,1)",
   };
 }
 
-function keyBadge(accent: string): React.CSSProperties {
+// Kafelek po lewej: dla emoji — miękkie tło; dla litery — obrys akcentem.
+function optionTile(accent: string, hasIcon: boolean, cards: boolean, selected: boolean, radius: number): React.CSSProperties {
+  const size = cards ? 40 : 26;
   return {
-    width: 24,
-    height: 24,
+    width: size,
+    height: size,
     flexShrink: 0,
-    borderRadius: 6,
-    border: `1px solid ${accent}`,
-    color: accent,
+    borderRadius: hasIcon ? Math.min(12, radius) : cards ? 10 : 6,
     display: "grid",
     placeItems: "center",
-    fontSize: 12,
+    fontSize: hasIcon ? (cards ? 20 : 15) : 12.5,
     fontWeight: 700,
+    lineHeight: 1,
+    ...(hasIcon
+      ? { background: selected ? `${accent}1f` : "rgba(0,0,0,0.05)", color: accent }
+      : { border: `1px solid ${accent}`, color: accent, background: selected ? `${accent}12` : "transparent" }),
   };
 }
