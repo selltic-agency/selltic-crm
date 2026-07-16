@@ -16,6 +16,13 @@ import { blankForm, randomSlug } from "@/lib/forms";
 import ShareModal from "./share-modal";
 import { useToast } from "@/components/Toast";
 
+// Poniżej tej szerokości dostępnego obszaru tabela (min-width 900) nie mieści
+// się i zwija do przewijanego w bok pudełka — wtedy przełączamy na listę kart.
+// Liczy się realna szerokość kontenera, nie okna: na desktopie po odjęciu
+// sidebara (230px) obszar treści bywa węższy niż okno, więc sam useIsMobile
+// (mierzący viewport) nie wystarczał.
+const TABLE_MIN_WIDTH = 900;
+
 type MetricsRow = {
   id: string;
   title: string;
@@ -38,6 +45,21 @@ export default function FormsPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const toast = useToast();
+  // Przełączanie tabela ↔ karty na podstawie ZMIERZONEJ szerokości obszaru
+  // listy (ResizeObserver), a nie szerokości okna — dzięki temu zwinięty
+  // sidebar, węższe okno na desktopie i telefon są obsłużone tą samą regułą.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setCompact(w < TABLE_MIN_WIDTH);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [rows, setRows] = useState<MetricsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -143,7 +165,7 @@ export default function FormsPage() {
   }
 
   return (
-    <div>
+    <div ref={listRef}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Formularze</h1>
         <button onClick={newForm} disabled={creating} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
@@ -176,6 +198,27 @@ export default function FormsPage() {
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : sorted.length === 0 ? (
         <EmptyState tab={tab} />
+      ) : compact ? (
+        // Gdy dostępny obszar jest węższy niż tabela (telefon albo węższe okno
+        // na desktopie), tabela zwijała się do przewijanego w bok pudełka
+        // pokazującego tylko fragment kolumn. Zamiast tego renderujemy listę
+        // kart wypełniających całą szerokość.
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {sorted.map((r) => (
+            <MobileCard
+              key={r.id}
+              r={r}
+              onOpen={() => router.push(`/admin/forms/${r.id}`)}
+              onStats={() => router.push(`/admin/forms/${r.id}?tab=stats`)}
+              onShare={() => r.slug && setShareForm({ slug: r.slug, title: r.title })}
+              onCopy={() => copyLink(r.slug)}
+              onDuplicate={() => duplicate(r.id)}
+              onArchive={() => archive(r.id)}
+              onRestore={() => restore(r.id)}
+              onSubmissions={() => router.push(`/admin/forms/${r.id}?tab=submissions`)}
+            />
+          ))}
+        </div>
       ) : (
         <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "visible" }}>
           <div style={{ overflowX: "auto" }}>
@@ -288,6 +331,89 @@ function Row({
         />
       </td>
     </tr>
+  );
+}
+
+function MobileCard({
+  r, onOpen, onStats, onShare, onCopy, onDuplicate, onArchive, onRestore, onSubmissions,
+}: {
+  r: MetricsRow;
+  onOpen: () => void; onStats: () => void; onShare: () => void; onCopy: () => void;
+  onDuplicate: () => void; onArchive: () => void; onRestore: () => void; onSubmissions: () => void;
+}) {
+  const archived = !!r.archived_at;
+  const hasViews = r.views > 0;
+
+  return (
+    <div
+      style={{
+        background: tokens.card,
+        border: `1px solid ${tokens.border}`,
+        borderRadius: 14,
+        padding: 14,
+        ...(archived ? { opacity: 0.7 } : {}),
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={onOpen}>
+          <div style={{ fontWeight: 600, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {r.title || "Bez tytułu"}
+          </div>
+          {r.slug && (
+            <div style={{ fontSize: 12, color: tokens.muted, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              /{r.slug}
+            </div>
+          )}
+        </div>
+        <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
+          <RowMenu
+            archived={archived}
+            hasSlug={!!r.slug}
+            slug={r.slug}
+            onOpen={onOpen} onStats={onStats} onShare={onShare} onCopy={onCopy}
+            onDuplicate={onDuplicate} onArchive={onArchive} onRestore={onRestore} onSubmissions={onSubmissions}
+          />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <StatusBadge r={r} />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: 10,
+          marginTop: 12,
+        }}
+      >
+        <Metric label="Wyświetlenia" value={numCell(r.views, hasViews)} />
+        <Metric label="Zgłoszenia" value={numCell(r.completions, hasViews)} />
+        <Metric
+          label="Konwersja"
+          value={hasViews && r.conversion_rate != null ? `${r.conversion_rate.toFixed(1)}%` : <span style={{ color: tokens.muted }}>—</span>}
+        />
+      </div>
+
+      <div style={{ marginTop: 12, fontSize: 12, color: tokens.muted }}>
+        Ostatnie zgłoszenie:{" "}
+        {r.last_submission ? formatRelative(r.last_submission) : "—"}
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: tokens.muted, textTransform: "uppercase", letterSpacing: 0.3 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 600, marginTop: 3, fontVariantNumeric: "tabular-nums" }}>
+        {value}
+      </div>
+    </div>
   );
 }
 
