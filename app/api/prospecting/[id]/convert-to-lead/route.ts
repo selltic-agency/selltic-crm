@@ -42,58 +42,86 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     (props.google_maps_url as string | undefined) ??
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.city ?? ""}`.trim())}`;
 
-  const { data: deal, error: dErr } = await supabase
-    .from("deals")
-    .insert({
-      owner: user.id,
-      name: p.name,
-      phone: p.phone,
-      company: p.name,
-      stage: firstStage?.key ?? "new",
-      value: 0,
-      source: "prospecting",
-      // Pełny transfer danych z Google Maps na dedykowane kolumny deala
-      // (migration_deals_scraper_fields.sql) — KAŻDA właściwość zebrana przy
-      // scrapowaniu ląduje na rekordzie deala, nie tylko podzbiór.
-      place_id: p.place_id,
+  // Rdzeń deala + PEŁNY snapshot danych scrapera w props (jsonb bez ograniczeń).
+  // props to źródło prawdy dla danych przeniesionych z prospektu — dedykowane
+  // kolumny niżej są tylko odpytywalnym duplikatem tego, co i tak jest w props.
+  const corePayload = {
+    owner: user.id,
+    name: p.name,
+    phone: p.phone,
+    company: p.name,
+    stage: firstStage?.key ?? "new",
+    value: 0,
+    source: "prospecting",
+    // props zachowane dla zgodności wstecznej (google_maps_url, score_reasons)
+    // oraz komplet danych zdublowany, żeby nic nie zginęło.
+    props: {
       website: p.website,
       address: p.address,
-      google_rating: p.rating,
+      industry: p.industry,
+      category: p.category ?? p.industry,
+      city: p.city,
+      place_id: p.place_id,
+      rating: p.rating,
       review_count: p.review_count,
       business_status: p.business_status,
-      industry: p.industry,
-      city: p.city,
-      website_status: p.website_status,
       lead_score: p.lead_score,
       lead_score_breakdown: p.lead_score_breakdown,
-      // Kuratorowana kategoria branży (Feature 1) — przeniesiona na deala, żeby
-      // klasyfikacja nie ginęła przy konwersji prospekt → deal.
-      category: p.category ?? null,
-      // Cele kontaktu (Feature 2) — przeniesione na deala (model hybrydowy).
-      purposes: p.purposes ?? [],
-      // props zachowane dla zgodności wstecznej (google_maps_url, score_reasons)
-      // oraz komplet danych zdublowany, żeby nic nie zginęło.
-      props: {
-        website: p.website,
-        address: p.address,
-        industry: p.industry,
-        category: p.category ?? p.industry,
-        city: p.city,
-        place_id: p.place_id,
-        rating: p.rating,
-        review_count: p.review_count,
-        business_status: p.business_status,
-        lead_score: p.lead_score,
-        lead_score_breakdown: p.lead_score_breakdown,
-        website_status: p.website_status,
-        google_maps_url: googleMapsUrl,
-        score_reasons: props.score_reasons ?? null,
-      },
-    })
+      website_status: p.website_status,
+      google_maps_url: googleMapsUrl,
+      score_reasons: props.score_reasons ?? null,
+    },
+  };
+
+  // Pełny transfer danych z Google Maps na dedykowane kolumny deala
+  // (migration_deals_scraper_fields.sql, migration_lead_categories.sql,
+  // migration_properties_system.sql) — KAŻDA właściwość zebrana przy scrapowaniu
+  // ląduje na rekordzie deala, nie tylko podzbiór.
+  const extendedPayload = {
+    ...corePayload,
+    place_id: p.place_id,
+    website: p.website,
+    address: p.address,
+    google_rating: p.rating,
+    review_count: p.review_count,
+    business_status: p.business_status,
+    industry: p.industry,
+    city: p.city,
+    website_status: p.website_status,
+    lead_score: p.lead_score,
+    lead_score_breakdown: p.lead_score_breakdown,
+    // Kuratorowana kategoria branży (Feature 1) — przeniesiona na deala, żeby
+    // klasyfikacja nie ginęła przy konwersji prospekt → deal.
+    category: p.category ?? null,
+    // Cele kontaktu (Feature 2) — przeniesione na deala (model hybrydowy).
+    purposes: p.purposes ?? [],
+  };
+
+  let { data: deal, error: dErr } = await supabase
+    .from("deals")
+    .insert(extendedPayload)
     .select("id")
     .single();
+
+  // Odporność na dryf schematu bazy: jeśli któraś z dedykowanych kolumn scrapera
+  // nie istnieje na tej instancji (nieuruchomiona migracja) albo nieaktualny
+  // check-constraint odrzuca wartość (np. przywrócony górny limit lead_score),
+  // pełny insert się wywraca i „Konwertuj na lead" nic nie robi. W takim wypadku
+  // ponawiamy z rdzeniem — deal i tak powstaje, a komplet danych żyje w props.
+  if (dErr) {
+    console.error("convert-to-lead: full insert failed, retrying core payload", dErr);
+    ({ data: deal, error: dErr } = await supabase
+      .from("deals")
+      .insert(corePayload)
+      .select("id")
+      .single());
+  }
+
   if (dErr || !deal) {
-    return NextResponse.json({ error: "Nie udało się utworzyć deala" }, { status: 500 });
+    return NextResponse.json(
+      { error: `Nie udało się utworzyć deala: ${dErr?.message ?? "nieznany błąd"}` },
+      { status: 500 }
+    );
   }
 
   // Historia celów kontaktu (append-only) — przenieś na deala przy konwersji.
