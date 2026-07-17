@@ -132,3 +132,22 @@ export function splitPhone(
   }
   return { prefix: fallback, local: v };
 }
+
+// Sprowadza dowolny wpis użytkownika do E.164 BEZ spacji (np. "+48601234567").
+// Domyślny kraj: Polska (+48), gdy brak prefiksu. Zwraca null dla numerów
+// niepoprawnych (walidacja przez phoneLocalError — spójna z formularzami).
+// Używane przy KAŻDYM zapisie numeru w module SMS (przechowujemy tylko E.164).
+export function toE164(raw: string, defaultPrefix: string = DEFAULT_PHONE_PREFIX): string | null {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return null;
+  // "00" jako międzynarodowy prefiks zamieniamy na "+".
+  const normalized = trimmed.startsWith("00") ? `+${trimmed.slice(2)}` : trimmed;
+  const { prefix, local } = splitPhone(normalized, defaultPrefix);
+  if (phoneLocalError(prefix, local)) return null;
+  return `${prefix}${digitsOnly(local)}`;
+}
+
+// Czy wartość jest już poprawnym numerem E.164 (walidacja jak toE164).
+export function isE164(value: string): boolean {
+  return toE164(value) !== null && value === toE164(value);
+}

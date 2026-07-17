@@ -21,8 +21,9 @@ import { useClassification } from "@/lib/classification";
 import { useToast } from "@/components/Toast";
 import { PROPERTY_TYPES, TYPE_LABEL, hasOptions, normalizeOptions, propLabel, slugify } from "@/lib/properties";
 import { EmailTemplatesTab } from "@/components/email/EmailTemplatesTab";
+import { SmsTemplatesTab } from "@/components/sms/SmsTemplatesTab";
 
-type Tab = "properties" | "stages" | "categories" | "notifications" | "integrations" | "templates" | "scraper";
+type Tab = "properties" | "stages" | "categories" | "notifications" | "integrations" | "templates" | "sms-templates" | "scraper";
 
 const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
   google_places_api_key: "",
@@ -62,6 +63,7 @@ export default function SettingsPage() {
             ["notifications", "Powiadomienia"],
             ["integrations", "Integracje"],
             ["templates", "Szablony e-mail"],
+            ["sms-templates", "Szablony SMS"],
             ["scraper", "Scraper"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
@@ -96,6 +98,8 @@ export default function SettingsPage() {
         <IntegrationsTab />
       ) : tab === "templates" ? (
         <EmailTemplatesTab />
+      ) : tab === "sms-templates" ? (
+        <SmsTemplatesTab />
       ) : (
         <ScraperTab />
       )}

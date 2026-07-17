@@ -43,6 +43,7 @@ import {
   Pencil,
   Trash2,
   X,
+  MessageSquare,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -72,6 +73,7 @@ import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
 import { normalizeOptions, propLabel, type PropertyView } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
 import { SendEmailModal } from "@/components/email/SendEmailModal";
+import { SendSmsModal } from "@/components/sms/SendSmsModal";
 import StageSelector from "@/components/StageSelector";
 
 // Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
@@ -98,6 +100,7 @@ const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
   note: StickyNote,
   call: Phone,
   email: Mail,
+  sms: MessageSquare,
   submission: FileText,
   stage: GitBranch,
   task: CheckSquare,
@@ -107,6 +110,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
   note: "Notatka",
   call: "Telefon",
   email: "E-mail",
+  sms: "SMS",
   submission: "Zgłoszenie",
   stage: "Zmiana etapu",
   task: "Zadanie",
@@ -117,6 +121,7 @@ const ACTIVITY_COLOR: Record<string, string> = {
   note: tokens.accent,
   call: "#1A73E7",
   email: "#00A3A3",
+  sms: "#7C3AED",
   submission: tokens.accent,
   stage: "#64748B",
 };
@@ -149,6 +154,7 @@ export default function DealPage() {
 
   const [composer, setComposer] = useState<Composer>({ open: false });
   const [emailOpen, setEmailOpen] = useState(false);
+  const [smsOpen, setSmsOpen] = useState(false);
 
   // ── Sekcje z wsadową edycją: lokalny szkic + jeden przycisk „Zapisz” dla
   // całej sekcji (zamiast zapisu przy każdej zmianie pola). Szkic resetuje
@@ -580,6 +586,12 @@ export default function DealPage() {
               onClick={() => setEmailOpen(true)}
               title="Wyślij e-mail z szablonu"
             />
+            <ActionButton
+              icon={MessageSquare}
+              label="SMS"
+              onClick={() => setSmsOpen(true)}
+              title="Wyślij SMS z szablonu"
+            />
             <ActionButton icon={Calendar} label="Kalendarz" disabled title="Wkrótce — integracja Google" />
           </div>
 
@@ -779,6 +791,16 @@ export default function DealPage() {
         <SendEmailModal
           deal={deal}
           onClose={() => setEmailOpen(false)}
+          onSent={reloadFeed}
+        />
+      )}
+
+      {/* Modal „Wyślij SMS” — szablon + dane leada → wysyłka przez /api/sms/send.
+          Po wysyłce serwis dopisuje wpis „sms” na osi czasu; odświeżamy feed. */}
+      {smsOpen && (
+        <SendSmsModal
+          deal={deal}
+          onClose={() => setSmsOpen(false)}
           onSent={reloadFeed}
         />
       )}
@@ -1088,8 +1110,10 @@ function FeedRow({
   }
 
   const a = item.activity;
+  // Nieudany SMS wyróżniamy wizualnie (czerwony) — porażki nie mogą być ciche.
+  const smsFailed = a.type === "sms" && (a.meta as { status?: string } | null)?.status === "failed";
   const Icon = ACTIVITY_ICON[a.type] ?? CircleDot;
-  const color = ACTIVITY_COLOR[a.type] ?? tokens.accent;
+  const color = smsFailed ? tokens.danger : ACTIVITY_COLOR[a.type] ?? tokens.accent;
   const editable = EDITABLE_ACTIVITY_TYPES.has(a.type);
 
   return (
