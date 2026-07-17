@@ -2,9 +2,11 @@
 // Ciąg: zgłoszenie (z MIGAWKAMI tytułu+schematu) → lead (wspólna ścieżka §6/§7)
 // → sesja completed → mail (jeśli włączony) → Meta CAPI (§9c, fire-and-forget)
 // → generyczny webhook (§9d). Działa na service_role (omija RLS) — WYŁĄCZNIE server.
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { DEFAULT_PHONE_PREFIX, phoneLocalError, splitPhone } from "@/lib/phone";
+import { triggerFormSms } from "@/lib/sms/formTrigger";
+import { buildDlrNotifyUrl } from "@/lib/sms/provider";
 import {
   renderThankYouHtml,
   DEFAULT_THANK_YOU_SUBJECT,
@@ -123,6 +125,23 @@ export async function POST(req: Request) {
 
     // 3b. Powiąż zgłoszenie z dealem (Inbox).
     await db.from("submissions").update({ deal_id: dealId }).eq("id", submission.id);
+
+    // 3d. Automatyka SMS (moduł SMS): potwierdzenie + alert wewnętrzny. Uruchamiana
+    //     w tle przez `after` PO wysłaniu odpowiedzi — NIGDY nie blokuje ekranu
+    //     „dziękujemy". Błąd SMS nie może wywrócić zgłoszenia. Wyłącznie ta ścieżka
+    //     (ukończone zgłoszenie) wyzwala SMS — porzucenia/recovery są wykluczone.
+    after(async () => {
+      await triggerFormSms({
+        db,
+        owner: form.owner,
+        form: { id: form.id, title: form.title, slug: form.slug },
+        submissionId: submission.id,
+        schema,
+        answers,
+        lead: { dealId, name, phone },
+        notifyUrl: buildDlrNotifyUrl(new URL(req.url).origin),
+      });
+    });
 
     // 3c. Powiąż/utwórz sesję. Zgłoszenie bez sessionId → syntetyczna sesja
     //     completed, żeby i tak pojawiło się w raportowaniu (§3). Zwrócony

@@ -91,6 +91,7 @@ import { useToast } from "@/components/Toast";
 import FormStats from "@/components/forms/FormStats";
 import FormSubmissions from "@/components/forms/FormSubmissions";
 import MetaSettings from "@/components/forms/MetaSettings";
+import SmsSettings from "@/components/forms/SmsSettings";
 import { BarChart3, Inbox as InboxIcon, PencilRuler } from "lucide-react";
 
 // ── Upload obrazków (bucket Supabase Storage) ────────────────────────────
@@ -143,7 +144,7 @@ type SaveState = "idle" | "saving" | "saved";
 // „step” = ustawienia zaznaczonego kroku / pytania. Rozdzielenie tych dwóch
 // światów to główny cel redesignu — ogólne właściwości formularza są wyraźnie
 // oddzielone od ustawień pojedynczego pytania.
-type FormTab = "brand" | "design" | "settings";
+type FormTab = "brand" | "design" | "settings" | "sms";
 
 // §7b — definicje właściwości (custom fields) dostępne do mapowania pól.
 const PropDefsCtx = createContext<PropertyDef[]>([]);
@@ -760,11 +761,13 @@ export default function FormEditorPage() {
                 <TabButton active={formTab === "brand"} onClick={() => setFormTab("brand")} icon={ImageIcon} label="Marka" />
                 <TabButton active={formTab === "design"} onClick={() => setFormTab("design")} icon={Palette} label="Wygląd" />
                 <TabButton active={formTab === "settings"} onClick={() => setFormTab("settings")} icon={SlidersHorizontal} label="Ustawienia" />
+                <TabButton active={formTab === "sms"} onClick={() => setFormTab("sms")} icon={MessageSquare} label="SMS" />
               </div>
 
               {formTab === "brand" && <BrandPanel schema={schema} onPatch={patchSchema} formId={id} />}
               {formTab === "design" && <ThemePanel schema={schema} onPatch={patchSchema} />}
               {formTab === "settings" && <SettingsPanel schema={schema} onPatch={patchSchema} formId={id} />}
+              {formTab === "sms" && <SmsSettings schema={schema} formId={id} formTitle={schema.title} />}
             </>
           ) : (
             <StepEditor step={active} steps={schema.steps} onPatch={(patch) => patchStep(active.id, patch)} formId={id} />

@@ -15,7 +15,7 @@ export type PipelineStage = {
   is_lost: boolean;
 };
 
-export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | "task";
+export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | "task" | "sms";
 
 // Typy właściwości (custom fields). Rozszerzone o multi_select / boolean /
 // email; `type` w bazie nie ma CHECK-a, więc kolumna dopuszcza te wartości.
@@ -211,6 +211,76 @@ export type EmailTemplate = {
   name: string;
   subject: string;
   body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+// ── SMS (moduł SMSAPI) ───────────────────────────────────────────────────
+export type SmsKind = "transactional" | "marketing";
+export type SmsMessageStatus = "queued" | "sent" | "delivered" | "failed" | "undelivered";
+export type SmsEncodingKind = "gsm7" | "ucs2";
+export type SmsRelatedType = "lead" | "prospect" | "contact" | "deal";
+export type SmsTrigger = "manual" | "form_confirmation" | "form_internal" | "meeting_reminder";
+
+// Szablon SMS (Ustawienia → Szablony SMS). Body z placeholderami {{first_name}} itd.
+// `automated` = szablon używany w automatach formularzy → musi być na GSM-7.
+export type SmsTemplate = {
+  id: string;
+  owner: string;
+  name: string;
+  body: string;
+  kind: SmsKind;
+  is_active: boolean;
+  automated: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// Wiersz logu wysyłki SMS.
+export type SmsMessage = {
+  id: string;
+  owner: string;
+  created_at: string;
+  updated_at: string;
+  related_type: SmsRelatedType | null;
+  related_id: string | null;
+  to_number: string;
+  body: string;
+  sender_name: string | null;
+  provider: string;
+  provider_message_id: string | null;
+  status: SmsMessageStatus;
+  segments: number | null;
+  encoding: SmsEncodingKind | null;
+  cost_points: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  created_by: string | null;
+  kind: SmsKind;
+  template_id: string | null;
+  form_id: string | null;
+  form_submission_id: string | null;
+  trigger: SmsTrigger;
+  scheduled_at: string | null;
+};
+
+// Konfiguracja automatyzacji SMS per-formularz (tabela form_sms_settings).
+export type FormSmsSettings = {
+  form_id: string;
+  owner: string;
+  enabled: boolean;
+  confirmation_enabled: boolean;
+  confirmation_template_id: string | null;
+  confirmation_delay_seconds: number;
+  internal_enabled: boolean;
+  internal_template_id: string | null;
+  internal_recipients: string[];
+  phone_field_id: string | null;
+  consent_field_id: string | null;
+  hourly_cap: number;
   created_at: string;
   updated_at: string;
 };
