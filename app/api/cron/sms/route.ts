@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { deliverQueuedRow, dispatchSms } from "@/lib/sms/service";
-import { buildDlrNotifyUrl, getAppBaseUrl } from "@/lib/sms/provider";
+import { getAppBaseUrl } from "@/lib/sms/provider";
 import { toE164 } from "@/lib/phone";
 import { dealSmsValues } from "@/lib/sms/values";
 import { renderSmsTemplate } from "@/lib/sms/templates";
@@ -31,10 +31,11 @@ export async function GET(req: Request) {
   }
 
   const db = createSupabaseAdmin();
-  const notifyUrl = buildDlrNotifyUrl(getAppBaseUrl());
+  // Origin do budowy callbacku DLR; sam sekret dokłada serwis per-właściciel.
+  const notifyBaseUrl = getAppBaseUrl() ?? undefined;
 
-  const drained = await drainScheduled(db, notifyUrl);
-  const reminders = await sendMeetingReminders(db, notifyUrl);
+  const drained = await drainScheduled(db, notifyBaseUrl);
+  const reminders = await sendMeetingReminders(db, notifyBaseUrl);
 
   return NextResponse.json({ ok: true, drained, reminders });
 }
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
 // 1) Wysyłki zaplanowane, których termin już minął.
 async function drainScheduled(
   db: ReturnType<typeof createSupabaseAdmin>,
-  notifyUrl?: string
+  notifyBaseUrl?: string
 ): Promise<number> {
   const nowIso = new Date().toISOString();
   const { data: rows } = await db
@@ -55,7 +56,7 @@ async function drainScheduled(
 
   let sent = 0;
   for (const row of (rows ?? []) as SmsMessage[]) {
-    const outcome = await deliverQueuedRow(db, row, notifyUrl);
+    const outcome = await deliverQueuedRow(db, row, notifyBaseUrl);
     if (outcome.ok) sent++;
   }
   return sent;
@@ -65,7 +66,7 @@ async function drainScheduled(
 //    telefonu na dealu i bez wysłanego wcześniej przypomnienia.
 async function sendMeetingReminders(
   db: ReturnType<typeof createSupabaseAdmin>,
-  notifyUrl?: string
+  notifyBaseUrl?: string
 ): Promise<number> {
   const now = new Date();
   const until = new Date(now.getTime() + WINDOW_HOURS * 60 * 60 * 1000);
@@ -129,7 +130,7 @@ async function sendMeetingReminders(
       relatedType: "deal",
       relatedId: deal.id,
       templateId: tpl.id,
-      notifyUrl,
+      notifyBaseUrl,
       logActivity: true,
     });
 

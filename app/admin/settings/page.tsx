@@ -3,9 +3,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Reorder, useDragControls } from "framer-motion";
-import { Plus, Trash2, GripVertical, X, Check, Mail, Archive, ChevronDown, ChevronRight, Lock } from "lucide-react";
+import {
+  Plus, Trash2, GripVertical, X, Check, Mail, Archive, ChevronDown, ChevronRight, Lock,
+  SlidersHorizontal, GitBranch, Tag, Bell, Smartphone, FileText, MessageSquare, Bot,
+  type LucideIcon,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
+import { useIsMobile } from "@/lib/responsive";
 import type {
   AppSettings,
   CategoryKeyword,
@@ -23,7 +28,49 @@ import { PROPERTY_TYPES, TYPE_LABEL, hasOptions, normalizeOptions, propLabel, sl
 import { EmailTemplatesTab } from "@/components/email/EmailTemplatesTab";
 import { SmsTemplatesTab } from "@/components/sms/SmsTemplatesTab";
 
-type Tab = "properties" | "stages" | "categories" | "notifications" | "integrations" | "templates" | "sms-templates" | "scraper";
+type Tab =
+  | "properties"
+  | "stages"
+  | "categories"
+  | "notifications"
+  | "integrations"
+  | "sms-gateway"
+  | "templates"
+  | "sms-templates"
+  | "scraper";
+
+// Definicja nawigacji: pogrupowane zakładki z ikoną i krótkim opisem. Grupy
+// porządkują ustawienia tematycznie (lepszy UX niż płaski rząd 9 pigułek).
+type TabDef = { key: Tab; label: string; icon: LucideIcon; hint?: string };
+type TabGroup = { group: string; items: TabDef[] };
+
+const TAB_GROUPS: TabGroup[] = [
+  {
+    group: "Konfiguracja CRM",
+    items: [
+      { key: "properties", label: "Właściwości", icon: SlidersHorizontal, hint: "Pola własne leadów" },
+      { key: "stages", label: "Etapy lejka", icon: GitBranch, hint: "Kolumny pipeline'u" },
+      { key: "categories", label: "Kategorie branż", icon: Tag, hint: "Mapowanie słów kluczowych" },
+    ],
+  },
+  {
+    group: "Komunikacja",
+    items: [
+      { key: "notifications", label: "Powiadomienia", icon: Bell, hint: "E-maile o leadach i zadaniach" },
+      { key: "integrations", label: "Wysyłka e-mail", icon: Mail, hint: "Klucz Resend" },
+      { key: "sms-gateway", label: "Bramka SMS", icon: Smartphone, hint: "Token SMSAPI" },
+      { key: "templates", label: "Szablony e-mail", icon: FileText },
+      { key: "sms-templates", label: "Szablony SMS", icon: MessageSquare },
+    ],
+  },
+  {
+    group: "Zaawansowane",
+    items: [{ key: "scraper", label: "Scraper", icon: Bot, hint: "Google Maps + scoring" }],
+  },
+];
+
+const TAB_LIST: TabDef[] = TAB_GROUPS.flatMap((g) => g.items);
+const TAB_KEYS = new Set<string>(TAB_LIST.map((t) => t.key));
 
 const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
   google_places_api_key: "",
@@ -48,63 +95,152 @@ const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
 };
 
 export default function SettingsPage() {
+  const isMobile = useIsMobile(900);
   const [tab, setTab] = useState<Tab>("properties");
 
+  // Zakładka z URL (?tab=…) — deep-linkowanie i odporność na przeładowanie.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && TAB_KEYS.has(t)) setTab(t as Tab);
+  }, []);
+
+  const selectTab = useCallback((key: Tab) => {
+    setTab(key);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", key);
+    window.history.replaceState(null, "", url.toString());
+  }, []);
+
+  const active = TAB_LIST.find((t) => t.key === tab) ?? TAB_LIST[0];
+
   return (
-    <div style={{ maxWidth: 720 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 20px" }}>Ustawienia</h1>
+    <div style={{ maxWidth: 1080, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Ustawienia</h1>
+      <p style={{ fontSize: 13.5, color: tokens.muted, margin: "0 0 20px" }}>
+        Konfiguracja CRM, integracji i automatyzacji. Zmiany zapisują się per sekcja.
+      </p>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 24 }}>
-        {(
-          [
-            ["properties", "Właściwości"],
-            ["stages", "Etapy lejka"],
-            ["categories", "Kategorie branż"],
-            ["notifications", "Powiadomienia"],
-            ["integrations", "Integracje"],
-            ["templates", "Szablony e-mail"],
-            ["sms-templates", "Szablony SMS"],
-            ["scraper", "Scraper"],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 10,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-              border: `1px solid ${tab === key ? tokens.accent : tokens.border}`,
-              background: tab === key ? tokens.accentSoft : "#fff",
-              color: tab === key ? tokens.accent : tokens.muted,
-            }}
+      {isMobile ? (
+        // ── Mobile: przewijalny poziomo rząd pigułek (nie rozpycha strony) ──
+        <>
+          <div
+            className="selltic-scroll-x"
+            style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8, margin: "0 -2px 16px", WebkitOverflowScrolling: "touch" }}
           >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "properties" ? (
-        <PropertiesTab />
-      ) : tab === "stages" ? (
-        <StagesTab />
-      ) : tab === "categories" ? (
-        <CategoriesTab />
-      ) : tab === "notifications" ? (
-        <NotificationsTab />
-      ) : tab === "integrations" ? (
-        <IntegrationsTab />
-      ) : tab === "templates" ? (
-        <EmailTemplatesTab />
-      ) : tab === "sms-templates" ? (
-        <SmsTemplatesTab />
+            {TAB_LIST.map((t) => {
+              const on = t.key === tab;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => selectTab(t.key)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    padding: "9px 14px",
+                    borderRadius: 999,
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    border: `1px solid ${on ? tokens.accent : tokens.border}`,
+                    background: on ? tokens.accentSoft : "#fff",
+                    color: on ? tokens.accent : tokens.muted,
+                  }}
+                >
+                  <Icon size={15} /> {t.label}
+                </button>
+              );
+            })}
+          </div>
+          <TabContent tab={tab} />
+        </>
       ) : (
-        <ScraperTab />
+        // ── Desktop: boczna nawigacja pogrupowana + treść ──
+        <div style={{ display: "flex", gap: 28, alignItems: "flex-start" }}>
+          <nav style={{ width: 236, flexShrink: 0, position: "sticky", top: 8, display: "grid", gap: 18 }}>
+            {TAB_GROUPS.map((grp) => (
+              <div key={grp.group} style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: tokens.muted, padding: "0 10px 2px" }}>
+                  {grp.group}
+                </span>
+                {grp.items.map((t) => {
+                  const on = t.key === tab;
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.key}
+                      onClick={() => selectTab(t.key)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 11,
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "9px 11px",
+                        borderRadius: 10,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        border: "1px solid transparent",
+                        background: on ? tokens.accentSoft : "transparent",
+                        color: on ? tokens.accent : tokens.text,
+                        transition: `background 120ms ${tokens.ease}`,
+                      }}
+                    >
+                      <Icon size={17} color={on ? tokens.accent : tokens.muted} style={{ flexShrink: 0 }} />
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <div style={{ width: 38, height: 38, borderRadius: 11, display: "grid", placeItems: "center", background: tokens.accentSoft, color: tokens.accent, flexShrink: 0 }}>
+                <active.icon size={19} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 16.5, fontWeight: 700, lineHeight: 1.2 }}>{active.label}</div>
+                {active.hint && <div style={{ fontSize: 12.5, color: tokens.muted }}>{active.hint}</div>}
+              </div>
+            </div>
+            <TabContent tab={tab} />
+          </div>
+        </div>
       )}
     </div>
   );
+}
+
+// Zawartość aktywnej zakładki (jedno miejsce dla obu układów).
+function TabContent({ tab }: { tab: Tab }) {
+  switch (tab) {
+    case "properties":
+      return <PropertiesTab />;
+    case "stages":
+      return <StagesTab />;
+    case "categories":
+      return <CategoriesTab />;
+    case "notifications":
+      return <NotificationsTab />;
+    case "integrations":
+      return <IntegrationsTab />;
+    case "sms-gateway":
+      return <SmsGatewayTab />;
+    case "templates":
+      return <EmailTemplatesTab />;
+    case "sms-templates":
+      return <SmsTemplatesTab />;
+    case "scraper":
+      return <ScraperTab />;
+    default:
+      return null;
+  }
 }
 
 /* ── Etapy lejka ──────────────────────────────────────────── */
@@ -1615,6 +1751,277 @@ function IntegrationsTab() {
 function senderEmail(from: string): string {
   const m = from.match(/<([^>]+)>/);
   return (m ? m[1] : from).trim();
+}
+
+/* ── Bramka SMS (SMSAPI) ──────────────────────────────────────────────────
+   Token i sekret DLR trzymane po stronie serwera (app_settings), czytane przez
+   /api/sms/* z fallbackiem do ENV. GET nigdy nie zwraca sekretów — tylko czy są
+   ustawione. Wzorzec jak IntegrationsTab (Resend). */
+function SmsGatewayTab() {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
+
+  const [tokenConfigured, setTokenConfigured] = useState(false);
+  const [dlrConfigured, setDlrConfigured] = useState(false);
+  const [token, setToken] = useState("");
+  const [sender, setSender] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [testMode, setTestMode] = useState(false);
+  const [dlrSecret, setDlrSecret] = useState("");
+  const [testTo, setTestTo] = useState("");
+
+  const refresh = useCallback(async () => {
+    const res = await fetch("/api/settings/sms");
+    if (res.ok) {
+      const b = await res.json();
+      setTokenConfigured(!!b.tokenConfigured);
+      setDlrConfigured(!!b.dlrConfigured);
+      setSender(b.sender || "");
+      setBaseUrl(b.baseUrl || "");
+      setTestMode(!!b.testMode);
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await refresh();
+      } catch {
+        /* offline */
+      }
+      setLoading(false);
+    })();
+  }, [refresh]);
+
+  async function save() {
+    setSaving(true);
+    setStatus(null);
+    try {
+      const res = await fetch("/api/settings/sms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: token || undefined,
+          sender,
+          baseUrl,
+          testMode,
+          dlrSecret: dlrSecret || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => null);
+        const msg = b?.error || "Nie udało się zapisać.";
+        setStatus({ kind: "err", msg });
+        toast.error(msg);
+      } else {
+        setToken("");
+        setDlrSecret("");
+        await refresh().catch(() => {});
+        setStatus({ kind: "ok", msg: "Zapisano ✓ — konfiguracja bramki SMS utrwalona w bazie." });
+        toast.success("Zapisano ustawienia SMS.");
+      }
+    } catch {
+      setStatus({ kind: "err", msg: "Błąd sieci przy zapisie." });
+      toast.error("Błąd sieci przy zapisie.");
+    }
+    setSaving(false);
+  }
+
+  async function clearSecret(which: "token" | "dlr") {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings/sms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(which === "token" ? { clearToken: true } : { clearDlr: true }),
+      });
+      if (res.ok) {
+        if (which === "token") setTokenConfigured(false);
+        else setDlrConfigured(false);
+        toast.success(which === "token" ? "Token usunięty." : "Sekret DLR usunięty.");
+      } else toast.error("Nie udało się usunąć.");
+    } catch {
+      toast.error("Błąd sieci.");
+    }
+    setSaving(false);
+  }
+
+  async function sendTest() {
+    const to = testTo.trim();
+    if (!to) {
+      toast.error("Podaj numer, na który wysłać test.");
+      return;
+    }
+    setTesting(true);
+    try {
+      const res = await fetch("/api/sms/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, body: "Test SMS z Selltic — konfiguracja bramki dziala." }),
+      });
+      const b = await res.json().catch(() => null);
+      if (!res.ok) toast.error(b?.error || "Test nie powiódł się.");
+      else toast.success(testMode ? "Test zwalidowany (tryb testowy — nie dostarczono)." : "Test wysłany — sprawdź telefon.");
+    } catch {
+      toast.error("Błąd sieci przy teście.");
+    }
+    setTesting(false);
+  }
+
+  function generateDlrSecret() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    setDlrSecret(Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""));
+  }
+
+  if (loading) {
+    return (
+      <Section>
+        <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <Smartphone size={16} color={tokens.accent} />
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Bramka SMS (SMSAPI)</h3>
+      </div>
+      <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px", lineHeight: 1.6 }}>
+        Wszystkie SMS-y — potwierdzenia z formularzy, przypomnienia o spotkaniach i wiadomości ręczne z karty
+        leada — wychodzą przez{" "}
+        <a href="https://www.smsapi.pl" target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
+          SMSAPI
+        </a>
+        . Token jest przechowywany po stronie serwera i nigdy nie wraca do przeglądarki. Wartości ustawione tu
+        mają pierwszeństwo przed zmiennymi środowiskowymi.
+      </p>
+
+      <div style={{ display: "grid", gap: 16, maxWidth: 480 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>
+            Token API {tokenConfigured && <span style={{ color: tokens.success, fontWeight: 600 }}>· zapisany ✓</span>}
+          </span>
+          <input
+            type="password"
+            placeholder={tokenConfigured ? "•••••••••• (zostaw puste, aby nie zmieniać)" : "token OAuth SMSAPI"}
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            style={inputStyle}
+          />
+          <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.55 }}>
+            Wygenerujesz go w panelu SMSAPI → <b>API → Tokeny API → Wygeneruj token dostępu</b>. Bez niego
+            żaden SMS nie zostanie wysłany.
+          </span>
+        </label>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <label style={{ display: "grid", gap: 6, flex: "1 1 200px", minWidth: 0 }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Nazwa nadawcy</span>
+            <input placeholder="np. Selltic" value={sender} onChange={(e) => setSender(e.target.value)} style={inputStyle} />
+            <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.5 }}>
+              Musi być zatwierdzona w SMSAPI (Pola nadawcy).
+            </span>
+          </label>
+          <label style={{ display: "grid", gap: 6, flex: "1 1 200px", minWidth: 0 }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Adres API (opcjonalnie)</span>
+            <input placeholder="https://api.smsapi.com" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} style={inputStyle} />
+            <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.5 }}>
+              Zostaw puste dla domyślnego.
+            </span>
+          </label>
+        </div>
+
+        <ToggleRow
+          label="Tryb testowy"
+          desc="Wiadomości są walidowane, ale NIE wysyłane i NIE zużywają kredytów. Włącz na czas konfiguracji."
+          checked={testMode}
+          onChange={setTestMode}
+        />
+
+        <label style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>
+            Sekret webhooka DLR {dlrConfigured && <span style={{ color: tokens.success, fontWeight: 600 }}>· zapisany ✓</span>}
+          </span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              type="password"
+              placeholder={dlrConfigured ? "•••••••••• (zostaw puste, aby nie zmieniać)" : "długi losowy ciąg"}
+              value={dlrSecret}
+              onChange={(e) => setDlrSecret(e.target.value)}
+              style={{ ...inputStyle, flex: "1 1 220px", minWidth: 0 }}
+            />
+            <button onClick={generateDlrSecret} style={{ ...ghostButton, whiteSpace: "nowrap" }}>
+              Wygeneruj
+            </button>
+          </div>
+          <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.55 }}>
+            Chroni endpoint raportów doręczeń (SMSAPI nie podpisuje callbacków). W panelu SMSAPI ustaw URL
+            powiadomień na: <code>{"{adres-aplikacji}"}/api/sms/dlr?token={"{ten-sekret}"}</code>.
+          </span>
+        </label>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <button onClick={save} disabled={saving} style={primaryButton}>
+            {saving ? "Zapisywanie…" : "Zapisz"}
+          </button>
+          {tokenConfigured && (
+            <button onClick={() => clearSecret("token")} disabled={saving} style={{ ...ghostButton, color: tokens.danger }}>
+              Usuń token
+            </button>
+          )}
+          {dlrConfigured && (
+            <button onClick={() => clearSecret("dlr")} disabled={saving} style={{ ...ghostButton, color: tokens.danger }}>
+              Usuń sekret DLR
+            </button>
+          )}
+        </div>
+
+        {status && (
+          <div
+            role="status"
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: `1px solid ${status.kind === "ok" ? tokens.success : tokens.danger}`,
+              background: status.kind === "ok" ? "rgba(24,169,87,0.08)" : "rgba(229,72,77,0.08)",
+              color: status.kind === "ok" ? tokens.success : tokens.danger,
+            }}
+          >
+            {status.msg}
+          </div>
+        )}
+
+        <div style={{ height: 1, background: tokens.border }} />
+
+        <label style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Test połączenia</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              placeholder="+48601234567"
+              value={testTo}
+              onChange={(e) => setTestTo(e.target.value)}
+              style={{ ...inputStyle, flex: "1 1 200px", minWidth: 0 }}
+            />
+            <button onClick={sendTest} disabled={testing} style={{ ...ghostButton, whiteSpace: "nowrap" }}>
+              {testing ? "Wysyłanie…" : "Wyślij test"}
+            </button>
+          </div>
+          <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.55 }}>
+            Wysyła krótki SMS na podany numer, korzystając z zapisanej konfiguracji. Zapisz ustawienia przed
+            testem. Przy włączonym trybie testowym nic nie zostanie dostarczone.
+          </span>
+        </label>
+      </div>
+    </Section>
+  );
 }
 
 /* ── Scraper (klucz API, konfiguracja, scoring) ──────────────────────────

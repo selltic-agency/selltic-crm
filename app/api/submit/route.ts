@@ -6,7 +6,6 @@ import { NextResponse, after } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { DEFAULT_PHONE_PREFIX, phoneLocalError, splitPhone } from "@/lib/phone";
 import { triggerFormSms } from "@/lib/sms/formTrigger";
-import { buildDlrNotifyUrl } from "@/lib/sms/provider";
 import {
   renderThankYouHtml,
   DEFAULT_THANK_YOU_SUBJECT,
@@ -139,7 +138,7 @@ export async function POST(req: Request) {
         schema,
         answers,
         lead: { dealId, name, phone },
-        notifyUrl: buildDlrNotifyUrl(new URL(req.url).origin),
+        notifyBaseUrl: new URL(req.url).origin,
       });
     });
 

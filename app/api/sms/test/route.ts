@@ -6,7 +6,6 @@ import { createSupabaseServer } from "@/lib/supabase/server";
 import { toE164 } from "@/lib/phone";
 import { renderSmsTemplate, SMS_SAMPLE_VALUES } from "@/lib/sms/templates";
 import { dispatchSms } from "@/lib/sms/service";
-import { buildDlrNotifyUrl, getSmsSender } from "@/lib/sms/provider";
 import type { SmsTemplate } from "@/lib/types";
 
 export async function POST(req: Request) {
@@ -48,9 +47,8 @@ export async function POST(req: Request) {
       body: text,
       kind: "transactional",
       trigger: "manual",
-      senderName: getSmsSender() || undefined,
       createdBy: user.id,
-      notifyUrl: buildDlrNotifyUrl(new URL(req.url).origin),
+      notifyBaseUrl: new URL(req.url).origin,
       logActivity: false,
     });
 

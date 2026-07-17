@@ -27,7 +27,7 @@ export type FormSmsTriggerArgs = {
   schema: FormSchema;
   answers: Record<string, unknown>;
   lead: { dealId: string; name: string; phone: string };
-  notifyUrl?: string;
+  notifyBaseUrl?: string;
 };
 
 function firstToken(s: string | null | undefined): string {
@@ -188,7 +188,7 @@ async function sendConfirmation(
     templateId: tpl.id,
     formId: form.id,
     formSubmissionId: submissionId,
-    notifyUrl: args.notifyUrl,
+    notifyBaseUrl: args.notifyBaseUrl,
     logActivity: true,
   };
 
@@ -222,7 +222,7 @@ async function sendInternal(
       trigger: "form_internal",
       formId: form.id,
       formSubmissionId: submissionId,
-      notifyUrl: args.notifyUrl,
+      notifyBaseUrl: args.notifyBaseUrl,
       logActivity: false,
     };
     const outcome = await dispatchSms(db, ctx);
@@ -230,7 +230,7 @@ async function sendInternal(
     if (!outcome.ok && outcome.reason === "provider" && outcome.messageId) {
       const messageId = outcome.messageId;
       await new Promise((r) => setTimeout(r, INTERNAL_RETRY_DELAY_MS));
-      const retry = await resendMessage(db, messageId, args.notifyUrl);
+      const retry = await resendMessage(db, messageId, args.notifyBaseUrl);
       if (!retry.ok) {
         console.error(`[sms/formTrigger] alert wewnętrzny nie powiódł się po retry numer=***${to.slice(-3)}`);
       }
