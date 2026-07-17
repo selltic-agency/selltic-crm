@@ -3,6 +3,10 @@
 //   • automatów formularzy (lib/sms/formTrigger.ts),
 //   • drenażu wysyłek zaplanowanych i przypomnień (/api/cron/sms).
 //
+// Konfiguracja bramki (token/nadawca/tryb testowy/sekret DLR) jest rozwiązywana
+// per-właściciel z app_settings (fallback ENV) — patrz config.ts. Callbacki DLR
+// budujemy tutaj z sekretu właściciela.
+//
 // Reguły egzekwowane TUTAJ (nie tylko w UI):
 //   • numer musi być poprawny (E.164),
 //   • marketing bez zgody = twarda blokada,
@@ -13,8 +17,9 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SmsKind, SmsMessage, SmsMessageStatus, SmsRelatedType, SmsTrigger } from "@/lib/types";
 import { segmentInfo } from "./encoding";
-import { getActiveProviderId, getSmsProvider, getSmsSender, isSmsTestMode } from "./provider";
-import type { NormalizedSmsError, SendRequest } from "./types";
+import { buildDlrNotifyUrl, createSmsProvider, getAppBaseUrl } from "./provider";
+import { loadSmsConfig, type SmsRuntimeConfig } from "./config";
+import type { NormalizedSmsError, SendRequest, SmsProvider } from "./types";
 
 type Db = SupabaseClient;
 
@@ -31,7 +36,9 @@ export type SmsSendContext = {
   templateId?: string | null;
   formId?: string | null;
   formSubmissionId?: string | null;
-  notifyUrl?: string;
+  // Origin aplikacji do budowy callbacku DLR (np. z request.url). Sam sekret
+  // dokłada serwis z konfiguracji właściciela. Brak → getAppBaseUrl() (ENV).
+  notifyBaseUrl?: string;
   // Czy dopisać wpis na osi czasu leada (domyślnie: tak, gdy powiązano z dealem).
   logActivity?: boolean;
 };
@@ -84,6 +91,7 @@ async function isRecentDuplicate(db: Db, ctx: SmsSendContext): Promise<boolean> 
 async function insertQueuedRow(
   db: Db,
   ctx: SmsSendContext,
+  config: SmsRuntimeConfig,
   scheduledAt: string | null
 ): Promise<{ id: string } | { conflict: true } | { error: string }> {
   const seg = segmentInfo(ctx.body);
@@ -95,8 +103,8 @@ async function insertQueuedRow(
       related_id: ctx.relatedId ?? null,
       to_number: ctx.to,
       body: ctx.body,
-      sender_name: ctx.senderName ?? (getSmsSender() || null),
-      provider: getActiveProviderId(),
+      sender_name: ctx.senderName ?? (config.sender || null),
+      provider: config.providerId,
       status: "queued",
       encoding: seg.encoding,
       segments: seg.segments,
@@ -122,11 +130,11 @@ async function insertQueuedRow(
 // wysyłki natychmiastowej i drenażu zaplanowanych.
 async function performSend(
   db: Db,
+  provider: SmsProvider,
   messageId: string,
   req: SendRequest,
   logActivityFor?: { owner: string; dealId: string }
 ): Promise<SmsOutcome> {
-  const provider = getSmsProvider();
   const result = await provider.send(req);
 
   if (!result.ok) {
@@ -169,16 +177,16 @@ async function logSmsActivity(
   });
 }
 
-// Buduje żądanie do providera z kontekstu.
-function toSendRequest(ctx: SmsSendContext): SendRequest {
+// Buduje żądanie do providera z kontekstu i konfiguracji.
+function toSendRequest(ctx: SmsSendContext, config: SmsRuntimeConfig, notifyUrl?: string): SendRequest {
   const seg = segmentInfo(ctx.body);
   return {
     to: ctx.to,
     body: ctx.body,
-    from: ctx.senderName ?? (getSmsSender() || undefined),
+    from: ctx.senderName ?? (config.sender || undefined),
     encoding: seg.encoding,
-    testMode: isSmsTestMode(),
-    notifyUrl: ctx.notifyUrl,
+    testMode: config.testMode,
+    notifyUrl,
   };
 }
 
@@ -204,16 +212,28 @@ function activityTarget(ctx: SmsSendContext): { owner: string; dealId: string } 
   return undefined;
 }
 
+function notifyUrlFor(ctx: SmsSendContext, config: SmsRuntimeConfig): string | undefined {
+  return buildDlrNotifyUrl(ctx.notifyBaseUrl ?? getAppBaseUrl(), config.dlrSecret);
+}
+
 // Wysyłka NATYCHMIASTOWA: precheck → wiersz `queued` → provider → aktualizacja.
 export async function dispatchSms(db: Db, ctx: SmsSendContext): Promise<SmsOutcome> {
   const pre = await precheck(db, ctx);
   if (pre) return pre;
 
-  const inserted = await insertQueuedRow(db, ctx, null);
+  const config = await loadSmsConfig(db, ctx.owner);
+  let provider: SmsProvider;
+  try {
+    provider = createSmsProvider(config);
+  } catch (e) {
+    return { ok: false, reason: "no_config", error: { code: "no_provider", message: String(e) } };
+  }
+
+  const inserted = await insertQueuedRow(db, ctx, config, null);
   if ("conflict" in inserted) return { ok: false, reason: "duplicate_submission" };
   if ("error" in inserted) return { ok: false, reason: "provider", error: { code: "db", message: inserted.error } };
 
-  return performSend(db, inserted.id, toSendRequest(ctx), activityTarget(ctx));
+  return performSend(db, provider, inserted.id, toSendRequest(ctx, config, notifyUrlFor(ctx, config)), activityTarget(ctx));
 }
 
 // Wysyłka OPÓŹNIONA: tylko wstawia wiersz `queued` ze `scheduled_at`. Cron
@@ -225,7 +245,8 @@ export async function enqueueScheduledSms(
 ): Promise<SmsOutcome> {
   const pre = await precheck(db, ctx);
   if (pre) return pre;
-  const inserted = await insertQueuedRow(db, ctx, scheduledAtIso);
+  const config = await loadSmsConfig(db, ctx.owner);
+  const inserted = await insertQueuedRow(db, ctx, config, scheduledAtIso);
   if ("conflict" in inserted) return { ok: false, reason: "duplicate_submission" };
   if ("error" in inserted) return { ok: false, reason: "provider", error: { code: "db", message: inserted.error } };
   return { ok: true, messageId: inserted.id, status: "queued" };
@@ -233,29 +254,36 @@ export async function enqueueScheduledSms(
 
 // Ponawia wysyłkę istniejącego wiersza (retry alertu wewnętrznego). Pobiera
 // aktualny wiersz i wywołuje providera raz jeszcze na tym samym rekordzie.
-export async function resendMessage(db: Db, messageId: string, notifyUrl?: string): Promise<SmsOutcome> {
+export async function resendMessage(db: Db, messageId: string, notifyBaseUrl?: string): Promise<SmsOutcome> {
   const { data } = await db.from("sms_messages").select("*").eq("id", messageId).maybeSingle();
   if (!data) return { ok: false, reason: "provider", error: { code: "not_found", message: "Brak wiersza." } };
-  return deliverQueuedRow(db, data as SmsMessage, notifyUrl);
+  return deliverQueuedRow(db, data as SmsMessage, notifyBaseUrl);
 }
 
 // Drenaż jednego wcześniej zakolejkowanego wiersza (cron / wysyłki opóźnione).
 export async function deliverQueuedRow(
   db: Db,
   row: SmsMessage,
-  notifyUrl?: string
+  notifyBaseUrl?: string
 ): Promise<SmsOutcome> {
+  const config = await loadSmsConfig(db, row.owner);
+  let provider: SmsProvider;
+  try {
+    provider = createSmsProvider(config);
+  } catch (e) {
+    return { ok: false, reason: "no_config", error: { code: "no_provider", message: String(e) } };
+  }
   const req: SendRequest = {
     to: row.to_number,
     body: row.body,
-    from: row.sender_name ?? (getSmsSender() || undefined),
+    from: row.sender_name ?? (config.sender || undefined),
     encoding: (row.encoding as "gsm7" | "ucs2") ?? segmentInfo(row.body).encoding,
-    testMode: isSmsTestMode(),
-    notifyUrl,
+    testMode: config.testMode,
+    notifyUrl: buildDlrNotifyUrl(notifyBaseUrl ?? getAppBaseUrl(), config.dlrSecret),
   };
   const logFor =
     row.related_type === "deal" && row.related_id
       ? { owner: row.owner, dealId: row.related_id }
       : undefined;
-  return performSend(db, row.id, req, logFor);
+  return performSend(db, provider, row.id, req, logFor);
 }

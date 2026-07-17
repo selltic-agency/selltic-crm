@@ -4,7 +4,8 @@
 // wielokrotnie) i dla rozpoznanych payloadów ZAWSZE zwraca „OK", żeby provider
 // przestał ponawiać. Działa na service_role (webhook jest nieuwierzytelniony).
 import { createSupabaseAdmin } from "@/lib/supabase/server";
-import { getDlrSecret, getSmsProvider } from "@/lib/sms/provider";
+import { createSmsProvider } from "@/lib/sms/provider";
+import { envSmsConfig, loadSmsConfig } from "@/lib/sms/config";
 
 export const dynamic = "force-dynamic";
 
@@ -30,15 +31,12 @@ async function collectParams(req: Request): Promise<Record<string, string>> {
 
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const secret = getDlrSecret();
-  // Bez skonfigurowanego sekretu endpoint jest celowo zablokowany.
-  if (!secret) return new Response("misconfigured", { status: 503 });
-  if (url.searchParams.get("token") !== secret) {
-    return new Response("forbidden", { status: 401 });
-  }
+  const token = url.searchParams.get("token") || "";
+  if (!token) return new Response("forbidden", { status: 401 });
 
+  // Parsowanie payloadu nie wymaga tokenu ani konfiguracji właściciela.
   const params = await collectParams(req);
-  const report = getSmsProvider().parseDeliveryWebhook(params);
+  const report = createSmsProvider(envSmsConfig()).parseDeliveryWebhook(params);
   if (!report) {
     // Payload nierozpoznany — nie każemy providerowi ponawiać w nieskończoność.
     console.warn("[/api/sms/dlr] nierozpoznany payload", JSON.stringify(params).slice(0, 500));
@@ -53,10 +51,19 @@ async function handle(req: Request): Promise<Response> {
     .maybeSingle();
 
   if (!message) {
-    // Nie znamy tej wiadomości (np. wysłana spoza tego środowiska). „OK" kończy ponawianie.
+    // Nieznana wiadomość — bez mutacji. Weryfikujemy token sekretem ENV (gdy ustawiony),
+    // po czym „OK" kończy ponawianie (nic nie ujawniamy).
+    const envSecret = envSmsConfig().dlrSecret;
+    if (envSecret && token !== envSecret) return new Response("forbidden", { status: 401 });
     console.warn(`[/api/sms/dlr] brak wiadomości provider_message_id=${report.providerMessageId}`);
     return new Response("OK");
   }
+
+  // Weryfikacja pochodzenia: token musi zgadzać się z sekretem DLR WŁAŚCICIELA
+  // wiadomości (app_settings, fallback ENV). Bez skonfigurowanego sekretu blokujemy.
+  const config = await loadSmsConfig(db, message.owner);
+  if (!config.dlrSecret) return new Response("misconfigured", { status: 503 });
+  if (token !== config.dlrSecret) return new Response("forbidden", { status: 401 });
 
   // Idempotencja: ten sam DLR (dedupe_key) wstawiamy tylko raz.
   await db

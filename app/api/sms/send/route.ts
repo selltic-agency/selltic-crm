@@ -8,7 +8,6 @@ import { toE164 } from "@/lib/phone";
 import { renderSmsTemplate } from "@/lib/sms/templates";
 import { dealSmsValues } from "@/lib/sms/values";
 import { dispatchSms } from "@/lib/sms/service";
-import { buildDlrNotifyUrl, getSmsSender } from "@/lib/sms/provider";
 import type { SmsKind, SmsRelatedType } from "@/lib/types";
 
 // Komunikaty dla użytkownika wg powodu odrzucenia (bez surowych payloadów providera).
@@ -69,19 +68,17 @@ export async function POST(req: Request) {
       );
     }
 
-    const notifyUrl = buildDlrNotifyUrl(new URL(req.url).origin);
     const outcome = await dispatchSms(supabase, {
       owner: user.id,
       to: e164,
       body: text,
       kind: smsKind,
       trigger: "manual",
-      senderName: getSmsSender() || undefined,
       createdBy: user.id,
       relatedType: relatedType ?? null,
       relatedId: relatedId ?? null,
       templateId: templateId ?? null,
-      notifyUrl,
+      notifyBaseUrl: new URL(req.url).origin,
       logActivity: true,
     });
 
