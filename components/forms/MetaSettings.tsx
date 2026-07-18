@@ -21,18 +21,29 @@ export default function MetaSettings({ formId }: { formId: string }) {
   const [state, setState] = useState<MetaState | null>(null);
   const [tokenInput, setTokenInput] = useState("");
   const [saving, setSaving] = useState(false);
+  // Migawka ostatnio zapisanego stanu → wyliczenie „niezapisanych zmian" (item 6).
+  const [savedSnapshot, setSavedSnapshot] = useState("");
 
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/forms/${formId}/meta`);
-      if (res.ok) setState(await res.json());
-      else setState({ pixelId: "", tokenConfigured: false, testEventCode: "", eventsEnabled: false, webhookUrl: "" });
+      const data: MetaState = res.ok
+        ? await res.json()
+        : { pixelId: "", tokenConfigured: false, testEventCode: "", eventsEnabled: false, webhookUrl: "" };
+      setState(data);
+      setSavedSnapshot(JSON.stringify(data));
+      setTokenInput("");
     } catch {
-      setState({ pixelId: "", tokenConfigured: false, testEventCode: "", eventsEnabled: false, webhookUrl: "" });
+      const empty: MetaState = { pixelId: "", tokenConfigured: false, testEventCode: "", eventsEnabled: false, webhookUrl: "" };
+      setState(empty);
+      setSavedSnapshot(JSON.stringify(empty));
     }
   }, [formId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Brudny stan: pola zmienione względem zapisu lub wpisany nowy token.
+  const dirty = !!state && (JSON.stringify(state) !== savedSnapshot || tokenInput.trim() !== "");
 
   async function save() {
     if (!state) return;
@@ -119,10 +130,13 @@ export default function MetaSettings({ formId }: { formId: string }) {
         Wysyłaj zdarzenia Meta (Pixel + CAPI)
       </label>
 
-      <div>
-        <button onClick={save} disabled={saving} style={primaryButton}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button onClick={save} disabled={saving || !dirty} style={{ ...primaryButton, opacity: saving || !dirty ? 0.55 : 1, cursor: saving || !dirty ? "default" : "pointer" }}>
           {saving ? "Zapisywanie…" : "Zapisz ustawienia Meta"}
         </button>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: dirty ? tokens.warning : tokens.success }}>
+          {dirty ? "● Niezapisane zmiany" : "✓ Zapisane"}
+        </span>
       </div>
     </div>
   );

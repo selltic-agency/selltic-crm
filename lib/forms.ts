@@ -164,6 +164,12 @@ export type FormBranding = {
   tagline?: string; // krótki podtytuł pod nazwą
   showHeader?: boolean; // pokaż nagłówek marki na każdym kroku
   showAvatarOnSteps?: boolean; // pokaż awatar obok pytania (jak w referencji)
+  // ── Dyskretna stopka (prawy dolny róg publicznej strony). Domyślnie logo
+  //    formularza + własny podtytuł zamiast brandingu Selltic. Wszystko
+  //    opcjonalne i w pełni sterowalne przez właściciela formularza (item 4).
+  showFooter?: boolean; // pokaż dyskretną stopkę marki (domyślnie tak)
+  footerText?: string; // tekst/podtytuł w stopce (np. „Bezpieczny formularz")
+  footerLink?: string; // opcjonalny odnośnik pod stopką (https://…)
 };
 
 // Treść automatycznego maila „dziękujemy” (Faza: e-mail po zgłoszeniu).

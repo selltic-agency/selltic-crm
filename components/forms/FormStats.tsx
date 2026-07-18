@@ -18,7 +18,7 @@ const BRAND_RED = "#E8194B";
 
 type Range = 7 | 30 | 90 | 0; // 0 = cały czas
 
-type FunnelRow = { step_index: number; reached: number; completed: number };
+type FunnelRow = { step_index: number; reached: number };
 type Stats = {
   views: number;
   unique_users: number;
@@ -70,14 +70,19 @@ export default function FormStats({ formId }: { formId: string }) {
     ? (stats.completions / stats.unique_users) * 100
     : null;
 
-  // Dane lejka + wyliczenie największego odpływu (do podświetlenia).
+  // Dane lejka. `reached` = ilu UNIKALNYCH użytkowników dotarło do danego kroku
+  // (kumulacyjnie, monotonicznie malejąco). Odpływ = różnica względem kroku
+  // poprzedniego. Największy pojedynczy odpływ podświetlamy marką.
   const funnel = useMemo(() => {
     const rows = (stats?.funnel ?? []).slice().sort((a, b) => a.step_index - b.step_index);
+    const top = rows[0]?.reached ?? 0;
     const withDrop = rows.map((r, i) => {
-      const next = rows[i + 1];
-      const dropOff = next ? Math.max(0, r.reached - next.reached) : 0;
-      const dropPct = next && r.reached > 0 ? (dropOff / r.reached) * 100 : 0;
-      return { ...r, label: `${r.step_index + 1}. ${stepLabel(r.step_index)}`, dropOff, dropPct };
+      const prev = rows[i - 1];
+      const dropOff = prev ? Math.max(0, prev.reached - r.reached) : 0;
+      const dropPct = prev && prev.reached > 0 ? (dropOff / prev.reached) * 100 : 0;
+      // % zachowanych względem pierwszego kroku (widoczności formularza).
+      const keepPct = top > 0 ? (r.reached / top) * 100 : 0;
+      return { ...r, label: `${r.step_index + 1}. ${stepLabel(r.step_index)}`, dropOff, dropPct, keepPct };
     });
     let maxIdx = -1, maxDrop = -1;
     withDrop.forEach((r, i) => { if (r.dropOff > maxDrop) { maxDrop = r.dropOff; maxIdx = i; } });
@@ -145,7 +150,7 @@ export default function FormStats({ formId }: { formId: string }) {
                       />
                       <Tooltip
                         cursor={{ fill: tokens.bg }}
-                        formatter={(v: number, n: string) => [v, n === "reached" ? "Dotarło" : n]}
+                        formatter={(v: number, n: string) => [`${v} os.`, n === "reached" ? "Dotarło" : n]}
                         labelStyle={{ fontWeight: 600 }}
                         contentStyle={{ borderRadius: 10, border: `1px solid ${tokens.border}`, fontSize: 12 }}
                       />
@@ -158,20 +163,21 @@ export default function FormStats({ formId }: { formId: string }) {
                   </ResponsiveContainer>
                 </div>
 
-                {/* Odpływ między krokami */}
+                {/* Ile osób dotarło do każdego kroku + odpływ względem poprzedniego */}
                 <div style={{ marginTop: 12, display: "grid", gap: 6 }}>
-                  {funnel.rows.map((r, i) =>
-                    i < funnel.rows.length - 1 ? (
-                      <div key={r.step_index} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: tokens.muted }}>
-                        <span>
-                          Krok {r.step_index + 1} → {r.step_index + 2}: dotarło {r.reached}, ukończyło {funnel.rows[i + 1].reached}
+                  {funnel.rows.map((r, i) => (
+                    <div key={r.step_index} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12.5, color: tokens.muted }}>
+                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        Krok {r.step_index + 1}: dotarło <b style={{ color: tokens.text }}>{r.reached}</b>{" "}
+                        {i === 0 ? "os. (100%)" : `os. (${r.keepPct.toFixed(0)}% wejść)`}
+                      </span>
+                      {i > 0 && r.dropOff > 0 && (
+                        <span style={{ flexShrink: 0, fontWeight: 700, color: i === funnel.maxIdx ? BRAND_RED : tokens.text }}>
+                          −{r.dropOff} os. (−{r.dropPct.toFixed(0)}%)
                         </span>
-                        <span style={{ fontWeight: 700, color: i === funnel.maxIdx ? BRAND_RED : tokens.text }}>
-                          −{r.dropPct.toFixed(0)}% odpływu
-                        </span>
-                      </div>
-                    ) : null
-                  )}
+                      )}
+                    </div>
+                  ))}
                 </div>
               </>
             )}

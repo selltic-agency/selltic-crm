@@ -394,15 +394,15 @@ export default function FormRenderer({
           <img
             src={branding.logo}
             alt=""
-            style={{ width: 46, height: 46, borderRadius: "50%", objectFit: "cover", border: `2px solid ${accent}`, flexShrink: 0 }}
+            style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: `1px solid rgba(0,0,0,0.08)`, flexShrink: 0 }}
           />
         )}
         <div style={{ minWidth: 0 }}>
           {branding.name && (
-            <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.2, color: text }}>{branding.name}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, color: text, opacity: 0.85 }}>{branding.name}</div>
           )}
           {branding.tagline && (
-            <div style={{ fontSize: 13.5, opacity: 0.6, lineHeight: 1.3, color: text }}>{branding.tagline}</div>
+            <div style={{ fontSize: 12.5, opacity: 0.55, lineHeight: 1.3, color: text }}>{branding.tagline}</div>
           )}
         </div>
       </div>

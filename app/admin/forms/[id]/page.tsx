@@ -94,8 +94,7 @@ import MetaSettings from "@/components/forms/MetaSettings";
 import SmsSettings from "@/components/forms/SmsSettings";
 import { BarChart3, Inbox as InboxIcon, PencilRuler } from "lucide-react";
 
-// ── Upload obrazków (bucket Supabase Storage) ────────────────────────────
-const IMAGE_BUCKET = "form-assets";
+// ── Upload obrazków (przez serwerowy endpoint /api/forms/upload) ──────────
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
@@ -158,11 +157,13 @@ export default function FormEditorPage() {
   const isMobile = useIsMobile(900);
   const [mobilePane, setMobilePane] = useState<"steps" | "editor" | "preview">("editor");
 
-  // Widok najwyższego poziomu: Kreator / Statystyki / Zgłoszenia (§5/§6).
+  // Widok najwyższego poziomu: Kreator / Ustawienia / Statystyki / Zgłoszenia.
+  // „Ustawienia" (marka · wygląd · ustawienia · SMS) to ustawienia globalne
+  // całego formularza — wydzielone z listy kroków do osobnej zakładki.
   const searchParams = useSearchParams();
-  const [view, setView] = useState<"build" | "stats" | "submissions">(() => {
+  const [view, setView] = useState<"build" | "settings" | "stats" | "submissions">(() => {
     const t = searchParams.get("tab");
-    return t === "stats" || t === "submissions" ? t : "build";
+    return t === "settings" || t === "stats" || t === "submissions" ? t : "build";
   });
 
   const [schema, setSchema] = useState<FormSchema | null>(null);
@@ -175,8 +176,7 @@ export default function FormEditorPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  // Zakres edytora + aktywna zakładka ustawień formularza.
-  const [scope, setScope] = useState<"form" | "step">("step");
+  // Aktywna zakładka ustawień globalnych formularza (widok „Ustawienia").
   const [formTab, setFormTab] = useState<FormTab>("brand");
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
@@ -330,7 +330,6 @@ export default function FormEditorPage() {
       return { ...s, steps };
     });
     setActiveId(step.id);
-    setScope("step");
   }
 
   function moveStep(stepId: string, dir: -1 | 1) {
@@ -374,7 +373,6 @@ export default function FormEditorPage() {
       return { ...s, steps };
     });
     setActiveId(copy.id);
-    setScope("step");
     toast.success("Krok zduplikowany.");
   }
 
@@ -453,9 +451,12 @@ export default function FormEditorPage() {
   // Kroki z problemami walidacji (item 7) — do globalnego ostrzeżenia.
   const stepsWithIssues = schema.steps.filter((st) => stepIssues(st).length > 0);
 
+  // Lewa kolumna (lista kroków) ma teraz szerszy dolny próg, żeby nazwy kroków
+  // nie łamały się w wąską kolumnę (item 3). Środkowy edytor dostaje minimum,
+  // by pola formularza były wygodne do edycji.
   const desktopColumns = previewCollapsed
-    ? "minmax(190px, 1.7fr) minmax(0, 8fr) 46px"
-    : "minmax(190px, 1.7fr) minmax(0, 5fr) minmax(300px, 2.9fr)";
+    ? "minmax(240px, 1.6fr) minmax(360px, 8fr) 46px"
+    : "minmax(240px, 1.6fr) minmax(340px, 4.4fr) minmax(300px, 2.9fr)";
 
   return (
     <PropDefsCtx.Provider value={propDefs}>
@@ -495,8 +496,17 @@ export default function FormEditorPage() {
         >
           {statusLabel}
         </span>
-        <span style={{ fontSize: 12, color: tokens.muted }}>
-          {saveState === "saving" ? "Zapisywanie…" : saveState === "saved" ? "Zapisano ✓" : ""}
+        <span
+          style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: saveState === "saving" ? tokens.warning : tokens.success, fontWeight: 600 }}
+          title="Kreator, marka, wygląd i ustawienia zapisują się automatycznie jako wersja robocza. Zakładki SMS i Meta mają własny przycisk „Zapisz”."
+        >
+          <span
+            style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: saveState === "saving" ? tokens.warning : tokens.success,
+            }}
+          />
+          {saveState === "saving" ? "Zapisywanie…" : "Automatycznie zapisane"}
         </span>
         <div style={{ flex: 1 }} />
         <button
@@ -530,13 +540,24 @@ export default function FormEditorPage() {
         </button>
       </div>
 
-      {/* ── Przełącznik widoku: Kreator / Statystyki / Zgłoszenia ── */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: `1px solid ${tokens.border}`, paddingBottom: 2 }}>
+      {/* ── Przełącznik widoku: Kreator / Ustawienia / Statystyki / Zgłoszenia ── */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: `1px solid ${tokens.border}`, paddingBottom: 2, flexWrap: "wrap" }}>
         <ViewTab active={view === "build"} onClick={() => setView("build")} icon={PencilRuler} label="Kreator" />
+        <ViewTab active={view === "settings"} onClick={() => setView("settings")} icon={SlidersHorizontal} label="Ustawienia" />
         <ViewTab active={view === "stats"} onClick={() => setView("stats")} icon={BarChart3} label="Statystyki" />
         <ViewTab active={view === "submissions"} onClick={() => setView("submissions")} icon={InboxIcon} label="Zgłoszenia" />
       </div>
 
+      {view === "settings" && (
+        <FormSettingsView
+          schema={schema}
+          formTab={formTab}
+          setFormTab={setFormTab}
+          onPatch={patchSchema}
+          formId={id}
+          isMobile={isMobile}
+        />
+      )}
       {view === "stats" && <FormStats formId={id} />}
       {view === "submissions" && <FormSubmissions formId={id} />}
 
@@ -614,56 +635,6 @@ export default function FormEditorPage() {
             ...(isMobile ? { display: mobilePane === "steps" ? "block" : "none", flex: 1, minHeight: 0 } : {}),
           }}
         >
-          {/* Ustawienia całego formularza — wyraźnie oddzielone od kroków. */}
-          <div style={{ marginBottom: 14 }}>
-            <span style={{ ...paneTitle, display: "block", marginBottom: 8 }}>Formularz</span>
-            <button
-              onClick={() => {
-                setScope("form");
-                if (isMobile) setMobilePane("editor");
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                width: "100%",
-                textAlign: "left",
-                padding: "10px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                border: `1px solid ${scope === "form" ? tokens.accent : tokens.border}`,
-                background: scope === "form" ? tokens.accentSoft : "#fff",
-              }}
-            >
-              <span
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 8,
-                  flexShrink: 0,
-                  display: "grid",
-                  placeItems: "center",
-                  background: scope === "form" ? tokens.accent : tokens.bg,
-                  color: scope === "form" ? "#fff" : tokens.muted,
-                  overflow: "hidden",
-                }}
-              >
-                {schema.branding?.logo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={schema.branding.logo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                ) : (
-                  <Palette size={15} />
-                )}
-              </span>
-              <span style={{ minWidth: 0, flex: 1 }}>
-                <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: scope === "form" ? tokens.accent : tokens.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  Marka · wygląd · ustawienia
-                </span>
-                <span style={{ display: "block", fontSize: 11.5, color: tokens.muted }}>Ustawienia ogólne formularza</span>
-              </span>
-            </button>
-          </div>
-
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={paneTitle}>Kroki i pytania</span>
             <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj krok">
@@ -731,11 +702,10 @@ export default function FormEditorPage() {
                 step={st}
                 index={i}
                 total={schema.steps.length}
-                active={scope === "step" && st.id === active.id}
+                active={st.id === active.id}
                 issues={stepIssues(st)}
                 onSelect={() => {
                   setActiveId(st.id);
-                  setScope("step");
                   if (isMobile) setMobilePane("editor");
                 }}
                 onMove={moveStep}
@@ -746,8 +716,8 @@ export default function FormEditorPage() {
           </Reorder.Group>
         </div>
 
-        {/* Środek: ustawienia całego formularza (marka/wygląd/ustawienia) LUB
-            edytor zaznaczonego kroku. Te dwa światy są celowo rozdzielone. */}
+        {/* Środek: edytor zaznaczonego kroku. Ustawienia globalne formularza
+            (marka / wygląd / ustawienia / SMS) mają teraz osobną zakładkę. */}
         <div
           style={{
             ...pane,
@@ -755,23 +725,7 @@ export default function FormEditorPage() {
             ...(isMobile ? { display: mobilePane === "editor" ? "block" : "none", flex: 1, minHeight: 0 } : {}),
           }}
         >
-          {scope === "form" ? (
-            <>
-              <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-                <TabButton active={formTab === "brand"} onClick={() => setFormTab("brand")} icon={ImageIcon} label="Marka" />
-                <TabButton active={formTab === "design"} onClick={() => setFormTab("design")} icon={Palette} label="Wygląd" />
-                <TabButton active={formTab === "settings"} onClick={() => setFormTab("settings")} icon={SlidersHorizontal} label="Ustawienia" />
-                <TabButton active={formTab === "sms"} onClick={() => setFormTab("sms")} icon={MessageSquare} label="SMS" />
-              </div>
-
-              {formTab === "brand" && <BrandPanel schema={schema} onPatch={patchSchema} formId={id} />}
-              {formTab === "design" && <ThemePanel schema={schema} onPatch={patchSchema} />}
-              {formTab === "settings" && <SettingsPanel schema={schema} onPatch={patchSchema} formId={id} />}
-              {formTab === "sms" && <SmsSettings schema={schema} formId={id} formTitle={schema.title} />}
-            </>
-          ) : (
-            <StepEditor step={active} steps={schema.steps} onPatch={(patch) => patchStep(active.id, patch)} formId={id} />
-          )}
+          <StepEditor step={active} steps={schema.steps} onPatch={(patch) => patchStep(active.id, patch)} formId={id} />
         </div>
 
         {/* Prawy: podgląd */}
@@ -891,6 +845,100 @@ export default function FormEditorPage() {
       {shareOpen && slug && <ShareModal slug={slug} title={schema.title} onClose={() => setShareOpen(false)} />}
     </div>
     </PropDefsCtx.Provider>
+  );
+}
+
+/* ── Widok „Ustawienia" — ustawienia globalne całego formularza ─────────────
+   Wydzielone z listy kroków do osobnej zakładki najwyższego poziomu (item 2):
+   marka · wygląd · ustawienia · SMS, z podglądem na żywo obok. */
+function FormSettingsView({
+  schema,
+  formTab,
+  setFormTab,
+  onPatch,
+  formId,
+  isMobile,
+}: {
+  schema: FormSchema;
+  formTab: FormTab;
+  setFormTab: (t: FormTab) => void;
+  onPatch: (patch: Partial<FormSchema>) => void;
+  formId: string;
+  isMobile: boolean;
+}) {
+  return (
+    <div
+      style={
+        isMobile
+          ? { display: "flex", flexDirection: "column", gap: 14 }
+          : { display: "grid", gridTemplateColumns: "minmax(340px, 1.5fr) minmax(320px, 1fr)", gap: 14, alignItems: "start" }
+      }
+    >
+      <div style={{ ...pane, overflowY: "auto", maxHeight: isMobile ? undefined : "calc(100vh - 220px)" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+          <TabButton active={formTab === "brand"} onClick={() => setFormTab("brand")} icon={ImageIcon} label="Marka" />
+          <TabButton active={formTab === "design"} onClick={() => setFormTab("design")} icon={Palette} label="Wygląd" />
+          <TabButton active={formTab === "settings"} onClick={() => setFormTab("settings")} icon={SlidersHorizontal} label="Ustawienia" />
+          <TabButton active={formTab === "sms"} onClick={() => setFormTab("sms")} icon={MessageSquare} label="SMS" />
+        </div>
+
+        {/* Doprecyzowanie zapisu (item 6): które zakładki zapisują się same,
+            a które mają własny przycisk „Zapisz". */}
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 8, marginBottom: 14,
+            padding: "8px 12px", borderRadius: 10, fontSize: 12.5, fontWeight: 600,
+            background: formTab === "sms" ? "#FDF1E3" : "#E7F7EE",
+            color: formTab === "sms" ? "#8a5a1a" : tokens.success,
+          }}
+        >
+          {formTab === "sms" ? (
+            <>
+              <AlertTriangle size={14} />
+              Ta zakładka ma własny przycisk „Zapisz konfigurację" — zmiany zapisują się dopiero po jego kliknięciu.
+            </>
+          ) : formTab === "settings" ? (
+            <>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: tokens.success, flexShrink: 0 }} />
+              Ustawienia formularza zapisują się automatycznie. Sekcja „Meta Conversions & webhook" ma osobny przycisk „Zapisz".
+            </>
+          ) : (
+            <>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: tokens.success, flexShrink: 0 }} />
+              Zmiany na tej zakładce zapisują się automatycznie jako wersja robocza.
+            </>
+          )}
+        </div>
+
+        {formTab === "brand" && <BrandPanel schema={schema} onPatch={onPatch} formId={formId} />}
+        {formTab === "design" && <ThemePanel schema={schema} onPatch={onPatch} />}
+        {formTab === "settings" && <SettingsPanel schema={schema} onPatch={onPatch} formId={formId} />}
+        {formTab === "sms" && <SmsSettings schema={schema} formId={formId} formTitle={schema.title} />}
+      </div>
+
+      {/* Podgląd na żywo — pomaga przy marce i wyglądzie. */}
+      {!isMobile && (
+        <div
+          style={{
+            ...pane,
+            padding: 0,
+            overflow: "hidden",
+            position: "sticky",
+            top: 0,
+            height: "calc(100vh - 220px)",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div style={{ padding: "8px 12px", borderBottom: `1px solid ${tokens.border}` }}>
+            <span style={paneTitle}>Podgląd na żywo</span>
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+            <FormRenderer form={schema} preview />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1551,12 +1599,13 @@ function ImageField({
   formId: string;
   label?: string;
 }) {
-  const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [broken, setBroken] = useState(false);
 
+  // Upload przez serwerowy endpoint (service_role). Endpoint sam tworzy bucket
+  // „form-assets”, gdy go brak — dzięki temu znika błąd „Bucket not found”.
   async function handleFile(file: File) {
     if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
       toast.error("Dozwolone formaty: JPEG, PNG, WEBP lub GIF.");
@@ -1567,18 +1616,24 @@ function ImageField({
       return;
     }
     setUploading(true);
-    const ext = (file.name.split(".").pop() || "png").toLowerCase();
-    const path = `${formId}/${newStepId()}.${ext}`;
-    const { error } = await supabase.storage.from(IMAGE_BUCKET).upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type });
-    setUploading(false);
-    if (error) {
-      toast.error("Nie udało się wgrać pliku. " + (error.message || ""));
-      return;
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("formId", formId);
+      const res = await fetch("/api/forms/upload", { method: "POST", body: fd });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.url) {
+        toast.error(body?.error || "Nie udało się wgrać pliku.");
+        return;
+      }
+      setBroken(false);
+      onChange(body.url as string);
+      toast.success("Obraz wgrany.");
+    } catch {
+      toast.error("Błąd sieci podczas wgrywania pliku.");
+    } finally {
+      setUploading(false);
     }
-    const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
-    setBroken(false);
-    onChange(data.publicUrl);
-    toast.success("Obraz wgrany.");
   }
 
   return (
@@ -1908,6 +1963,45 @@ function BrandPanel({
       {!headerOn && b.showHeader !== false && (
         <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>Dodaj logo lub nazwę, aby nagłówek marki był widoczny.</p>
       )}
+
+      {/* ── Stopka marki (prawy dolny róg publicznej strony) — item 4 ───── */}
+      <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 14, marginTop: 4, display: "grid", gap: 12 }}>
+        <span style={{ ...paneTitle, display: "block" }}>Dyskretna stopka</span>
+        <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>
+          Mały, subtelny podpis w prawym dolnym rogu formularza. Zastępuje domyślny znak Selltic — pokazuje
+          Twoje logo i własny tekst. Nie odciąga uwagi od formularza.
+        </p>
+
+        <ToggleRow
+          label="Pokaż stopkę marki"
+          checked={b.showFooter !== false}
+          onChange={(v) => setB({ showFooter: v })}
+        />
+
+        {b.showFooter !== false && (
+          <>
+            <Field label="Tekst stopki">
+              <input
+                value={b.footerText ?? ""}
+                onChange={(e) => setB({ footerText: e.target.value })}
+                placeholder="np. Bezpieczny formularz · Twoja Firma"
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Odnośnik stopki (opcjonalnie)">
+              <input
+                value={b.footerLink ?? ""}
+                onChange={(e) => setB({ footerLink: e.target.value })}
+                placeholder="https://twoja-strona.pl"
+                style={inputStyle}
+              />
+            </Field>
+            <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
+              Stopka używa logo powyżej. Puste pola = pokazujemy samą nazwę marki lub neutralną kropkę.
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }
