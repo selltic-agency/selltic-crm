@@ -26,13 +26,10 @@ app/api/submit/route.ts        ← submission → kontakt → aktywność → ma
    Skopiuj pliki z tego pakietu, zachowując strukturę katalogów.
 
 2. **Supabase**: załóż projekt na supabase.com → SQL Editor → wklej `schema.sql` → Run.
-
-   **Aktualizujesz istniejący projekt sprzed Fazy 9?** `schema.sql` używa
-   `create table if not exists`, więc samo ponowne uruchomienie go NIE doda
-   tabeli `leads` ani nie przeniesie `stage`/`value`/`source`/`form_id` z
-   `contacts` na `leads`. Uruchom dodatkowo `migration_phase9.sql` (SQL Editor
-   → Run) — bez tego dodawanie/tworzenie leadów oraz zapisywanie zgłoszeń z
-   formularzy (które tworzą leada) będzie się nie udawać.
+   `schema.sql` zawiera aktualny, docelowy schemat (Forms + CRM + Prospecting,
+   model `deals`/`prospects`). Dla świeżej bazy to jedyny wymagany plik; pozostałe
+   `migration_*.sql` to przyrostowe dodatki do konkretnych funkcji (uruchamiasz je,
+   gdy włączasz daną funkcję na istniejącej bazie).
 
 3. **Zmienne**: skopiuj `.env.example` → `.env.local`, wklej klucze z Supabase
    (Project Settings → API). `SUPABASE_SERVICE_ROLE_KEY` to sekret — nigdy do kodu klienta.

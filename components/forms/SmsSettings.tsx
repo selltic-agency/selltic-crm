@@ -47,6 +47,8 @@ export default function SmsSettings({
   const [templates, setTemplates] = useState<SmsTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Migawka ostatnio zapisanej konfiguracji → wskaźnik „niezapisanych zmian" (item 6).
+  const [savedSnapshot, setSavedSnapshot] = useState("");
 
   // Stan konfiguracji.
   const [enabled, setEnabled] = useState(false);
@@ -71,20 +73,35 @@ export default function SmsSettings({
       supabase.from("form_sms_settings").select("*").eq("form_id", formId).maybeSingle(),
     ]);
     setTemplates((tpls as SmsTemplate[]) ?? []);
-    if (cfg) {
-      setEnabled(!!cfg.enabled);
-      setConfirmationEnabled(!!cfg.confirmation_enabled);
-      setConfirmationTemplateId((cfg.confirmation_template_id as string) ?? "");
-      setConfirmationDelay((cfg.confirmation_delay_seconds as number) ?? 0);
-      setInternalEnabled(!!cfg.internal_enabled);
-      setInternalTemplateId((cfg.internal_template_id as string) ?? "");
-      setInternalRecipients(((cfg.internal_recipients as string[]) ?? []).join("\n"));
-      setPhoneFieldId((cfg.phone_field_id as string) ?? "");
-      setConsentFieldId((cfg.consent_field_id as string) ?? "");
-      setHourlyCap((cfg.hourly_cap as number) ?? 50);
-    } else if (phoneFields.length === 1) {
-      setPhoneFieldId(phoneFields[0].id); // rozsądny domyślny wybór
-    }
+    // Wartości domyślne / z bazy — zebrane też do migawki „zapisanego" stanu.
+    const v = {
+      enabled: !!cfg?.enabled,
+      confirmationEnabled: !!cfg?.confirmation_enabled,
+      confirmationTemplateId: (cfg?.confirmation_template_id as string) ?? "",
+      confirmationDelay: (cfg?.confirmation_delay_seconds as number) ?? 0,
+      internalEnabled: !!cfg?.internal_enabled,
+      internalTemplateId: (cfg?.internal_template_id as string) ?? "",
+      internalRecipients: ((cfg?.internal_recipients as string[]) ?? []).join("\n"),
+      phoneFieldId: (cfg?.phone_field_id as string) ?? (!cfg && phoneFields.length === 1 ? phoneFields[0].id : ""),
+      consentFieldId: (cfg?.consent_field_id as string) ?? "",
+      hourlyCap: (cfg?.hourly_cap as number) ?? 50,
+    };
+    setEnabled(v.enabled);
+    setConfirmationEnabled(v.confirmationEnabled);
+    setConfirmationTemplateId(v.confirmationTemplateId);
+    setConfirmationDelay(v.confirmationDelay);
+    setInternalEnabled(v.internalEnabled);
+    setInternalTemplateId(v.internalTemplateId);
+    setInternalRecipients(v.internalRecipients);
+    setPhoneFieldId(v.phoneFieldId);
+    setConsentFieldId(v.consentFieldId);
+    setHourlyCap(v.hourlyCap);
+    // Migawka zapisu — jeśli formularz nie ma jeszcze konfiguracji, domyślny
+    // wybór pola telefonu NIE liczy się jako niezapisana zmiana.
+    setSavedSnapshot(JSON.stringify([
+      v.enabled, v.confirmationEnabled, v.confirmationTemplateId, v.confirmationDelay,
+      v.internalEnabled, v.internalTemplateId, v.internalRecipients, v.phoneFieldId, v.consentFieldId, v.hourlyCap,
+    ]));
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, formId]);
@@ -92,6 +109,13 @@ export default function SmsSettings({
   useEffect(() => {
     load();
   }, [load]);
+
+  // Serializacja bieżącej konfiguracji (spójny porządek pól) do porównań.
+  const currentSnapshot = JSON.stringify([
+    enabled, confirmationEnabled, confirmationTemplateId, confirmationDelay,
+    internalEnabled, internalTemplateId, internalRecipients, phoneFieldId, consentFieldId, hourlyCap,
+  ]);
+  const dirty = !loading && currentSnapshot !== savedSnapshot;
 
   const confirmationTpl = templates.find((t) => t.id === confirmationTemplateId) ?? null;
   const internalTpl = templates.find((t) => t.id === internalTemplateId) ?? null;
@@ -165,7 +189,13 @@ export default function SmsSettings({
       );
       return;
     }
-    setInternalRecipients(valid.join("\n"));
+    const normalizedRecipients = valid.join("\n");
+    setInternalRecipients(normalizedRecipients);
+    // Odśwież migawkę zapisu (znormalizowani odbiorcy) → wskaźnik wróci do „Zapisane".
+    setSavedSnapshot(JSON.stringify([
+      enabled, confirmationEnabled, confirmationTemplateId, confirmationDelay,
+      internalEnabled, internalTemplateId, normalizedRecipients, phoneFieldId, consentFieldId, hourlyCap,
+    ]));
     toast.success("Konfiguracja SMS zapisana.");
   }
 
@@ -318,10 +348,13 @@ export default function SmsSettings({
       </div>
 
       {/* Zapis */}
-      <div style={{ display: "flex", gap: 10 }}>
-        <button onClick={save} disabled={saving} style={{ ...primaryButton, opacity: saving ? 0.6 : 1 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <button onClick={save} disabled={saving || !dirty} style={{ ...primaryButton, opacity: saving || !dirty ? 0.55 : 1, cursor: saving || !dirty ? "default" : "pointer" }}>
           {saving ? "Zapisywanie…" : "Zapisz konfigurację"}
         </button>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: dirty ? tokens.warning : tokens.success }}>
+          {dirty ? "● Niezapisane zmiany" : "✓ Zapisane"}
+        </span>
       </div>
 
       {/* Test SMS */}
