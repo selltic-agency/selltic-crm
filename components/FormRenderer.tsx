@@ -32,6 +32,8 @@ import {
   themeProgress,
   themeRadius,
   themeCardBg,
+  themeChoiceHint,
+  choiceHintText,
 } from "@/lib/forms";
 import {
   COUNTRY_PREFIXES,
@@ -349,6 +351,20 @@ export default function FormRenderer({
   const fontFamily = `"${theme.font || "Inter"}", system-ui, sans-serif`;
   const cardRadius = Math.min(28, radius + 8);
   const cardMaxWidth = 560;
+  const showChoiceHint = themeChoiceHint(theme);
+
+  // Własne tło formularza (URL lub wgrany plik). W trybie „karta” prześwituje
+  // wokół karty; w trybie „pełne tło” pod treścią dokładamy delikatną przesłonę
+  // dla czytelności tekstu.
+  const bgImage = (theme.bgImage || "").trim();
+  const bgImageStyle: React.CSSProperties = bgImage
+    ? {
+        backgroundImage: `url("${bgImage.replace(/"/g, '\\"')}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      }
+    : {};
 
   const btn: React.CSSProperties = {
     background: accent,
@@ -373,38 +389,43 @@ export default function FormRenderer({
   const showKrok = !!theme.showStepNumber && current.type !== "end" && current.type !== "welcome" && current.type !== "statement";
   const showStepAvatar = !!branding?.showAvatarOnSteps && !!branding?.logo && current.type !== "welcome" && current.type !== "end";
 
-  // ── Nagłówek marki (awatar + nazwa + podtytuł) ────────────────────────
-  const brandHeader =
+  // ── Logo marki przypięte w lewym górnym rogu ──────────────────────────
+  // Jedno, stałe logo (jak na stronach lądowania). Zastępuje dawny podwójny
+  // nagłówek nad pytaniem. Na publicznej stronie jest `fixed` (przypięte do
+  // okna), w podglądzie edytora `absolute` (nie wychodzi poza panel podglądu).
+  const cornerLogo =
     branding?.showHeader && (branding.logo || branding.name) ? (
       <div
         style={{
+          position: preview ? "absolute" : "fixed",
+          top: isMobile ? 14 : 22,
+          left: isMobile ? 14 : 24,
+          zIndex: 40,
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          width: "100%",
-          maxWidth: cardMaxWidth,
-          margin: "0 auto",
-          marginBottom: isCard ? 14 : 22,
-          padding: "0 2px",
-          boxSizing: "border-box",
+          gap: 10,
+          maxWidth: "72%",
+          pointerEvents: "none",
         }}
       >
-        {branding.logo && (
+        {branding.logo ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={branding.logo}
-            alt=""
-            style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: `1px solid rgba(0,0,0,0.08)`, flexShrink: 0 }}
+            alt={branding.name || ""}
+            style={{
+              height: isMobile ? 32 : 42,
+              width: "auto",
+              maxWidth: isMobile ? 150 : 220,
+              objectFit: "contain",
+              display: "block",
+            }}
           />
+        ) : (
+          <span style={{ fontSize: isMobile ? 16 : 19, fontWeight: 800, color: text, letterSpacing: -0.2, lineHeight: 1.1 }}>
+            {branding.name}
+          </span>
         )}
-        <div style={{ minWidth: 0 }}>
-          {branding.name && (
-            <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, color: text, opacity: 0.85 }}>{branding.name}</div>
-          )}
-          {branding.tagline && (
-            <div style={{ fontSize: 12.5, opacity: 0.55, lineHeight: 1.3, color: text }}>{branding.tagline}</div>
-          )}
-        </div>
       </div>
     ) : null;
 
@@ -540,6 +561,7 @@ export default function FormRenderer({
                 key={f.id}
                 field={f}
                 showLabel={container}
+                showChoiceHint={showChoiceHint}
                 optionStyle={optStyle}
                 radius={radius}
                 value={answers[f.id]}
@@ -601,9 +623,11 @@ export default function FormRenderer({
     return (
       <div
         style={{
+          position: "relative",
           height: "100%",
           minHeight: 460,
-          background: bg,
+          backgroundColor: bg,
+          ...bgImageStyle,
           color: text,
           fontFamily,
           overflowY: "auto",
@@ -611,12 +635,18 @@ export default function FormRenderer({
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          padding: isMobile ? "24px 16px" : "40px 24px",
+          padding: cornerLogo
+            ? isMobile
+              ? "72px 16px 24px"
+              : "92px 24px 40px"
+            : isMobile
+            ? "24px 16px"
+            : "40px 24px",
           boxSizing: "border-box",
         }}
       >
+        {cornerLogo}
         <div style={{ width: "100%", maxWidth: cardMaxWidth, margin: "0 auto" }}>
-          {brandHeader}
           <div
             style={{
               position: "relative",
@@ -642,7 +672,8 @@ export default function FormRenderer({
         position: "relative",
         height: "100%",
         minHeight: 420,
-        background: bg,
+        backgroundColor: bg,
+        ...bgImageStyle,
         color: text,
         fontFamily,
         display: "flex",
@@ -650,6 +681,13 @@ export default function FormRenderer({
         overflow: "hidden",
       }}
     >
+      {/* Przesłona pod treścią — czytelność tekstu na własnym tle. */}
+      {bgImage && (
+        <div style={{ position: "absolute", inset: 0, background: bg, opacity: 0.72, zIndex: 0, pointerEvents: "none" }} />
+      )}
+
+      {cornerLogo}
+
       {/* Pasek postępu na samej górze */}
       {progressStyle !== "none" && (
         <div style={{ height: 4, background: "rgba(0,0,0,0.06)", flexShrink: 0 }}>
@@ -664,9 +702,10 @@ export default function FormRenderer({
           aria-label="Wstecz"
           style={{
             position: "absolute",
-            top: 16,
+            // Zejdź poniżej przypiętego logo, gdy jest widoczne (unikamy kolizji).
+            top: cornerLogo ? (isMobile ? 54 : 74) : 16,
             left: 16,
-            zIndex: 2,
+            zIndex: 3,
             width: 36,
             height: 36,
             borderRadius: 9,
@@ -691,6 +730,8 @@ export default function FormRenderer({
 
       <div
         style={{
+          position: "relative",
+          zIndex: 1,
           flex: 1,
           display: isSplit ? "grid" : "flex",
           gridTemplateColumns: isSplit ? "1fr 1fr" : undefined,
@@ -713,7 +754,6 @@ export default function FormRenderer({
             boxSizing: "border-box",
           }}
         >
-          {brandHeader}
           {stepContent}
         </div>
       </div>
@@ -725,6 +765,7 @@ export default function FormRenderer({
 function FieldControl({
   field,
   showLabel,
+  showChoiceHint,
   optionStyle,
   radius,
   value,
@@ -744,6 +785,7 @@ function FieldControl({
 }: {
   field: FormField;
   showLabel: boolean;
+  showChoiceHint: boolean;
   optionStyle: OptionStyle;
   radius: number;
   value: string | string[] | undefined;
@@ -839,6 +881,20 @@ function FieldControl({
           placeholder={field.placeholder}
           style={{ ...fieldStyle(text, invalid), resize: "vertical" }}
         />
+      )}
+
+      {isChoice(field.type) && showChoiceHint && (
+        <div
+          style={{
+            fontSize: 13.5,
+            fontWeight: 500,
+            opacity: 0.55,
+            marginTop: -2,
+            textAlign: align as React.CSSProperties["textAlign"],
+          }}
+        >
+          {choiceHintText(field.type)}
+        </div>
       )}
 
       {isChoice(field.type) && (
