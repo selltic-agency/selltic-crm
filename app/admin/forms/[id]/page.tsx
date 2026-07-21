@@ -79,6 +79,7 @@ import {
   randomSlug,
   BUILTIN_LEAD_PROPERTIES,
   type FieldMapping,
+  type TeamProperty,
 } from "@/lib/forms";
 import { compatibleTargetTypes, isCompatible, BUILTIN_TARGET_TYPE, type MapTargetType } from "@/lib/leadMapping";
 import { leadTitleTokens } from "@/lib/leadTitle";
@@ -180,6 +181,36 @@ export default function FormEditorPage() {
   const [formTab, setFormTab] = useState<FormTab>("brand");
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
+  // Szerokość kolumny „Kroki i pytania” — regulowana przez użytkownika (item —
+  // sekcja nie jest już sztywna). Trzymana w px, utrwalana w localStorage.
+  const [stepsColW, setStepsColW] = useState(300);
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("selltic-forms-steps-w"));
+    if (saved >= 220 && saved <= 560) setStepsColW(saved);
+  }, []);
+  const startStepsResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      let latest = stepsColW;
+      const onMove = (ev: MouseEvent) => {
+        latest = Math.min(560, Math.max(220, stepsColW + (ev.clientX - startX)));
+        setStepsColW(latest);
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        localStorage.setItem("selltic-forms-steps-w", String(Math.round(latest)));
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [stepsColW]
+  );
   // §7b — właściwości CRM do mapowania pól (aktywne + zarchiwizowane, by ostrzec
   // o usuniętych). Pobierane raz, współdzielone przez kontekst.
   const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
@@ -451,12 +482,12 @@ export default function FormEditorPage() {
   // Kroki z problemami walidacji (item 7) — do globalnego ostrzeżenia.
   const stepsWithIssues = schema.steps.filter((st) => stepIssues(st).length > 0);
 
-  // Lewa kolumna (lista kroków) ma teraz szerszy dolny próg, żeby nazwy kroków
-  // nie łamały się w wąską kolumnę (item 3). Środkowy edytor dostaje minimum,
-  // by pola formularza były wygodne do edycji.
+  // Lewa kolumna (lista kroków) ma regulowaną, utrwalaną szerokość (uchwyt na
+  // prawej krawędzi) — nie jest już sztywna, a nazwy kroków się mieszczą.
+  // Środkowy edytor i podgląd elastycznie wypełniają resztę.
   const desktopColumns = previewCollapsed
-    ? "minmax(240px, 1.6fr) minmax(360px, 8fr) 46px"
-    : "minmax(240px, 1.6fr) minmax(340px, 4.4fr) minmax(300px, 2.9fr)";
+    ? `${stepsColW}px minmax(360px, 1fr) 46px`
+    : `${stepsColW}px minmax(340px, 1.5fr) minmax(300px, 1fr)`;
 
   return (
     <PropDefsCtx.Provider value={propDefs}>
@@ -635,6 +666,26 @@ export default function FormEditorPage() {
             ...(isMobile ? { display: mobilePane === "steps" ? "block" : "none", flex: 1, minHeight: 0 } : {}),
           }}
         >
+          {/* Uchwyt zmiany szerokości kolumny (tylko desktop). */}
+          {!isMobile && (
+            <div
+              onMouseDown={startStepsResize}
+              title="Przeciągnij, aby zmienić szerokość"
+              style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                bottom: 0,
+                width: 12,
+                cursor: "col-resize",
+                zIndex: 6,
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+            >
+              <span style={{ width: 3, background: tokens.border, borderRadius: 2 }} />
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={paneTitle}>Kroki i pytania</span>
             <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj krok">
@@ -911,7 +962,7 @@ function FormSettingsView({
         </div>
 
         {formTab === "brand" && <BrandPanel schema={schema} onPatch={onPatch} formId={formId} />}
-        {formTab === "design" && <ThemePanel schema={schema} onPatch={onPatch} />}
+        {formTab === "design" && <ThemePanel schema={schema} onPatch={onPatch} formId={formId} />}
         {formTab === "settings" && <SettingsPanel schema={schema} onPatch={onPatch} formId={formId} />}
         {formTab === "sms" && <SmsSettings schema={schema} formId={formId} formTitle={schema.title} />}
       </div>
@@ -2007,7 +2058,7 @@ function BrandPanel({
 }
 
 /* ── Panel wyglądu (motyw + styl) ───────────────────────────── */
-function ThemePanel({ schema, onPatch }: { schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void }) {
+function ThemePanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void; formId: string }) {
   const t = schema.theme;
   const setTheme = (patch: Partial<FormSchema["theme"]>) => onPatch({ theme: { ...t, ...patch } });
   const surface = t.surface ?? "full";
@@ -2017,9 +2068,9 @@ function ThemePanel({ schema, onPatch }: { schema: FormSchema; onPatch: (patch: 
       <span style={paneTitle}>Wygląd</span>
 
       <Field label="Czcionka">
-        <select value={t.font} onChange={(e) => setTheme({ font: e.target.value })} style={inputStyle}>
+        <select value={t.font} onChange={(e) => setTheme({ font: e.target.value })} style={{ ...inputStyle, fontFamily: `"${t.font}", system-ui, sans-serif` }}>
           {FONTS.map((f) => (
-            <option key={f} value={f}>
+            <option key={f} value={f} style={{ fontFamily: `"${f}", system-ui, sans-serif` }}>
               {f}
             </option>
           ))}
@@ -2034,6 +2085,17 @@ function ThemePanel({ schema, onPatch }: { schema: FormSchema; onPatch: (patch: 
           <ColorField label="Tło karty" value={t.cardBg ?? "#FFFFFF"} onChange={(v) => setTheme({ cardBg: v })} />
         )}
       </div>
+
+      {/* Własne tło formularza — URL lub wgrany plik (JPEG/PNG/WEBP/GIF). */}
+      <ImageField
+        value={t.bgImage ?? ""}
+        onChange={(url) => setTheme({ bgImage: url || undefined })}
+        formId={formId}
+        label="Tło formularza (obraz — opcjonalnie)"
+      />
+      <p style={{ fontSize: 12, color: tokens.muted, margin: "-6px 0 0" }}>
+        Wklej adres URL lub wgraj własny plik. W trybie „karta" tło prześwituje wokół formularza; w trybie „pełne tło" dokładamy delikatną przesłonę dla czytelności.
+      </p>
 
       <Field label="Powierzchnia formularza">
         <select value={surface} onChange={(e) => setTheme({ surface: e.target.value as FormSchema["theme"]["surface"] })} style={inputStyle}>
@@ -2079,6 +2141,12 @@ function ThemePanel({ schema, onPatch }: { schema: FormSchema; onPatch: (patch: 
         checked={!!t.showStepNumber}
         onChange={(v) => setTheme({ showStepNumber: v })}
       />
+
+      <ToggleRow
+        label="Podpowiedź przy pytaniach wyboru („Wybierz jedną opcję”)"
+        checked={!!t.showChoiceHint}
+        onChange={(v) => setTheme({ showChoiceHint: v })}
+      />
     </div>
   );
 }
@@ -2101,6 +2169,111 @@ function isValidUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/* ── Predefiniowane właściwości formularza (ukryte dla klienta, widoczne dla
+   zespołu). Stała wartość przypisywana do każdego leadu z tego formularza —
+   np. „Źródło = Kampania FB”. Mapuje na własną właściwość (property_defs) lub
+   wbudowaną (Firma / Wartość). Opcjonalne. ─────────────────────────────────── */
+const TEAM_BUILTINS: { key: string; label: string; type: "text" | "number" }[] = [
+  { key: "company", label: "Firma", type: "text" },
+  { key: "value", label: "Wartość (zł)", type: "number" },
+];
+
+function TeamPropsEditor({ value, onChange }: { value: TeamProperty[]; onChange: (v: TeamProperty[]) => void }) {
+  const propDefs = useContext(PropDefsCtx);
+  const activeDefs = useMemo(() => propDefs.filter((d) => !d.archived_at), [propDefs]);
+
+  const setRow = (id: string, patch: Partial<TeamProperty>) =>
+    onChange(value.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addRow = () =>
+    onChange([...value, { id: newStepId(), target: "builtin", property: "company", value: "" }]);
+  const removeRow = (id: string) => onChange(value.filter((r) => r.id !== id));
+
+  // Zmiana wybranej właściwości (target:property) — resetuje wartość, gdy typ
+  // wymaga listy opcji.
+  const selectProp = (id: string, composite: string) => {
+    const [target, property] = composite.split(":") as ["builtin" | "custom", string];
+    setRow(id, { target, property, value: "" });
+  };
+
+  const defFor = (r: TeamProperty) =>
+    r.target === "custom" ? activeDefs.find((d) => d.key === r.property) : null;
+
+  return (
+    <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 12, border: `1px solid ${tokens.border}`, background: tokens.bg }}>
+      <span style={{ ...paneTitle, display: "block" }}>Właściwości zespołu (ukryte dla klienta)</span>
+      <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>
+        Stałe wartości doklejane do każdego leadu z tego formularza — np. „Źródło = Kampania FB”. Klient ich nie widzi;
+        pojawiają się na karcie leadu. Własne właściwości (np. „Źródło”) tworzysz w Ustawienia → Właściwości.
+      </p>
+
+      {value.map((r) => {
+        const def = defFor(r);
+        const options = def ? normalizeOptions(def.options) : [];
+        const isNumber = r.target === "builtin" && r.property === "value";
+        return (
+          <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select
+              value={`${r.target}:${r.property}`}
+              onChange={(e) => selectProp(r.id, e.target.value)}
+              style={{ ...inputStyle, flex: "1 1 140px", minWidth: 0, width: "auto" }}
+            >
+              <optgroup label="Wbudowane">
+                {TEAM_BUILTINS.map((b) => (
+                  <option key={b.key} value={`builtin:${b.key}`}>{b.label}</option>
+                ))}
+              </optgroup>
+              {activeDefs.length > 0 && (
+                <optgroup label="Własne właściwości">
+                  {activeDefs.map((d) => (
+                    <option key={d.key} value={`custom:${d.key}`}>{propLabel(d)}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <span style={{ color: tokens.muted }}>=</span>
+            {options.length > 0 ? (
+              <select
+                value={r.value}
+                onChange={(e) => setRow(r.id, { value: e.target.value })}
+                style={{ ...inputStyle, flex: "1 1 140px", minWidth: 0, width: "auto" }}
+              >
+                <option value="">— wybierz —</option>
+                {options.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={r.value}
+                onChange={(e) => setRow(r.id, { value: e.target.value })}
+                type={isNumber ? "number" : "text"}
+                placeholder={isNumber ? "np. 500" : "np. Kampania FB"}
+                style={{ ...inputStyle, flex: "1 1 140px", minWidth: 0 }}
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => removeRow(r.id)}
+              aria-label="Usuń właściwość"
+              style={{ ...iconBtn, width: 32, height: 32 }}
+            >
+              <X size={14} color={tokens.muted} />
+            </button>
+          </div>
+        );
+      })}
+
+      <button
+        type="button"
+        onClick={addRow}
+        style={{ ...ghostButton, display: "inline-flex", alignItems: "center", gap: 6, width: "fit-content", padding: "7px 12px", fontSize: 13 }}
+      >
+        <Plus size={14} /> Dodaj właściwość
+      </button>
+    </div>
+  );
 }
 
 function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void; formId: string }) {
@@ -2213,6 +2386,12 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
           Puste = domyślne zachowanie (imię/nazwa). Nierozwiązane pola degradują się łagodnie.
         </p>
       </Field>
+
+      {/* Predefiniowane właściwości zespołu — ukryte dla klienta. */}
+      <TeamPropsEditor
+        value={settings.teamProps ?? []}
+        onChange={(teamProps) => setSettings({ teamProps: teamProps.length ? teamProps : undefined })}
+      />
 
       <Field label="Przekierowanie po wysłaniu (URL, opcjonalnie)">
         <input

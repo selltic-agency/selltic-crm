@@ -141,6 +141,26 @@ export async function createLeadFromForm(args: CreateLeadArgs): Promise<CreateLe
 
   const stage = await firstStageKey(db, owner);
 
+  // Predefiniowane właściwości zespołu (ukryte dla klienta) — stałe wartości
+  // doklejane do leadu. Custom → props[key]; wbudowane (company/value) wypełniają
+  // tylko, gdy mapowanie pola ich nie dostarczyło (nie nadpisujemy danych klienta).
+  const teamProps = (settings.teamProps ?? []) as { target?: string; property?: string; value?: string }[];
+  const props: Record<string, unknown> = { ...mapped.props };
+  let teamCompany: string | undefined;
+  let teamValue: number | undefined;
+  for (const tp of teamProps) {
+    const val = (tp.value ?? "").trim();
+    if (!tp.property || !val) continue;
+    if (tp.target === "custom") {
+      props[tp.property] = val;
+    } else if (tp.property === "company") {
+      teamCompany = val;
+    } else if (tp.property === "value") {
+      const n = Number(val);
+      if (!Number.isNaN(n)) teamValue = n;
+    }
+  }
+
   const insert: Record<string, unknown> = {
     owner,
     name: title,
@@ -150,10 +170,12 @@ export async function createLeadFromForm(args: CreateLeadArgs): Promise<CreateLe
     source: formSlug ? `form:${formSlug}` : "form",
     form_id: formId,
     incomplete,
-    props: mapped.props,
+    props,
   };
   if (mapped.builtin.company) insert.company = mapped.builtin.company;
+  else if (teamCompany) insert.company = teamCompany;
   if (typeof mapped.builtin.value === "number") insert.value = mapped.builtin.value;
+  else if (typeof teamValue === "number") insert.value = teamValue;
 
   const { data: deal, error } = await db.from("deals").insert(insert).select("id").single();
   if (error) throw error;

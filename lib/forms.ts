@@ -149,11 +149,15 @@ export type FormTheme = {
   //    Wszystkie opcjonalne: istniejące, opublikowane formularze renderują się
   //    bez zmian (fallbacki w rendererze).
   cardBg?: string; // tło karty formularza (gdy surface = "card")
+  bgImage?: string; // własne tło formularza (URL lub wgrany plik) — pod kartą / na całą stronę
   surface?: FormSurface; // "card" (domyślnie dla nowych) | "full"
   optionStyle?: OptionStyle; // "list" (domyślnie) | "cards"
   progress?: ProgressStyle; // "bar" (domyślnie) | "dots" | "none"
   radius?: number; // promień zaokrągleń kart/przycisków (px)
   showStepNumber?: boolean; // etykieta „KROK X” nad pytaniem
+  // Podpowiedź przy pytaniach wyboru (np. „Wybierz jedną opcję”). Opcjonalna —
+  // stare formularze bez tej flagi jej nie pokazują (fallback w rendererze).
+  showChoiceHint?: boolean;
 };
 
 // Marka formularza — nagłówek z awatarem/logo, nazwą i podtytułem (jak w
@@ -189,6 +193,19 @@ export type FormSettings = {
   // §7a. Szablon domyślnego tytułu leadu, np. „{{field:<id>}} — {{form:title}}”.
   // Pusty → zachowanie domyślne (imię/nazwa z ekstrakcji). Snapshotowany ze schematem.
   defaultLeadTitle?: string;
+  // Predefiniowane właściwości formularza — stałe wartości ustawiane ręcznie
+  // przez zespół (np. „Źródło = Kampania FB"). UKRYTE dla klienta (nigdy nie
+  // renderowane w formularzu), przypisywane do każdego leadu z tego formularza.
+  teamProps?: TeamProperty[];
+};
+
+// Predefiniowana właściwość formularza (item — właściwości zespołu). Stała
+// wartość mapowana na wbudowaną właściwość leadu lub własną z property_defs.
+export type TeamProperty = {
+  id: string;
+  target: "builtin" | "custom";
+  property: string; // company | value | klucz z property_defs
+  value: string; // stała wartość (parsowana wg typu przy tworzeniu leadu)
 };
 
 export type FormSchema = {
@@ -435,19 +452,51 @@ export function validateFieldValue(field: FormField, raw: string): string | null
 
 // ── Czcionki (Google Fonts) ───────────────────────────────────────────────
 export const FONTS = [
+  // Sans-serif (nowoczesne, uniwersalne)
   "Inter",
   "DM Sans",
+  "Manrope",
+  "Poppins",
+  "Montserrat",
+  "Roboto",
+  "Open Sans",
+  "Nunito",
+  "Work Sans",
+  "Raleway",
+  "Rubik",
+  "Outfit",
+  "Plus Jakarta Sans",
   "Space Grotesk",
+  "Lexend",
+  "Figtree",
+  // Serif (elegancki, redakcyjny charakter)
   "Playfair Display",
   "Lora",
+  "Merriweather",
+  "Source Serif 4",
 ] as const;
 
 const GOOGLE_FONT_SPEC: Record<string, string> = {
   Inter: "Inter:wght@400;500;600;700",
   "DM Sans": "DM+Sans:wght@400;500;700",
+  Manrope: "Manrope:wght@400;500;600;700;800",
+  Poppins: "Poppins:wght@400;500;600;700",
+  Montserrat: "Montserrat:wght@400;500;600;700",
+  Roboto: "Roboto:wght@400;500;700",
+  "Open Sans": "Open+Sans:wght@400;500;600;700",
+  Nunito: "Nunito:wght@400;500;600;700;800",
+  "Work Sans": "Work+Sans:wght@400;500;600;700",
+  Raleway: "Raleway:wght@400;500;600;700",
+  Rubik: "Rubik:wght@400;500;600;700",
+  Outfit: "Outfit:wght@400;500;600;700",
+  "Plus Jakarta Sans": "Plus+Jakarta+Sans:wght@400;500;600;700;800",
   "Space Grotesk": "Space+Grotesk:wght@400;500;700",
+  Lexend: "Lexend:wght@400;500;600;700",
+  Figtree: "Figtree:wght@400;500;600;700",
   "Playfair Display": "Playfair+Display:wght@400;600;700",
   Lora: "Lora:wght@400;500;600;700",
+  Merriweather: "Merriweather:wght@400;700",
+  "Source Serif 4": "Source+Serif+4:wght@400;500;600;700",
 };
 
 export function googleFontHref(font: string): string | null {
@@ -541,6 +590,7 @@ export function blankForm(title = "Nowy formularz"): FormSchema {
       progress: "bar",
       radius: 16,
       showStepNumber: true,
+      showChoiceHint: true,
     },
     branding: {
       showHeader: true,
@@ -570,6 +620,18 @@ export function themeRadius(t: FormTheme): number {
 }
 export function themeCardBg(t: FormTheme): string {
   return t.cardBg || t.bg || "#FFFFFF";
+}
+// Podpowiedź przy pytaniach wyboru — domyślnie ukryta (zgodność wsteczna ze
+// starymi formularzami, które jej nie miały). Nowe formularze włączają ją w blankForm.
+export function themeChoiceHint(t: FormTheme): boolean {
+  return t.showChoiceHint ?? false;
+}
+
+// Tekst podpowiedzi zależny od typu pola wyboru.
+export function choiceHintText(type: FieldType | StepType): string {
+  return type === "multi_choice"
+    ? "Możesz wybrać kilka opcji"
+    : "Wybierz jedną opcję";
 }
 
 export function randomSlug(): string {
