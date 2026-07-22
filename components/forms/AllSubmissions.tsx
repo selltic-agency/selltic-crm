@@ -51,7 +51,7 @@ export default function AllSubmissions({ onOpenForm }: { onOpenForm?: (formId: s
       <div style={{ overflowX: "auto" }} className="selltic-scroll-x">
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
           <thead>
-            <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: "#FAFAFB" }}>
+            <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.surface }}>
               <th style={thStyle}>Formularz</th>
               <th style={thStyle}>Zgłoszono</th>
               <th style={thStyle}>Deal</th>
@@ -63,7 +63,7 @@ export default function AllSubmissions({ onOpenForm }: { onOpenForm?: (formId: s
               <tr
                 key={s.id}
                 style={{ borderBottom: `1px solid ${tokens.borderSoft}` }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#FAFAFB")}
+                onMouseEnter={(e) => (e.currentTarget.style.background = tokens.surface)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
                 <td style={tdStyle}>

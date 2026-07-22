@@ -139,7 +139,7 @@ export function SendSmsModal({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <MIcon name="chat" size={17} color={tokens.accent} />
-            <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Wyślij SMS</h2>
+            <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Wyślij SMS</h2>
           </div>
           <button
             onClick={onClose}
@@ -214,7 +214,7 @@ export function SendSmsModal({
             </label>
 
             {kind === "marketing" && (
-              <div style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#8a5a1f", background: "rgba(242,153,74,0.10)", border: "1px solid rgba(242,153,74,0.35)", borderRadius: 10, padding: "10px 12px" }}>
+              <div style={{ display: "flex", gap: 8, fontSize: 12.5, color: tokens.warningStrong, background: "rgba(242,153,74,0.10)", border: "1px solid rgba(242,153,74,0.35)", borderRadius: 10, padding: "10px 12px" }}>
                 <MIcon name="warning" size={15} style={{ flexShrink: 0, marginTop: 1 }} />
                 Szablon marketingowy — wysyłka wymaga zgody marketingowej leada (egzekwowane po stronie serwera).
               </div>

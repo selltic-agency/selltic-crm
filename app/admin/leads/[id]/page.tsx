@@ -97,7 +97,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
 // Kolor „akcentu” aktywności wg typu (dla ikony w osi czasu).
 const ACTIVITY_COLOR: Record<string, string> = {
   note: tokens.accent,
-  call: "#1A73E7",
+  call: tokens.info,
   email: "#00A3A3",
   sms: "#7C3AED",
   submission: tokens.accent,
@@ -485,10 +485,10 @@ export default function DealPage() {
             )}
           </div>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, margin: "10px 0 10px" }}>
-            <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, lineHeight: 1.25 }}>
+            <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: 0, lineHeight: 1.25 }}>
               {dealName}
               {deal.incomplete && (
-                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#FDF1E3", color: tokens.warning, verticalAlign: "middle" }}>
+                <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: tokens.warningSoft, color: tokens.warning, verticalAlign: "middle" }}>
                   Niekompletny
                 </span>
               )}
@@ -1306,7 +1306,7 @@ function ComposerModal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>{heading}</h2>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>{heading}</h2>
           <button
             onClick={onClose}
             aria-label="Zamknij"
@@ -1382,7 +1382,7 @@ function StatusChip({ color, children }: { color: string; children: React.ReactN
   return (
     <span
       style={{
-        fontSize: 10.5,
+        fontSize: 11,
         fontWeight: 700,
         letterSpacing: 0.3,
         textTransform: "uppercase",

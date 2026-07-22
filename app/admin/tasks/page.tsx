@@ -15,6 +15,7 @@ import {
 import type { Assignee, Task } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 import MIcon from "@/components/MaterialIcon";
+import PageHeader from "@/components/PageHeader";
 
 const ASSIGNEE_LABEL: Record<Assignee, string> = { dominik: "Dominik", kuba: "Kuba" };
 
@@ -119,7 +120,7 @@ export default function TasksPage() {
 
   return (
     <div style={{ maxWidth: 760 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Zadania</h1>
+      <PageHeader title="Zadania" />
 
       {/* Formularz dodawania */}
       <form

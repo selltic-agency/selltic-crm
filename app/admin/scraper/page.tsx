@@ -15,6 +15,7 @@ import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "
 import { useToast } from "@/components/Toast";
 import { humanizeScrapeError, ZERO_RESULTS_MESSAGE, formatFound } from "@/lib/scraperMessages";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
+import PageHeader from "@/components/PageHeader";
 import { useClassification } from "@/lib/classification";
 import { useIsMobile } from "@/lib/responsive";
 import type { LeadCategory, ScrapeJob, ScrapeBatch, ScrapeBatchStatus, ScrapedLead, Prospect } from "@/lib/types";
@@ -458,7 +459,7 @@ export default function ScraperPage() {
 
   return (
     <div style={{ maxWidth: 980 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Scraper</h1>
+      <PageHeader title="Scraper" />
 
       <section
         style={{
@@ -765,7 +766,7 @@ function AssignCategoriesModal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexShrink: 0 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Przypisz kategorie</h2>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Przypisz kategorie</h2>
           <button
             onClick={onCancel}
             aria-label="Zamknij"

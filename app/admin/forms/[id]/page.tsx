@@ -480,7 +480,7 @@ export default function FormEditorPage() {
             padding: "4px 12px",
             borderRadius: 999,
             background:
-              statusLabel === "Opublikowany" ? "#E7F7EE" : statusLabel === "Niezapisane zmiany" ? "#FDF1E3" : tokens.bg,
+              statusLabel === "Opublikowany" ? tokens.successSoft : statusLabel === "Niezapisane zmiany" ? tokens.warningSoft : tokens.bg,
             color:
               statusLabel === "Opublikowany"
                 ? tokens.success
@@ -568,9 +568,9 @@ export default function FormEditorPage() {
             padding: "8px 12px",
             marginBottom: 12,
             borderRadius: 10,
-            background: "#FDF1E3",
+            background: tokens.warningSoft,
             border: `1px solid ${tokens.warning}`,
-            color: "#8a5a1a",
+            color: tokens.warningStrong,
             fontSize: 13,
             fontWeight: 600,
           }}
@@ -903,8 +903,8 @@ function FormSettingsView({
           style={{
             display: "flex", alignItems: "center", gap: 8, marginBottom: 14,
             padding: "8px 12px", borderRadius: 10, fontSize: 12.5, fontWeight: 600,
-            background: formTab === "sms" ? "#FDF1E3" : "#E7F7EE",
-            color: formTab === "sms" ? "#8a5a1a" : tokens.success,
+            background: formTab === "sms" ? tokens.warningSoft : tokens.successSoft,
+            color: formTab === "sms" ? tokens.warningStrong : tokens.success,
           }}
         >
           {formTab === "sms" ? (
@@ -2319,7 +2319,7 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
       <span style={paneTitle}>Ustawienia formularza</span>
 
       {!hasContactMap && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "#FDF1E3", border: `1px solid ${tokens.warning}`, color: "#8a5a1a", fontSize: 13, fontWeight: 600 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: tokens.warningSoft, border: `1px solid ${tokens.warning}`, color: tokens.warningStrong, fontSize: 13, fontWeight: 600 }}>
           <MIcon name="warning" size={15} />
           Żadne pole nie jest zmapowane na e-mail ani telefon — ten formularz nie utworzy kontaktowalnego leadu.
         </div>

@@ -14,7 +14,7 @@ import type { FormSchema, Step } from "@/lib/forms";
 import { stepFields } from "@/lib/forms";
 import MIcon from "@/components/MaterialIcon";
 
-const BRAND_RED = "#E8194B";
+const BRAND_RED = tokens.danger;
 
 type Range = 7 | 30 | 90 | 0; // 0 = cały czas
 
@@ -123,7 +123,7 @@ export default function FormStats({ formId }: { formId: string }) {
           </div>
 
           {/* Lejek krokowy */}
-          <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, padding: 20 }}>
+          <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 20 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Lejek krokowy</h3>
               <span style={{ fontSize: 12, color: tokens.muted }}>
@@ -190,11 +190,11 @@ export default function FormStats({ formId }: { formId: string }) {
 
 function Tile({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
   return (
-    <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 14, padding: 16 }}>
+    <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, color: tokens.muted, fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>
         {icon}{label}
       </div>
-      <div style={{ fontSize: 26, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
         {typeof value === "number" ? value.toLocaleString("pl-PL") : value}
       </div>
     </div>

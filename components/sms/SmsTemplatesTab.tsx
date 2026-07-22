@@ -376,7 +376,7 @@ const warnBox = {
   borderRadius: 10,
   background: "rgba(242,153,74,0.10)",
   border: `1px solid rgba(242,153,74,0.35)`,
-  color: "#8a5a1f",
+  color: tokens.warningStrong,
   fontSize: 13,
 } as const;
 

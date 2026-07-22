@@ -21,9 +21,10 @@ import {
   CartesianGrid,
 } from "recharts";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, formatPLN } from "@/lib/ui";
+import { tokens, font, formatPLN, cardStyle, space, chartPalette } from "@/lib/ui";
 import { useStages } from "@/lib/stages";
-import MIcon from "@/components/MaterialIcon";
+import PageHeader from "@/components/PageHeader";
+import StatTile from "@/components/StatTile";
 
 type Kpis = {
   prospects: number;
@@ -33,15 +34,8 @@ type Kpis = {
   wonValue: number;
 };
 
-const SOURCE_COLORS = [
-  tokens.accent,
-  "#1A73E7",
-  "#F2994A",
-  "#18A957",
-  "#E5484D",
-  "#00B8A9",
-  "#8A92A6",
-];
+// Paleta wykresu kołowego — wspólna paleta kategorialna z tokenów.
+const SOURCE_COLORS = chartPalette;
 
 export default function AnalyticsPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -142,22 +136,22 @@ export default function AnalyticsPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Raporty</h1>
+      <PageHeader title="Raporty" />
 
       {/* KPI */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 14,
-          marginBottom: 18,
+          gap: space.md,
+          marginBottom: space.section,
         }}
       >
-        <Kpi icon="group" label="Prospekty" value={loading ? null : String(kpis.prospects)} />
-        <Kpi icon="target" label="Leady" value={loading ? null : String(kpis.leads)} />
-        <Kpi icon="trending_up" label="Konwersja" value={loading ? null : `${kpis.conversion}%`} />
-        <Kpi icon="trophy" label="Wygrane" value={loading ? null : String(kpis.won)} />
-        <Kpi icon="wallet" label="Wartość wygranych" value={loading ? null : formatPLN(kpis.wonValue)} />
+        <StatTile icon="group" label="Prospekty" value={loading ? null : String(kpis.prospects)} />
+        <StatTile icon="target" label="Leady" value={loading ? null : String(kpis.leads)} />
+        <StatTile icon="trending_up" label="Konwersja" value={loading ? null : `${kpis.conversion}%`} />
+        <StatTile icon="trophy" label="Wygrane" value={loading ? null : String(kpis.won)} />
+        <StatTile icon="wallet" label="Wartość wygranych" value={loading ? null : formatPLN(kpis.wonValue)} />
       </div>
 
       {/* Zgłoszenia / dzień */}
@@ -194,8 +188,8 @@ export default function AnalyticsPage() {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-          gap: 18,
-          marginTop: 18,
+          gap: space.section,
+          marginTop: space.section,
         }}
       >
         {/* Leady wg etapu */}
@@ -275,82 +269,18 @@ export default function AnalyticsPage() {
 const axisTick = { fontSize: 12, fill: tokens.muted };
 const tooltipProps = {
   contentStyle: {
-    borderRadius: 10,
+    borderRadius: tokens.radius,
     border: `1px solid ${tokens.border}`,
     fontSize: 13,
-    boxShadow: "0 8px 30px rgba(15,18,28,0.12)",
+    boxShadow: tokens.shadowMenu,
   },
   cursor: { stroke: tokens.border },
 };
 
-function Kpi({
-  icon,
-  label,
-  value,
-}: {
-  icon: string;
-  label: string;
-  value: string | null;
-}) {
-  return (
-    <div
-      style={{
-        background: tokens.card,
-        border: `1px solid ${tokens.border}`,
-        borderRadius: tokens.radius,
-        padding: 18,
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-      }}
-    >
-      <span
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 12,
-          background: tokens.accentSoft,
-          color: tokens.accent,
-          display: "grid",
-          placeItems: "center",
-          flexShrink: 0,
-        }}
-      >
-        <MIcon name={icon} size={22} />
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12, color: tokens.muted, fontWeight: 600 }}>{label}</div>
-        {value === null ? (
-          <div
-            style={{
-              height: 22,
-              width: 64,
-              marginTop: 4,
-              borderRadius: 6,
-              background: tokens.bg,
-              animation: "selltic-pulse 1.2s ease-in-out infinite",
-            }}
-          />
-        ) : (
-          <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{value}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section
-      style={{
-        background: tokens.card,
-        border: `1px solid ${tokens.border}`,
-        borderRadius: tokens.radius,
-        padding: 18,
-      }}
-    >
-      <h2 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 14px" }}>{title}</h2>
-      <style>{`@keyframes selltic-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }`}</style>
+    <section style={cardStyle()}>
+      <h2 style={{ ...font.heading, margin: "0 0 14px", color: tokens.text }}>{title}</h2>
       {children}
     </section>
   );
@@ -361,9 +291,9 @@ function ChartSkeleton() {
     <div
       style={{
         height: 240,
-        borderRadius: 12,
+        borderRadius: tokens.radius,
         background: tokens.bg,
-        animation: "selltic-pulse 1.2s ease-in-out infinite",
+        animation: "selltic-skeleton 1.2s ease-in-out infinite",
       }}
     />
   );

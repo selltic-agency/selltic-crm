@@ -13,7 +13,7 @@ import { dropOffLabel } from "@/lib/formSessions";
 import MIcon from "@/components/MaterialIcon";
 import { useScrollLock } from "@/lib/useScrollLock";
 
-const AMBER = "#F2994A";
+const AMBER = tokens.warning;
 
 type SessionRow = {
   id: string;
@@ -111,11 +111,11 @@ export default function FormSubmissions({ formId }: { formId: string }) {
       {loading ? (
         <p style={{ color: tokens.muted }}>Wczytywanie…</p>
       ) : filtered.length === 0 ? (
-        <div style={{ background: tokens.card, border: `1px dashed ${tokens.border}`, borderRadius: 16, padding: 32, textAlign: "center", color: tokens.muted }}>
+        <div style={{ background: tokens.card, border: `1px dashed ${tokens.border}`, borderRadius: tokens.radius, padding: 32, textAlign: "center", color: tokens.muted }}>
           Brak zgłoszeń w tym filtrze.
         </div>
       ) : (
-        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "hidden" }}>
+        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 840 }}>
               <thead>
@@ -143,11 +143,11 @@ export default function FormSubmissions({ formId }: { formId: string }) {
                       <td style={td}>{formatRelative(r.completed_at || r.started_at)}</td>
                       <td style={td}>
                         {incomplete ? (
-                          <span style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "#FDF1E3", color: AMBER }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: tokens.warningSoft, color: AMBER }}>
                             Niekompletne
                           </span>
                         ) : (
-                          <span style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "#E7F7EE", color: tokens.success }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: tokens.successSoft, color: tokens.success }}>
                             Ukończone
                           </span>
                         )}
@@ -240,7 +240,7 @@ function Drawer({ session, fields, onClose }: { session: SessionRow; fields: For
         style={{ width: "min(480px, 100%)", height: "100%", background: tokens.card, overflowY: "auto", padding: 24, boxShadow: "-10px 0 30px rgba(0,0,0,0.12)" }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Zgłoszenie</h3>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Zgłoszenie</h3>
           <button onClick={onClose} aria-label="Zamknij" style={{ border: "none", background: "none", cursor: "pointer", color: tokens.muted }}>
             <MIcon name="close" size={20} />
           </button>

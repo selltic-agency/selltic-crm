@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { tokens, formatDateTime, formatPLN } from "@/lib/ui";
+import PageHeader from "@/components/PageHeader";
 import {
   type Activity,
   type Deal,
@@ -98,7 +99,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Start</h1>
+      <PageHeader title="Start" />
 
       {/* Szybkie akcje */}
       <div

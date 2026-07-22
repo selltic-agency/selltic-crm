@@ -41,8 +41,8 @@ export default function AdminError({
           style={{
             width: 52,
             height: 52,
-            borderRadius: 14,
-            background: "rgba(229,72,77,0.10)",
+            borderRadius: tokens.radius,
+            background: tokens.dangerSoft,
             color: tokens.danger,
             display: "grid",
             placeItems: "center",
@@ -51,7 +51,7 @@ export default function AdminError({
         >
           <MIcon name="warning" size={26} />
         </span>
-        <p style={{ fontSize: 17, fontWeight: 700, margin: "0 0 6px", color: tokens.text }}>
+        <p style={{ fontSize: 15, fontWeight: 600, margin: "0 0 6px", color: tokens.text }}>
           Coś poszło nie tak
         </p>
         <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 20px", lineHeight: 1.5 }}>

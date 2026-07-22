@@ -114,7 +114,7 @@ export default function ProspectTimeline({
                         {e.body}
                       </div>
                     )}
-                    <div style={{ fontSize: 10.5, color: tokens.muted, marginTop: 2 }}>{formatDateTime(e.created_at)}</div>
+                    <div style={{ fontSize: 11, color: tokens.muted, marginTop: 2 }}>{formatDateTime(e.created_at)}</div>
                   </div>
                 </div>
               );
