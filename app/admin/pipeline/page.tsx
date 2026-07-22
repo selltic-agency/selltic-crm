@@ -583,8 +583,8 @@ function CardMetaRow({
         ...(danger ? { background: "rgba(229,72,77,0.08)", borderRadius: 5, padding: "2px 5px", margin: "-1px -3px" } : {}),
       }}
     >
-      <MIcon name={icon} size={12} />
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
+      <MIcon name={icon} size={12} style={{ flexShrink: 0 }} />
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
     </span>
   );
 }

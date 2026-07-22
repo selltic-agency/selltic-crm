@@ -380,7 +380,7 @@ function MobileCard({
       style={{
         background: tokens.card,
         border: `1px solid ${tokens.border}`,
-        borderRadius: 14,
+        borderRadius: tokens.radius,
         padding: 14,
         ...(archived ? { opacity: 0.7 } : {}),
       }}
