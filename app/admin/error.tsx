@@ -4,8 +4,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { AlertTriangle, RotateCcw } from "lucide-react";
 import { tokens, primaryButton } from "@/lib/ui";
+import MIcon from "@/components/MaterialIcon";
 
 export default function AdminError({
   error,
@@ -49,7 +49,7 @@ export default function AdminError({
             margin: "0 auto 14px",
           }}
         >
-          <AlertTriangle size={26} />
+          <MIcon name="warning" size={26} />
         </span>
         <p style={{ fontSize: 17, fontWeight: 700, margin: "0 0 6px", color: tokens.text }}>
           Coś poszło nie tak
@@ -62,7 +62,7 @@ export default function AdminError({
           onClick={reset}
           style={{ ...primaryButton, display: "inline-flex", alignItems: "center", gap: 8 }}
         >
-          <RotateCcw size={16} />
+          <MIcon name="history" size={16} />
           Spróbuj ponownie
         </button>
       </div>

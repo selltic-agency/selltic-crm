@@ -159,6 +159,9 @@ export type PropertyDef = {
   position: number;
   // Miękkie usunięcie — właściwość z danymi archiwizujemy, nie kasujemy.
   archived_at?: string | null;
+  // Zakres widoczności: 'deals' | 'prospects' (migration_attio_redesign.sql).
+  // Brak kolumny (przed migracją) = widoczna na obu encjach.
+  scopes?: string[] | null;
 };
 
 // Zgłoszenie (surowa odpowiedź formularza) — widok Inbox.

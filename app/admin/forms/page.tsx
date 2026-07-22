@@ -6,15 +6,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Plus, FileText, ChevronUp, ChevronDown, MoreHorizontal, Pencil, Link2,
-  ExternalLink, Copy, BarChart3, Archive, RotateCcw, Inbox,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, primaryButton, formatRelative } from "@/lib/ui";
+import { tokens, primaryButton, formatRelative, pageTitle, menuPanel } from "@/lib/ui";
 import { blankForm, randomSlug } from "@/lib/forms";
 import ShareModal from "./share-modal";
 import { useToast } from "@/components/Toast";
+import MIcon from "@/components/MaterialIcon";
+import EmptyState from "@/components/EmptyState";
+import AllSubmissions from "@/components/forms/AllSubmissions";
 
 // Poniżej tej szerokości dostępnego obszaru tabela (min-width 900) nie mieści
 // się i zwija do przewijanego w bok pudełka — wtedy przełączamy na listę kart.
@@ -63,7 +62,14 @@ export default function FormsPage() {
   const [rows, setRows] = useState<MetricsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [tab, setTab] = useState<"active" | "archive">("active");
+  // Zakładka „Zgłoszenia" (§ redesign): globalna lista zgłoszeń wszystkich
+  // formularzy — przeniesiona z dawnej strony /admin/inbox.
+  const [tab, setTab] = useState<"active" | "archive" | "submissions">(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "zgloszenia") {
+      return "submissions";
+    }
+    return "active";
+  });
   const [sort, setSort] = useState<Sort>({ key: "last_submission", dir: "desc" });
   const [shareForm, setShareForm] = useState<{ slug: string; title: string } | null>(null);
 
@@ -166,38 +172,57 @@ export default function FormsPage() {
 
   return (
     <div ref={listRef}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Formularze</h1>
-        <button onClick={newForm} disabled={creating} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
-          <Plus size={16} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <h1 style={pageTitle}>Formularze</h1>
+        <button onClick={newForm} disabled={creating} style={primaryButton}>
+          <MIcon name="add" size={15} />
           {creating ? "Tworzenie…" : "Nowy formularz"}
         </button>
       </div>
 
-      {/* Zakładki Active / Archive */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {(["active", "archive"] as const).map((t) => (
+      {/* Zakładki: Aktywne / Archiwum / Zgłoszenia (globalne) */}
+      <div style={{ display: "flex", gap: 2, marginBottom: 14, borderBottom: `1px solid ${tokens.border}` }}>
+        {(
+          [
+            ["active", "Aktywne"],
+            ["archive", "Archiwum"],
+            ["submissions", "Zgłoszenia"],
+          ] as const
+        ).map(([t, label]) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             style={{
-              padding: "8px 16px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
-              background: tab === t ? tokens.accentSoft : "transparent",
-              color: tab === t ? tokens.accent : tokens.muted,
+              padding: "7px 12px",
+              border: "none",
+              borderBottom: `2px solid ${tab === t ? tokens.accent : "transparent"}`,
+              marginBottom: -1,
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: tab === t ? 600 : 500,
+              background: "transparent",
+              color: tab === t ? tokens.text : tokens.muted,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
             }}
           >
-            {t === "active" ? "Aktywne" : "Archiwum"}
-            <span style={{ marginLeft: 8, opacity: 0.7 }}>
-              {rows.filter((r) => (t === "archive" ? r.archived_at : !r.archived_at)).length}
-            </span>
+            {label}
+            {t !== "submissions" && (
+              <span style={{ fontSize: 11, fontWeight: 500, color: tokens.muted, background: tokens.bg, borderRadius: 999, padding: "0 6px", lineHeight: "16px" }}>
+                {rows.filter((r) => (t === "archive" ? r.archived_at : !r.archived_at)).length}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
-      {loading ? (
-        <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+      {tab === "submissions" ? (
+        <AllSubmissions onOpenForm={(id) => router.push(`/admin/forms/${id}?tab=submissions`)} />
+      ) : loading ? (
+        <p style={{ color: tokens.muted, fontSize: 13 }}>Wczytywanie…</p>
       ) : sorted.length === 0 ? (
-        <EmptyState tab={tab} />
+        <FormsEmptyState tab={tab} onNew={newForm} />
       ) : compact ? (
         // Gdy dostępny obszar jest węższy niż tabela (telefon albo węższe okno
         // na desktopie), tabela zwijała się do przewijanego w bok pudełka
@@ -474,31 +499,25 @@ function RowMenu({
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Więcej akcji"
-        style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
+        style={{ width: 28, height: 28, borderRadius: 7, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer", color: tokens.muted }}
       >
-        <MoreHorizontal size={16} color={tokens.muted} />
+        <MIcon name="more_horiz" size={16} />
       </button>
       {open && (
-        <div
-          style={{
-            position: "absolute", right: 0, top: 36, zIndex: 30, width: 200,
-            background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 12,
-            boxShadow: "0 10px 30px rgba(0,0,0,0.12)", padding: 4, overflow: "hidden",
-          }}
-        >
+        <div style={{ ...menuPanel, position: "absolute", right: 0, top: 32, zIndex: 30, width: 200, padding: 4 }}>
           {archived ? (
             <>
-              {item(<Inbox size={15} />, "Zobacz zgłoszenia", onSubmissions)}
-              {item(<RotateCcw size={15} />, "Przywróć", onRestore)}
+              {item(<MIcon name="inbox" size={15} />, "Zobacz zgłoszenia", onSubmissions)}
+              {item(<MIcon name="restore_from_trash" size={15} />, "Przywróć", onRestore)}
             </>
           ) : (
             <>
-              {item(<Pencil size={15} />, "Edytuj", onOpen)}
-              {hasSlug && item(<Link2 size={15} />, "Kopiuj link", onCopy)}
-              {hasSlug && item(<ExternalLink size={15} />, "Podgląd", () => slug && window.open(`/f/${slug}`, "_blank"))}
-              {item(<Copy size={15} />, "Duplikuj", onDuplicate)}
-              {item(<BarChart3 size={15} />, "Statystyki", onStats)}
-              {item(<Archive size={15} />, "Archiwizuj", onArchive, true)}
+              {item(<MIcon name="edit" size={15} />, "Edytuj", onOpen)}
+              {hasSlug && item(<MIcon name="link" size={15} />, "Kopiuj link", onCopy)}
+              {hasSlug && item(<MIcon name="open_in_new" size={15} />, "Podgląd", () => slug && window.open(`/f/${slug}`, "_blank"))}
+              {item(<MIcon name="content_copy" size={15} />, "Duplikuj", onDuplicate)}
+              {item(<MIcon name="monitoring" size={15} />, "Statystyki", onStats)}
+              {item(<MIcon name="archive" size={15} />, "Archiwizuj", onArchive, true)}
             </>
           )}
         </div>
@@ -507,13 +526,18 @@ function RowMenu({
   );
 }
 
-function EmptyState({ tab }: { tab: "active" | "archive" }) {
+function FormsEmptyState({ tab, onNew }: { tab: "active" | "archive"; onNew: () => void }) {
   return (
-    <div style={{ background: tokens.card, border: `1px dashed ${tokens.border}`, borderRadius: tokens.radius, padding: 40, textAlign: "center", color: tokens.muted }}>
-      <FileText size={28} style={{ opacity: 0.5 }} />
-      <p style={{ fontSize: 14, margin: "10px 0 0" }}>
-        {tab === "archive" ? "Brak zarchiwizowanych formularzy." : "Brak formularzy. Utwórz pierwszy, klikając „Nowy formularz”."}
-      </p>
+    <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius }}>
+      <EmptyState
+        title={tab === "archive" ? "Brak zarchiwizowanych formularzy" : "Brak formularzy"}
+        description={
+          tab === "archive"
+            ? "Zarchiwizowane formularze pojawią się tutaj."
+            : "Utwórz pierwszy formularz, aby zbierać zgłoszenia."
+        }
+        action={tab === "active" ? { label: "Nowy formularz", icon: "add", onClick: onNew } : undefined}
+      />
     </div>
   );
 }
@@ -531,9 +555,9 @@ function SortHeader({
         color: tokens.muted, cursor: "pointer", whiteSpace: "nowrap", userSelect: "none",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: num ? "flex-end" : "flex-start" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, justifyContent: num ? "flex-end" : "flex-start" }}>
         {label.toUpperCase()}
-        {sort.key === k && (sort.dir === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+        {sort.key === k && <MIcon name={sort.dir === "asc" ? "arrow_upward" : "arrow_downward"} size={12} />}
       </div>
     </th>
   );

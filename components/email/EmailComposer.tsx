@@ -7,9 +7,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Bold, Italic, Link2, ChevronDown } from "lucide-react";
 import { tokens, inputStyle } from "@/lib/ui";
 import { TEMPLATE_FIELDS, renderText, renderHtml } from "@/lib/emailTemplates";
+import MIcon from "@/components/MaterialIcon";
 
 // ── Picker pól dynamicznych ────────────────────────────────────────────────
 export function FieldMenu({ onInsert }: { onInsert: (key: string) => void }) {
@@ -46,7 +46,7 @@ export function FieldMenu({ onInsert }: { onInsert: (key: string) => void }) {
           cursor: "pointer",
         }}
       >
-        Wstaw pole <ChevronDown size={13} />
+        Wstaw pole <MIcon name="expand_more" size={13} />
       </button>
       {open && (
         <div
@@ -248,13 +248,13 @@ export function RichTextEditor({
         }}
       >
         <button type="button" title="Pogrubienie" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")} style={toolBtn}>
-          <Bold size={15} />
+          <MIcon name="format_bold" size={15} />
         </button>
         <button type="button" title="Kursywa" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")} style={toolBtn}>
-          <Italic size={15} />
+          <MIcon name="format_italic" size={15} />
         </button>
         <button type="button" title="Wstaw link" onMouseDown={(e) => e.preventDefault()} onClick={insertLink} style={toolBtn}>
-          <Link2 size={15} />
+          <MIcon name="link" size={15} />
         </button>
         <div style={{ width: 1, height: 20, background: tokens.border, margin: "0 2px" }} />
         <FieldMenu onInsert={insertField} />

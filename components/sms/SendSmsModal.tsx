@@ -5,7 +5,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X, MessageSquare, AlertCircle, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
@@ -15,6 +14,7 @@ import { dealSmsValues } from "@/lib/sms/values";
 import { renderSmsTemplate, SMS_VARIABLES } from "@/lib/sms/templates";
 import { stripDiacritics } from "@/lib/sms/encoding";
 import { SmsCounter } from "@/components/sms/SmsCounter";
+import MIcon from "@/components/MaterialIcon";
 
 export function SendSmsModal({
   deal,
@@ -136,7 +136,7 @@ export function SendSmsModal({
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <MessageSquare size={17} color={tokens.accent} />
+            <MIcon name="chat" size={17} color={tokens.accent} />
             <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Wyślij SMS</h2>
           </div>
           <button
@@ -144,7 +144,7 @@ export function SendSmsModal({
             aria-label="Zamknij"
             style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
           >
-            <X size={15} color={tokens.muted} />
+            <MIcon name="close" size={15} color={tokens.muted} />
           </button>
         </div>
 
@@ -160,7 +160,7 @@ export function SendSmsModal({
               <b>{e164}</b>
             ) : (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: tokens.danger, fontWeight: 600 }}>
-                <AlertCircle size={14} /> Lead nie ma poprawnego numeru — uzupełnij go w danych kontaktowych.
+                <MIcon name="error" size={14} /> Lead nie ma poprawnego numeru — uzupełnij go w danych kontaktowych.
               </span>
             )}
           </div>
@@ -213,7 +213,7 @@ export function SendSmsModal({
 
             {kind === "marketing" && (
               <div style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#8a5a1f", background: "rgba(242,153,74,0.10)", border: "1px solid rgba(242,153,74,0.35)", borderRadius: 10, padding: "10px 12px" }}>
-                <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <MIcon name="warning" size={15} style={{ flexShrink: 0, marginTop: 1 }} />
                 Szablon marketingowy — wysyłka wymaga zgody marketingowej leada (egzekwowane po stronie serwera).
               </div>
             )}

@@ -244,22 +244,40 @@ export async function appendPurposeHistory(
   if (error) console.error(`Nie zapisano historii celu kontaktu (${table}):`, error);
 }
 
-// ── Hook: właściwości dla encji (systemowe + własne) ──────────────────────
+// ── Zakresy właściwości (gdzie właściwość jest widoczna) ──────────────────
+// Definicja bez kolumny scopes (przed migration_attio_redesign.sql) = obie encje.
+export function defScopes(def: Pick<PropertyDef, "scopes">): EntityKind[] {
+  const raw = def.scopes;
+  if (!Array.isArray(raw) || raw.length === 0) return ["deals", "prospects"];
+  return raw.filter((s): s is EntityKind => s === "deals" || s === "prospects");
+}
+
+export function defInScope(def: Pick<PropertyDef, "scopes">, entity: EntityKind): boolean {
+  return defScopes(def).includes(entity);
+}
+
+// Nadpisania zakresów właściwości SYSTEMOWYCH (kategoria / cel kontaktu) —
+// app_settings.system_prop_scopes = { category: ['deals','prospects'], ... }.
+export type SystemPropScopes = Record<string, EntityKind[]>;
+
+// ── Hook: właściwości dla encji (systemowe + własne, wg zakresów) ─────────
 export function useEntityProperties(entity: EntityKind) {
   const supabase = useMemo(() => createClient(), []);
   const { categories, purposes } = useClassification();
   const [defs, setDefs] = useState<PropertyDef[]>([]);
+  const [sysScopes, setSysScopes] = useState<SystemPropScopes>({});
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
     // Tylko aktywne (niearchiwalne) właściwości trafiają do UI list/filtrów.
-    const { data } = await supabase
-      .from("property_defs")
-      .select("*")
-      .is("archived_at", null)
-      .order("position", { ascending: true });
+    const [{ data }, settingsRes] = await Promise.all([
+      supabase.from("property_defs").select("*").is("archived_at", null).order("position", { ascending: true }),
+      supabase.from("app_settings").select("system_prop_scopes").maybeSingle(),
+    ]);
     setDefs((data as PropertyDef[]) ?? []);
+    const raw = (settingsRes.data as { system_prop_scopes?: SystemPropScopes | null } | null)?.system_prop_scopes;
+    setSysScopes(raw && typeof raw === "object" ? raw : {});
     setLoading(false);
   }, [supabase]);
 
@@ -268,9 +286,13 @@ export function useEntityProperties(entity: EntityKind) {
   }, [reload]);
 
   // Właściwości systemowe: kategoria (single-select) + cel kontaktu (multi).
-  // Dostępne na obu encjach (deals ma teraz purposes — migration_properties_system.sql).
+  // Zakres można zawęzić w Ustawieniach (system_prop_scopes); domyślnie obie encje.
   const systemViews = useMemo<PropertyView[]>(() => {
-    return [
+    const inScope = (key: string) => {
+      const s = sysScopes[key];
+      return !Array.isArray(s) || s.length === 0 ? true : s.includes(entity);
+    };
+    const all: PropertyView[] = [
       {
         key: SYS_CATEGORY,
         label: "Kategoria",
@@ -290,22 +312,24 @@ export function useEntityProperties(entity: EntityKind) {
         archived: false,
       },
     ];
-  }, [categories, purposes]);
+    return all.filter((v) => inScope(v.key));
+  }, [categories, purposes, sysScopes, entity]);
 
   const customViews = useMemo<PropertyView[]>(() => {
-    return defs.map((d) => ({
-      key: d.key,
-      label: propLabel(d),
-      type: d.type,
-      options: normalizeOptions(d.options),
-      system: false,
-      storage: "props" as const,
-      archived: !!d.archived_at,
-    }));
-  }, [defs]);
+    return defs
+      .filter((d) => defInScope(d, entity))
+      .map((d) => ({
+        key: d.key,
+        label: propLabel(d),
+        type: d.type,
+        options: normalizeOptions(d.options),
+        system: false,
+        storage: "props" as const,
+        archived: !!d.archived_at,
+      }));
+  }, [defs, entity]);
 
   const views = useMemo(() => [...systemViews, ...customViews], [systemViews, customViews]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   return { views, systemViews, customViews, defs, loading, reload };
 }

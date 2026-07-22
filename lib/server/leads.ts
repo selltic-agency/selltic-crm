@@ -7,6 +7,7 @@ import type { FormSchema, Step } from "@/lib/forms";
 import { stepFields } from "@/lib/forms";
 import { resolveMappedValues, type MappingWarning, type PropTypeLookup } from "@/lib/leadMapping";
 import { resolveLeadTitle } from "@/lib/leadTitle";
+import { CONTACT_SOURCE_KEY, ensureContactSourceDef } from "@/lib/contactSource";
 import type { PropertyType } from "@/lib/types";
 
 type Db = SupabaseClient;
@@ -159,6 +160,14 @@ export async function createLeadFromForm(args: CreateLeadArgs): Promise<CreateLe
       const n = Number(val);
       if (!Number.isNaN(n)) teamValue = n;
     }
+  }
+
+  // Właściwość „Źródło kontaktu" — deal z formularza dostaje 'formularz'
+  // (o ile mapowanie pól nie ustawiło jej jawnie). Dosiew definicji jest
+  // idempotentny — patrz lib/contactSource.ts.
+  await ensureContactSourceDef(db, owner);
+  if (props[CONTACT_SOURCE_KEY] == null || props[CONTACT_SOURCE_KEY] === "") {
+    props[CONTACT_SOURCE_KEY] = "formularz";
   }
 
   const insert: Record<string, unknown> = {

@@ -5,7 +5,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Clock, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   tokens,
@@ -15,6 +14,7 @@ import {
 } from "@/lib/ui";
 import type { Assignee, Task } from "@/lib/types";
 import { useToast } from "@/components/Toast";
+import MIcon from "@/components/MaterialIcon";
 
 const ASSIGNEE_LABEL: Record<Assignee, string> = { dominik: "Dominik", kuba: "Kuba" };
 
@@ -119,7 +119,7 @@ export default function TasksPage() {
 
   return (
     <div style={{ maxWidth: 760 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 20px" }}>Zadania</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Zadania</h1>
 
       {/* Formularz dodawania */}
       <form
@@ -158,7 +158,7 @@ export default function TasksPage() {
           <option value="kuba">Kuba</option>
         </select>
         <button type="submit" disabled={adding} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
-          <Plus size={16} />
+          <MIcon name="add" size={16} />
           {adding ? "Dodawanie…" : "Dodaj"}
         </button>
       </form>
@@ -255,7 +255,7 @@ function TaskRow({
         <div style={{ display: "flex", gap: 14, marginTop: 3, flexWrap: "wrap" }}>
           {task.due_at && (
             <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.muted }}>
-              <Clock size={13} />
+              <MIcon name="schedule" size={13} />
               {formatDateTime(task.due_at)}
             </span>
           )}
@@ -275,7 +275,7 @@ function TaskRow({
                 fontWeight: 600,
               }}
             >
-              <User size={13} />
+              <MIcon name="person" size={13} />
               {task.deals.name || "Deal"}
             </button>
           )}
@@ -316,7 +316,7 @@ function TaskRow({
           flexShrink: 0,
         }}
       >
-        <Trash2 size={15} color={tokens.muted} />
+        <MIcon name="delete" size={15} color={tokens.muted} />
       </button>
     </div>
   );

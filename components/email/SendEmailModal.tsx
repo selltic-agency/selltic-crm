@@ -5,13 +5,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X, Mail, AlertCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import type { Deal, EmailTemplate } from "@/lib/types";
 import { dealFieldValues, renderText, renderHtml } from "@/lib/emailTemplates";
 import { RichTextEditor } from "@/components/email/EmailComposer";
+import MIcon from "@/components/MaterialIcon";
 
 export function SendEmailModal({
   deal,
@@ -117,7 +117,7 @@ export function SendEmailModal({
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Mail size={17} color={tokens.accent} />
+            <MIcon name="mail" size={17} color={tokens.accent} />
             <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Wyślij e-mail</h2>
           </div>
           <button
@@ -125,7 +125,7 @@ export function SendEmailModal({
             aria-label="Zamknij"
             style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
           >
-            <X size={15} color={tokens.muted} />
+            <MIcon name="close" size={15} color={tokens.muted} />
           </button>
         </div>
 
@@ -136,7 +136,7 @@ export function SendEmailModal({
             <b>{to}</b>
           ) : (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: tokens.danger, fontWeight: 600 }}>
-              <AlertCircle size={14} /> Lead nie ma adresu e-mail — uzupełnij go w danych kontaktowych.
+              <MIcon name="error" size={14} /> Lead nie ma adresu e-mail — uzupełnij go w danych kontaktowych.
             </span>
           )}
         </div>

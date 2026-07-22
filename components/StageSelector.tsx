@@ -5,9 +5,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Check } from "lucide-react";
 import { tokens } from "@/lib/ui";
 import type { PipelineStage } from "@/lib/types";
+import MIcon from "@/components/MaterialIcon";
 
 export default function StageSelector({
   stages,
@@ -57,7 +57,7 @@ export default function StageSelector({
       >
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: "rgba(255,255,255,0.9)" }} />
         {current?.label ?? "—"}
-        {!disabled && <ChevronDown size={15} style={{ opacity: 0.85 }} />}
+        {!disabled && <MIcon name="expand_more" size={15} style={{ opacity: 0.85 }} />}
       </button>
 
       {open && (
@@ -87,7 +87,7 @@ export default function StageSelector({
               >
                 <span style={{ width: 10, height: 10, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{s.label}</span>
-                {active && <Check size={15} color={tokens.accent} />}
+                {active && <MIcon name="check" size={15} color={tokens.accent} />}
               </button>
             );
           })}

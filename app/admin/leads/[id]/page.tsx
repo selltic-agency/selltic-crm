@@ -25,26 +25,6 @@ import {
 } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Reorder, useDragControls } from "framer-motion";
-import {
-  ArrowLeft,
-  StickyNote,
-  Phone,
-  Mail,
-  FileText,
-  CircleDot,
-  CheckSquare,
-  PhoneCall,
-  Calendar,
-  AlertCircle,
-  CheckCircle2,
-  Circle,
-  GripVertical,
-  GitBranch,
-  Pencil,
-  Trash2,
-  X,
-  MessageSquare,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   tokens,
@@ -70,11 +50,12 @@ import { useToast } from "@/components/Toast";
 import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
-import { normalizeOptions, propLabel, type PropertyView } from "@/lib/properties";
+import { normalizeOptions, propLabel, defInScope, type PropertyView } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
 import { SendEmailModal } from "@/components/email/SendEmailModal";
 import { SendSmsModal } from "@/components/sms/SendSmsModal";
 import StageSelector from "@/components/StageSelector";
+import MIcon from "@/components/MaterialIcon";
 
 // Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
 // (28+28) trzeba odjąć od 100vh, żeby dwa panele zmieściły się bez
@@ -96,14 +77,14 @@ type Composer =
 // wolno tylko usuwać.
 const EDITABLE_ACTIVITY_TYPES = new Set<string>(["note", "call", "email"]);
 
-const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
-  note: StickyNote,
-  call: Phone,
-  email: Mail,
-  sms: MessageSquare,
-  submission: FileText,
-  stage: GitBranch,
-  task: CheckSquare,
+const ACTIVITY_ICON: Record<string, string> = {
+  note: "sticky_note_2",
+  call: "call",
+  email: "mail",
+  sms: "chat",
+  submission: "description",
+  stage: "account_tree",
+  task: "check_box",
 };
 
 const ACTIVITY_LABEL: Record<string, string> = {
@@ -239,7 +220,8 @@ export default function DealPage() {
 
     const dealRow = d as Deal | null;
     setDeal(dealRow ?? null);
-    setPropertyDefs((defs as PropertyDef[]) ?? []);
+    // Tylko właściwości w zakresie „Deals" (scopes; brak kolumny = obie encje).
+    setPropertyDefs(((defs as PropertyDef[]) ?? []).filter((def) => defInScope(def, "deals")));
     if (dealRow) await reloadFeed();
     setLoading(false);
   }, [supabase, dealId, reloadFeed]);
@@ -514,7 +496,7 @@ export default function DealPage() {
                   cursor: "pointer",
                 }}
               >
-                <PhoneCall size={13} /> Dzwonienie
+                <MIcon name="call" size={13} /> Dzwonienie
               </button>
             )}
           </div>
@@ -540,7 +522,7 @@ export default function DealPage() {
                   cursor: deal.phone ? "pointer" : "not-allowed", textDecoration: "none",
                 }}
               >
-                <Phone size={16} />
+                <MIcon name="call" size={16} />
               </a>
               <button
                 onClick={() => setEmailOpen(true)}
@@ -548,7 +530,7 @@ export default function DealPage() {
                 title="Wyślij e-mail"
                 style={{ width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", border: `1px solid ${tokens.border}`, background: "#fff", color: tokens.accent, cursor: "pointer" }}
               >
-                <Mail size={16} />
+                <MIcon name="mail" size={16} />
               </button>
             </div>
           </div>
@@ -571,28 +553,28 @@ export default function DealPage() {
               E-mail / Kalendarz wyłączone (pod przyszłą integrację Google). */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 22 }}>
             <ActionButton
-              icon={StickyNote}
+              icon="sticky_note_2"
               label="Notatka"
               onClick={() => setComposer({ open: true, editor: "text", mode: "create" })}
             />
             <ActionButton
-              icon={CheckSquare}
+              icon="add_task"
               label="Zadanie"
               onClick={() => setComposer({ open: true, editor: "task", mode: "create" })}
             />
             <ActionButton
-              icon={Mail}
+              icon="mail"
               label="E-mail"
               onClick={() => setEmailOpen(true)}
               title="Wyślij e-mail z szablonu"
             />
             <ActionButton
-              icon={MessageSquare}
+              icon="chat"
               label="SMS"
               onClick={() => setSmsOpen(true)}
               title="Wyślij SMS z szablonu"
             />
-            <ActionButton icon={Calendar} label="Kalendarz" disabled title="Wkrótce — integracja Google" />
+            <ActionButton icon="calendar_month" label="Kalendarz" disabled title="Wkrótce — integracja Google" />
           </div>
 
           {/* Kontakt / tożsamość — edycja wsadowa: jeden „Zapisz” dla całej sekcji */}
@@ -718,7 +700,7 @@ export default function DealPage() {
                 ))}
               </Reorder.Group>
               <p style={{ fontSize: 11.5, color: tokens.muted, margin: "10px 0 0" }}>
-                Przeciągnij <GripVertical size={11} style={{ verticalAlign: "-1px" }} />, by zmienić kolejność — dotyczy wszystkich deali.
+                Przeciągnij <MIcon name="drag_indicator" size={11} style={{ verticalAlign: "-1px" }} />, by zmienić kolejność — dotyczy wszystkich deali.
               </p>
             </>
           ) : (
@@ -833,14 +815,14 @@ function Panel({ fill, children }: { fill: boolean; children: React.ReactNode })
 
 /* ── Przycisk akcji (Notatka / Zadanie / E-mail / Kalendarz) ────────────── */
 function ActionButton({
-  icon: Icon,
+  icon,
   label,
   active = false,
   disabled = false,
   title,
   onClick,
 }: {
-  icon: typeof StickyNote;
+  icon: string;
   label: string;
   active?: boolean;
   disabled?: boolean;
@@ -867,7 +849,7 @@ function ActionButton({
         transition: `all .15s ${tokens.ease}`,
       }}
     >
-      <Icon size={14} />
+      <MIcon name={icon} size={14} />
       {label}
     </button>
   );
@@ -915,7 +897,7 @@ function PropertyReorderRow({
           flexShrink: 0,
         }}
       >
-        <GripVertical size={15} />
+        <MIcon name="drag_indicator" size={15} />
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
         <FieldLabel label={view.label}>
@@ -1049,7 +1031,7 @@ function FeedRow({
     const t = item.task;
     const overdue = !t.done && !!t.due_at && new Date(t.due_at).getTime() < now;
     const color = t.done ? tokens.success : overdue ? tokens.danger : tokens.warning;
-    const Icon = t.done ? CheckCircle2 : overdue ? AlertCircle : Circle;
+    const taskIcon = t.done ? "check_circle" : overdue ? "error" : "circle";
     const stripe = overdue ? tokens.danger : t.done ? tokens.success : tokens.warning;
 
     return (
@@ -1071,7 +1053,7 @@ function FeedRow({
             placeItems: "center",
           }}
         >
-          <Icon size={16} />
+          <MIcon name={taskIcon} size={16} />
         </button>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -1112,7 +1094,7 @@ function FeedRow({
   const a = item.activity;
   // Nieudany SMS wyróżniamy wizualnie (czerwony) — porażki nie mogą być ciche.
   const smsFailed = a.type === "sms" && (a.meta as { status?: string } | null)?.status === "failed";
-  const Icon = ACTIVITY_ICON[a.type] ?? CircleDot;
+  const iconName = ACTIVITY_ICON[a.type] ?? "adjust";
   const color = smsFailed ? tokens.danger : ACTIVITY_COLOR[a.type] ?? tokens.accent;
   const editable = EDITABLE_ACTIVITY_TYPES.has(a.type);
 
@@ -1130,7 +1112,7 @@ function FeedRow({
           placeItems: "center",
         }}
       >
-        <Icon size={15} />
+        <MIcon name={iconName} size={15} />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -1168,26 +1150,26 @@ function RowActions({
     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
       {onToggleComplete && (
         <IconAction
-          icon={completed ? Circle : CheckCircle2}
+          icon={completed ? "circle" : "check_circle"}
           label={completed ? "Oznacz jako niewykonane" : "Oznacz jako wykonane"}
           active={!completed}
           onClick={onToggleComplete}
         />
       )}
-      {onEdit && <IconAction icon={Pencil} label={editLabel} onClick={onEdit} />}
-      <IconAction icon={Trash2} label="Usuń" danger onClick={onDelete} />
+      {onEdit && <IconAction icon="edit" label={editLabel} onClick={onEdit} />}
+      <IconAction icon="delete" label="Usuń" danger onClick={onDelete} />
     </div>
   );
 }
 
 function IconAction({
-  icon: Icon,
+  icon,
   label,
   danger = false,
   active = false,
   onClick,
 }: {
-  icon: typeof Pencil;
+  icon: string;
   label: string;
   danger?: boolean;
   active?: boolean;
@@ -1211,7 +1193,7 @@ function IconAction({
         color: danger ? tokens.danger : active ? tokens.success : tokens.muted,
       }}
     >
-      <Icon size={14} />
+      <MIcon name={icon} size={14} />
     </button>
   );
 }
@@ -1311,7 +1293,7 @@ function ComposerModal({
             aria-label="Zamknij"
             style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
           >
-            <X size={15} color={tokens.muted} />
+            <MIcon name="close" size={15} color={tokens.muted} />
           </button>
         </div>
 
@@ -1593,7 +1575,7 @@ function BackLink({ router }: { router: ReturnType<typeof useRouter> }) {
         padding: 0,
       }}
     >
-      <ArrowLeft size={16} />
+      <MIcon name="arrow_back" size={16} />
       Wstecz
     </button>
   );

@@ -1,13 +1,15 @@
-// components/NotificationBell.tsx — dzwonek powiadomień w topbarze.
-// Pokazuje licznik nieprzeczytanych, a po kliknięciu panel z listą.
-// Klik w pozycję otwiera kontakt; „Oznacz wszystkie” czyści nieprzeczytane.
+// components/NotificationBell.tsx — kompaktowy dzwonek powiadomień w nagłówku
+// sidebara. Pokazuje licznik nieprzeczytanych; panel z listą otwiera się
+// obok sidebara (position: fixed, kotwiczony do przycisku).
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CheckCheck, UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, formatDateTime } from "@/lib/ui";
+import { tokens, formatDateTime, menuPanel } from "@/lib/ui";
 import type { Notification } from "@/lib/types";
+import MIcon from "@/components/MaterialIcon";
+
+const PANEL_W = 320;
 
 export default function NotificationBell({
   onOpenContact,
@@ -17,7 +19,10 @@ export default function NotificationBell({
   const supabase = useMemo(() => createClient(), []);
   const [items, setItems] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const unread = items.filter((n) => !n.read).length;
 
@@ -37,11 +42,28 @@ export default function NotificationBell({
     return () => clearInterval(t);
   }, [load]);
 
+  // Pozycja panelu: pod przyciskiem, przypięty do lewej krawędzi ekranu gdy
+  // brakuje miejsca (sidebar jest wąski, panel szerszy).
+  useEffect(() => {
+    if (!open) return;
+    function place() {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - PANEL_W - 8));
+      setPos({ top: r.bottom + 6, left });
+    }
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
+
   // Zamknij panel po kliknięciu poza nim.
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     }
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -63,29 +85,45 @@ export default function NotificationBell({
   }
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={wrapRef} style={{ position: "relative" }}>
       <button
+        ref={btnRef}
         onClick={() => {
           setOpen((v) => !v);
           if (!open) load();
         }}
         aria-label="Powiadomienia"
-        style={iconBtn}
+        style={{
+          position: "relative",
+          width: 28,
+          height: 28,
+          borderRadius: tokens.radiusSm,
+          flexShrink: 0,
+          border: "none",
+          background: open ? tokens.bg : "transparent",
+          color: tokens.muted,
+          display: "grid",
+          placeItems: "center",
+          cursor: "pointer",
+          padding: 0,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
+        onMouseLeave={(e) => (e.currentTarget.style.background = open ? tokens.bg : "transparent")}
       >
-        <Bell size={18} color={tokens.muted} />
+        <MIcon name="notifications" size={18} />
         {unread > 0 && (
           <span
             style={{
               position: "absolute",
-              top: -4,
-              right: -4,
-              minWidth: 18,
-              height: 18,
-              padding: "0 5px",
+              top: -3,
+              right: -3,
+              minWidth: 15,
+              height: 15,
+              padding: "0 4px",
               borderRadius: 999,
               background: tokens.danger,
               color: "#fff",
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 700,
               display: "grid",
               placeItems: "center",
@@ -97,20 +135,17 @@ export default function NotificationBell({
         )}
       </button>
 
-      {open && (
+      {open && pos && (
         <div
+          ref={panelRef}
           style={{
-            position: "absolute",
-            top: 46,
-            right: 0,
-            width: 320,
-            maxWidth: "calc(100vw - 24px)",
-            background: tokens.card,
-            border: `1px solid ${tokens.border}`,
-            borderRadius: 14,
-            boxShadow: "0 16px 50px rgba(15,18,28,0.18)",
-            zIndex: 80,
-            overflow: "hidden",
+            ...menuPanel,
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            width: PANEL_W,
+            maxWidth: "calc(100vw - 16px)",
+            zIndex: 96,
           }}
         >
           <div
@@ -118,11 +153,11 @@ export default function NotificationBell({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "12px 14px",
-              borderBottom: `1px solid ${tokens.border}`,
+              padding: "10px 12px",
+              borderBottom: `1px solid ${tokens.borderSoft}`,
             }}
           >
-            <span style={{ fontSize: 14, fontWeight: 700 }}>Powiadomienia</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Powiadomienia</span>
             <button
               onClick={markAll}
               disabled={unread === 0}
@@ -139,14 +174,14 @@ export default function NotificationBell({
                 padding: 0,
               }}
             >
-              <CheckCheck size={14} />
+              <MIcon name="done_all" size={14} />
               Oznacz wszystkie
             </button>
           </div>
 
           <div style={{ maxHeight: 360, overflowY: "auto" }}>
             {items.length === 0 ? (
-              <p style={{ padding: 24, textAlign: "center", color: tokens.muted, fontSize: 14, margin: 0 }}>
+              <p style={{ padding: 22, textAlign: "center", color: tokens.muted, fontSize: 13, margin: 0 }}>
                 Brak powiadomień.
               </p>
             ) : (
@@ -156,21 +191,21 @@ export default function NotificationBell({
                   onClick={() => openItem(n)}
                   style={{
                     display: "flex",
-                    gap: 11,
+                    gap: 10,
                     width: "100%",
                     textAlign: "left",
-                    padding: "11px 14px",
+                    padding: "9px 12px",
                     border: "none",
-                    borderTop: `1px solid ${tokens.border}`,
+                    borderTop: `1px solid ${tokens.borderSoft}`,
                     background: n.read ? "transparent" : tokens.accentSoft,
                     cursor: n.deal_id ? "pointer" : "default",
                   }}
                 >
                   <span
                     style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 8,
+                      width: 26,
+                      height: 26,
+                      borderRadius: 7,
                       flexShrink: 0,
                       background: tokens.card,
                       border: `1px solid ${tokens.border}`,
@@ -179,13 +214,13 @@ export default function NotificationBell({
                       placeItems: "center",
                     }}
                   >
-                    <UserPlus size={15} />
+                    <MIcon name="person_add" size={14} />
                   </span>
                   <span style={{ minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: tokens.text }}>
+                    <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: tokens.text }}>
                       {n.body}
                     </span>
-                    <span style={{ display: "block", fontSize: 12, color: tokens.muted }}>
+                    <span style={{ display: "block", fontSize: 11.5, color: tokens.muted }}>
                       {formatDateTime(n.created_at)}
                     </span>
                   </span>
@@ -198,16 +233,3 @@ export default function NotificationBell({
     </div>
   );
 }
-
-const iconBtn: React.CSSProperties = {
-  position: "relative",
-  width: 38,
-  height: 38,
-  borderRadius: 10,
-  flexShrink: 0,
-  border: `1px solid ${tokens.border}`,
-  background: "#fff",
-  display: "grid",
-  placeItems: "center",
-  cursor: "pointer",
-};

@@ -3,11 +3,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Reorder, useDragControls } from "framer-motion";
-import {
-  Plus, Trash2, GripVertical, X, Check, Mail, Archive, ChevronDown, ChevronRight, Lock,
-  SlidersHorizontal, GitBranch, Tag, Bell, Smartphone, FileText, MessageSquare, Bot,
-  type LucideIcon,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
@@ -25,10 +20,13 @@ import { useStages } from "@/lib/stages";
 import { useClassification } from "@/lib/classification";
 import { useToast } from "@/components/Toast";
 import { PROPERTY_TYPES, TYPE_LABEL, hasOptions, normalizeOptions, propLabel, slugify } from "@/lib/properties";
+import { ensureContactSourceDef } from "@/lib/contactSource";
 import { EmailTemplatesTab } from "@/components/email/EmailTemplatesTab";
 import { SmsTemplatesTab } from "@/components/sms/SmsTemplatesTab";
+import MIcon from "@/components/MaterialIcon";
 
 type Tab =
+  | "general"
   | "properties"
   | "stages"
   | "categories"
@@ -41,31 +39,35 @@ type Tab =
 
 // Definicja nawigacji: pogrupowane zakładki z ikoną i krótkim opisem. Grupy
 // porządkują ustawienia tematycznie (lepszy UX niż płaski rząd 9 pigułek).
-type TabDef = { key: Tab; label: string; icon: LucideIcon; hint?: string };
+type TabDef = { key: Tab; label: string; icon: string; hint?: string };
 type TabGroup = { group: string; items: TabDef[] };
 
 const TAB_GROUPS: TabGroup[] = [
   {
+    group: "Ogólne",
+    items: [{ key: "general", label: "Ogólne", icon: "storefront", hint: "Nazwa firmy" }],
+  },
+  {
     group: "Konfiguracja CRM",
     items: [
-      { key: "properties", label: "Właściwości", icon: SlidersHorizontal, hint: "Pola własne leadów" },
-      { key: "stages", label: "Etapy lejka", icon: GitBranch, hint: "Kolumny pipeline'u" },
-      { key: "categories", label: "Kategorie branż", icon: Tag, hint: "Mapowanie słów kluczowych" },
+      { key: "properties", label: "Właściwości", icon: "tune", hint: "Pola własne leadów" },
+      { key: "stages", label: "Etapy lejka", icon: "account_tree", hint: "Kolumny pipeline'u" },
+      { key: "categories", label: "Kategorie branż", icon: "sell", hint: "Mapowanie słów kluczowych" },
     ],
   },
   {
     group: "Komunikacja",
     items: [
-      { key: "notifications", label: "Powiadomienia", icon: Bell, hint: "E-maile o leadach i zadaniach" },
-      { key: "integrations", label: "Wysyłka e-mail", icon: Mail, hint: "Klucz Resend" },
-      { key: "sms-gateway", label: "Bramka SMS", icon: Smartphone, hint: "Token SMSAPI" },
-      { key: "templates", label: "Szablony e-mail", icon: FileText },
-      { key: "sms-templates", label: "Szablony SMS", icon: MessageSquare },
+      { key: "notifications", label: "Powiadomienia", icon: "notifications", hint: "E-maile o leadach i zadaniach" },
+      { key: "integrations", label: "Wysyłka e-mail", icon: "mail", hint: "Klucz Resend" },
+      { key: "sms-gateway", label: "Bramka SMS", icon: "smartphone", hint: "Token SMSAPI" },
+      { key: "templates", label: "Szablony e-mail", icon: "description" },
+      { key: "sms-templates", label: "Szablony SMS", icon: "chat" },
     ],
   },
   {
     group: "Zaawansowane",
-    items: [{ key: "scraper", label: "Scraper", icon: Bot, hint: "Google Maps + scoring" }],
+    items: [{ key: "scraper", label: "Scraper", icon: "smart_toy", hint: "Google Maps + scoring" }],
   },
 ];
 
@@ -115,7 +117,7 @@ export default function SettingsPage() {
 
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Ustawienia</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 4px" }}>Ustawienia</h1>
       <p style={{ fontSize: 13.5, color: tokens.muted, margin: "0 0 20px" }}>
         Konfiguracja CRM, integracji i automatyzacji. Zmiany zapisują się per sekcja.
       </p>
@@ -129,7 +131,6 @@ export default function SettingsPage() {
           >
             {TAB_LIST.map((t) => {
               const on = t.key === tab;
-              const Icon = t.icon;
               return (
                 <button
                   key={t.key}
@@ -150,7 +151,7 @@ export default function SettingsPage() {
                     color: on ? tokens.accent : tokens.muted,
                   }}
                 >
-                  <Icon size={15} /> {t.label}
+                  <MIcon name={t.icon} size={15} /> {t.label}
                 </button>
               );
             })}
@@ -168,8 +169,7 @@ export default function SettingsPage() {
                 </span>
                 {grp.items.map((t) => {
                   const on = t.key === tab;
-                  const Icon = t.icon;
-                  return (
+                      return (
                     <button
                       key={t.key}
                       onClick={() => selectTab(t.key)}
@@ -190,7 +190,7 @@ export default function SettingsPage() {
                         transition: `background 120ms ${tokens.ease}`,
                       }}
                     >
-                      <Icon size={17} color={on ? tokens.accent : tokens.muted} style={{ flexShrink: 0 }} />
+                      <MIcon name={t.icon} size={17} color={on ? tokens.accent : tokens.muted} style={{ flexShrink: 0 }} />
                       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</span>
                     </button>
                   );
@@ -202,7 +202,7 @@ export default function SettingsPage() {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
               <div style={{ width: 38, height: 38, borderRadius: 11, display: "grid", placeItems: "center", background: tokens.accentSoft, color: tokens.accent, flexShrink: 0 }}>
-                <active.icon size={19} />
+                <MIcon name={active.icon} size={19} />
               </div>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 16.5, fontWeight: 700, lineHeight: 1.2 }}>{active.label}</div>
@@ -220,6 +220,8 @@ export default function SettingsPage() {
 // Zawartość aktywnej zakładki (jedno miejsce dla obu układów).
 function TabContent({ tab }: { tab: Tab }) {
   switch (tab) {
+    case "general":
+      return <GeneralTab />;
     case "properties":
       return <PropertiesTab />;
     case "stages":
@@ -390,7 +392,7 @@ function StagesTab() {
               background: "#fff",
             }}
           >
-            <GripVertical size={16} color={tokens.muted} style={{ cursor: "grab", flexShrink: 0 }} />
+            <MIcon name="drag_indicator" size={16} color={tokens.muted} style={{ cursor: "grab", flexShrink: 0 }} />
 
             <label
               style={{
@@ -464,7 +466,7 @@ function StagesTab() {
                   opacity: savingId === s.id ? 0.7 : 1,
                 }}
               >
-                <Check size={14} />
+                <MIcon name="check" size={14} />
                 {savingId === s.id ? "Zapisywanie…" : "Zapisz"}
               </button>
             )}
@@ -490,7 +492,7 @@ function StagesTab() {
                 flexShrink: 0,
               }}
             >
-              <Trash2 size={15} color={tokens.muted} />
+              <MIcon name="delete" size={15} color={tokens.muted} />
             </button>
           </Reorder.Item>
         ))}
@@ -500,7 +502,7 @@ function StagesTab() {
         onClick={addStage}
         style={{ ...ghostButton, marginTop: 14, display: "flex", alignItems: "center", gap: 6 }}
       >
-        <Plus size={16} /> Dodaj etap
+        <MIcon name="add" size={16} /> Dodaj etap
       </button>
 
       {deleting && (
@@ -569,7 +571,7 @@ function DeleteStageDialog({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Usuń etap „{stage.label}”</h2>
           <button onClick={onCancel} aria-label="Zamknij" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}>
-            <X size={15} color={tokens.muted} />
+            <MIcon name="close" size={15} color={tokens.muted} />
           </button>
         </div>
 
@@ -815,7 +817,7 @@ function CategoriesTab() {
                           color: tokens.muted,
                         }}
                       >
-                        <X size={13} />
+                        <MIcon name="close" size={13} />
                       </button>
                     </span>
                   ))}
@@ -846,7 +848,7 @@ function CategoriesTab() {
                     opacity: busy || !(drafts[c.key] ?? "").trim() ? 0.5 : 1,
                   }}
                 >
-                  <Plus size={16} /> Dodaj
+                  <MIcon name="add" size={16} /> Dodaj
                 </button>
               </div>
             </div>
@@ -864,29 +866,224 @@ function CategoriesTab() {
   );
 }
 
-/* ── Właściwości (custom fields, HubSpot/Notion-style) ─────────────────────
-   Uogólniony system pól leada. „Kategoria" i „Cel kontaktu" pojawiają się jako
-   dwie pierwsze właściwości SYSTEMOWE (dane w dedykowanych tabelach), reszta to
-   właściwości definiowane przez użytkownika (wartości w props jsonb). */
+/* ── Ogólne: nazwa firmy (nagłówek sidebara) ─────────────────────────────── */
+function GeneralTab() {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const [companyName, setCompanyName] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("app_settings").select("company_name").maybeSingle();
+      setCompanyName(((data as { company_name?: string | null } | null)?.company_name ?? "").trim());
+      setLoading(false);
+    })();
+  }, [supabase]);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setSaving(false);
+      return;
+    }
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert({ owner: user.id, company_name: companyName.trim() || null }, { onConflict: "owner" });
+    setSaving(false);
+    if (error) {
+      toast.error("Nie udało się zapisać — uruchom migration_attio_redesign.sql (kolumna company_name).");
+    } else {
+      toast.success("Zapisano. Nazwa firmy w sidebarze odświeży się po przeładowaniu.");
+    }
+  }
+
+  return (
+    <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 18, maxWidth: 520 }}>
+      <label style={{ display: "grid", gap: 5 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>Nazwa firmy</span>
+        <span style={{ fontSize: 12, color: tokens.muted }}>
+          Wyświetlana w nagłówku sidebara obok logo.
+        </span>
+        <input
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+          placeholder="Selltic"
+          disabled={loading}
+          style={{ ...inputStyle, maxWidth: 320 }}
+        />
+      </label>
+      <div style={{ marginTop: 12 }}>
+        <button onClick={save} disabled={saving || loading} style={primaryButton}>
+          {saving ? "Zapisywanie…" : "Zapisz"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/* ── Właściwości — JEDNA globalna lista definicji z zakresami ──────────────
+   Pokazuje wszystkie właściwości: wbudowane/systemowe (zablokowane — bez
+   usuwania i zmiany typu/klucza) ORAZ własne (w pełni edytowalne). Każda ma
+   zakres (multi-select): "Deals", "Prospekty" — zakres decyduje, gdzie
+   właściwość jest widoczna (kolumny, filtry, panele). */
+
+type ScopeValue = "deals" | "prospects";
+const SCOPE_LABEL: Record<ScopeValue, string> = { deals: "Deals", prospects: "Prospekty" };
+
+// Wbudowane kolumny tabel prezentowane jako zablokowane właściwości systemowe.
+const BUILTIN_PROPS: { key: string; label: string; typeLabel: string; scopes: ScopeValue[] }[] = [
+  { key: "name", label: "Nazwa", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "company", label: "Firma", typeLabel: "tekst", scopes: ["deals"] },
+  { key: "email", label: "E-mail", typeLabel: "e-mail", scopes: ["deals"] },
+  { key: "phone", label: "Telefon", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "stage", label: "Etap lejka", typeLabel: "lista", scopes: ["deals"] },
+  { key: "value", label: "Wartość", typeLabel: "liczba", scopes: ["deals"] },
+  { key: "assignee", label: "Deal Owner", typeLabel: "lista", scopes: ["deals"] },
+  { key: "source", label: "Źródło (techniczne)", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "website", label: "Strona WWW", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "address", label: "Adres", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "rating", label: "Ocena Google", typeLabel: "liczba", scopes: ["deals", "prospects"] },
+  { key: "review_count", label: "Liczba opinii", typeLabel: "liczba", scopes: ["deals", "prospects"] },
+  { key: "city", label: "Miasto", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "industry", label: "Branża", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "business_status", label: "Status firmy", typeLabel: "tekst", scopes: ["deals", "prospects"] },
+  { key: "prospecting_status", label: "Status prospektu", typeLabel: "lista", scopes: ["prospects"] },
+  { key: "lead_score", label: "Lead score", typeLabel: "liczba", scopes: ["deals", "prospects"] },
+  { key: "contact_attempts", label: "Próby kontaktu", typeLabel: "liczba", scopes: ["prospects"] },
+  { key: "opened_at", label: "Data otwarcia", typeLabel: "data", scopes: ["deals"] },
+  { key: "created_at", label: "Data utworzenia", typeLabel: "data", scopes: ["deals", "prospects"] },
+];
+
+// Multi-select zakresu (dropdown z checkboxami) — wspólny dla wszystkich wierszy.
+function ScopeSelect({
+  value,
+  onChange,
+  locked = false,
+}: {
+  value: ScopeValue[];
+  onChange?: (next: ScopeValue[]) => void;
+  locked?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const label = value.length === 0 ? "— brak —" : value.map((v) => SCOPE_LABEL[v]).join(" + ");
+
+  return (
+    <div ref={ref} style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => !locked && setOpen((v) => !v)}
+        title={locked ? "Zakres właściwości wbudowanej jest stały" : "Zmień zakres (gdzie właściwość jest widoczna)"}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          padding: "3px 9px",
+          borderRadius: 6,
+          border: `1px solid ${tokens.border}`,
+          background: locked ? tokens.bg : "#fff",
+          color: locked ? tokens.muted : tokens.text,
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: locked ? "default" : "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+        {!locked && <MIcon name="expand_more" size={13} />}
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            marginTop: 4,
+            zIndex: 30,
+            background: "#fff",
+            border: `1px solid ${tokens.border}`,
+            borderRadius: 8,
+            boxShadow: tokens.shadowMenu,
+            padding: 6,
+            minWidth: 150,
+          }}
+        >
+          {(Object.keys(SCOPE_LABEL) as ScopeValue[]).map((k) => {
+            const on = value.includes(k);
+            return (
+              <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => {
+                    const next = on ? value.filter((x) => x !== k) : [...value, k];
+                    onChange?.(next);
+                  }}
+                  style={{ accentColor: tokens.accent, cursor: "pointer" }}
+                />
+                {SCOPE_LABEL[k]}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Oznaczenie właściwości systemowej: kłódka + badge.
+function SystemBadge() {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 5, background: tokens.bg, color: tokens.muted, border: `1px solid ${tokens.border}`, flexShrink: 0 }}>
+      <MIcon name="lock" size={11} /> Systemowa
+    </span>
+  );
+}
+
 function PropertiesTab() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const [defs, setDefs] = useState<PropertyDef[]>([]);
+  const [sysScopes, setSysScopes] = useState<Record<string, ScopeValue[]>>({});
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [type, setType] = useState<PropertyType>("text");
+  const [newScopes, setNewScopes] = useState<ScopeValue[]>(["deals", "prospects"]);
   const [newOptions, setNewOptions] = useState<PropertyOption[]>([]);
   const [adding, setAdding] = useState(false);
+  const [showBuiltin, setShowBuiltin] = useState(false);
 
-  // Tylko aktywne definicje (zarchiwizowane chowamy z listy).
+  // Tylko aktywne definicje (zarchiwizowane chowamy z listy). Dodatkowo:
+  // dosiewamy definicję „Źródło kontaktu" (deals), jeśli jeszcze nie istnieje.
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("property_defs")
-      .select("*")
-      .is("archived_at", null)
-      .order("position", { ascending: true });
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) await ensureContactSourceDef(supabase, user.id);
+    const [{ data }, settingsRes] = await Promise.all([
+      supabase.from("property_defs").select("*").is("archived_at", null).order("position", { ascending: true }),
+      supabase.from("app_settings").select("system_prop_scopes").maybeSingle(),
+    ]);
     setDefs((data as PropertyDef[]) ?? []);
+    const raw = (settingsRes.data as { system_prop_scopes?: Record<string, ScopeValue[]> | null } | null)?.system_prop_scopes;
+    setSysScopes(raw && typeof raw === "object" ? raw : {});
     setLoading(false);
   }, [supabase]);
 
@@ -911,15 +1108,22 @@ function PropertiesTab() {
     let key = slugify(label);
     if (existing.has(key)) key = `${key}_${Math.random().toString(36).slice(2, 5)}`;
     const position = defs.length ? Math.max(...defs.map((d) => d.position)) + 1 : 0;
-    const { data, error } = await supabase
+    const base = { owner: user.id, key, label, type, position, options: hasOptions(type) ? newOptions : null };
+    let { data, error } = await supabase
       .from("property_defs")
-      .insert({ owner: user.id, key, label, type, position, options: hasOptions(type) ? newOptions : null })
+      .insert({ ...base, scopes: newScopes })
       .select()
       .single();
+    if (error && /scopes/.test(error.message)) {
+      // Przed migration_attio_redesign.sql — dodaj bez zakresu (obie encje).
+      ({ data, error } = await supabase.from("property_defs").insert(base).select().single());
+      if (!error) toast.info("Zakres nie zapisał się na stałe — uruchom migration_attio_redesign.sql.");
+    }
     if (!error && data) {
       setDefs((list) => [...list, data as PropertyDef]);
       setName("");
       setType("text");
+      setNewScopes(["deals", "prospects"]);
       setNewOptions([]);
       toast.success("Właściwość dodana.");
     } else if (error) {
@@ -933,14 +1137,35 @@ function PropertiesTab() {
     setDefs((list) => list.map((d) => (d.id === id ? { ...d, ...patch } : d)));
     const { error } = await supabase.from("property_defs").update(patch).eq("id", id);
     if (error) {
+      if ("scopes" in patch && /scopes/.test(error.message)) {
+        toast.error("Zakresy wymagają migracji — uruchom migration_attio_redesign.sql (Supabase → SQL Editor).");
+        return;
+      }
       setDefs(snapshot);
       toast.error("Nie udało się zapisać zmian.");
     }
   }
 
+  // Zakres właściwości systemowych (Kategoria / Cel kontaktu) — nadpisanie w
+  // app_settings.system_prop_scopes.
+  async function patchSystemScopes(key: string, scopes: ScopeValue[]) {
+    const next = { ...sysScopes, [key]: scopes };
+    setSysScopes(next);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert({ owner: user.id, system_prop_scopes: next }, { onConflict: "owner" });
+    if (error) {
+      toast.error("Zakresy właściwości systemowych wymagają migracji — uruchom migration_attio_redesign.sql.");
+    }
+  }
+
   // Miękkie usunięcie — dane w props zostają, właściwość znika z list/filtrów.
   async function archiveDef(def: PropertyDef) {
-    if (!window.confirm(`Zarchiwizować właściwość „${propLabel(def)}"?\n\nDane leadów NIE zostaną usunięte — właściwość zniknie tylko z kolumn, filtrów i panelu leada. Możesz ją odtworzyć uruchomieniem ponownie migracji lub w bazie.`)) return;
+    if (!window.confirm(`Zarchiwizować właściwość „${propLabel(def)}"?\n\nDane leadów NIE zostaną usunięte — właściwość zniknie tylko z kolumn, filtrów i panelu leada.`)) return;
     const snapshot = defs;
     setDefs((list) => list.filter((d) => d.id !== def.id));
     const { error } = await supabase.from("property_defs").update({ archived_at: new Date().toISOString() }).eq("id", def.id);
@@ -957,55 +1182,97 @@ function PropertiesTab() {
     Promise.all(next.map((d, i) => supabase.from("property_defs").update({ position: i }).eq("id", d.id)));
   }
 
+  const scopesOf = (d: PropertyDef): ScopeValue[] => {
+    const raw = d.scopes;
+    if (!Array.isArray(raw) || raw.length === 0) return ["deals", "prospects"];
+    return raw.filter((x): x is ScopeValue => x === "deals" || x === "prospects");
+  };
+
   return (
-    <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 20 }}>
-      <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 18px" }}>
-        Właściwości to pola leada — działają jako kolumny na listach, filtry oraz pola w panelu leada.
-        „Kategoria" i „Cel kontaktu" to właściwości systemowe. Nowe właściwości dodajesz sam poniżej.
+    <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, padding: 18 }}>
+      <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px" }}>
+        Jedna lista WSZYSTKICH właściwości — systemowych i własnych. Zakres („Deals" / „Prospekty")
+        decyduje, gdzie właściwość jest widoczna: kolumny list, filtry, panele rekordów.
+        Właściwości systemowe są zablokowane (bez usuwania i zmiany typu).
       </p>
 
-      {/* ── Właściwości systemowe ── */}
-      <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase", margin: "0 0 8px" }}>
+      {/* ── Systemowe z edytowalnymi opcjami (Kategoria / Cel kontaktu) ── */}
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, color: tokens.muted, textTransform: "uppercase", margin: "0 0 8px" }}>
         Systemowe
       </div>
-      <div style={{ display: "grid", gap: 8, marginBottom: 22 }}>
-        <SystemPropertyCard title="Kategoria" typeLabel={TYPE_LABEL.select} table="lead_categories" />
-        <SystemPropertyCard title="Cel kontaktu" typeLabel={TYPE_LABEL.multi_select} table="contact_purposes" />
+      <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+        <SystemPropertyCard
+          title="Kategoria"
+          typeLabel={TYPE_LABEL.select}
+          table="lead_categories"
+          scopes={sysScopes["category"] ?? ["deals", "prospects"]}
+          onScopesChange={(next) => patchSystemScopes("category", next)}
+        />
+        <SystemPropertyCard
+          title="Cel kontaktu"
+          typeLabel={TYPE_LABEL.multi_select}
+          table="contact_purposes"
+          scopes={sysScopes["purposes"] ?? ["deals", "prospects"]}
+          onScopesChange={(next) => patchSystemScopes("purposes", next)}
+        />
       </div>
 
+      {/* ── Wbudowane pola rekordów (zablokowane, zakres stały) ── */}
+      <button
+        onClick={() => setShowBuiltin((v) => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 6, border: "none", background: "none", cursor: "pointer", padding: "4px 0", fontSize: 12.5, fontWeight: 600, color: tokens.muted, marginBottom: 8 }}
+      >
+        <MIcon name={showBuiltin ? "expand_more" : "chevron_right"} size={15} />
+        Wbudowane pola rekordów ({BUILTIN_PROPS.length})
+      </button>
+      {showBuiltin && (
+        <div style={{ display: "grid", gap: 4, marginBottom: 16 }}>
+          {BUILTIN_PROPS.map((b) => (
+            <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", border: `1px solid ${tokens.borderSoft}`, borderRadius: 8, background: "#FCFCFD" }}>
+              <MIcon name="lock" size={13} color={tokens.muted} />
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.label}</span>
+              <span style={{ fontSize: 11.5, color: tokens.muted, flexShrink: 0 }}>{b.typeLabel}</span>
+              <ScopeSelect value={b.scopes} locked />
+              <SystemBadge />
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── Właściwości użytkownika ── */}
-      <div style={{ fontSize: 12, fontWeight: 700, color: tokens.muted, textTransform: "uppercase", margin: "0 0 8px" }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, color: tokens.muted, textTransform: "uppercase", margin: "14px 0 8px" }}>
         Twoje właściwości
       </div>
       {loading ? (
-        <p style={{ color: tokens.muted }}>Wczytywanie…</p>
+        <p style={{ color: tokens.muted, fontSize: 13 }}>Wczytywanie…</p>
       ) : defs.length === 0 ? (
-        <p style={{ color: tokens.muted, fontSize: 14, margin: "0 0 18px" }}>Brak własnych właściwości.</p>
+        <p style={{ color: tokens.muted, fontSize: 13, margin: "0 0 16px" }}>Brak własnych właściwości.</p>
       ) : (
-        <Reorder.Group axis="y" values={defs} onReorder={persistOrder} style={{ listStyle: "none", margin: "0 0 18px", padding: 0, display: "grid", gap: 8 }}>
+        <Reorder.Group axis="y" values={defs} onReorder={persistOrder} style={{ listStyle: "none", margin: "0 0 16px", padding: 0, display: "grid", gap: 6 }}>
           {defs.map((d) => (
-            <UserPropertyRow key={d.id} def={d} onPatch={patchDef} onArchive={archiveDef} />
+            <UserPropertyRow key={d.id} def={d} scopes={scopesOf(d)} onPatch={patchDef} onArchive={archiveDef} />
           ))}
         </Reorder.Group>
       )}
 
       {/* ── Dodaj właściwość ── */}
-      <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 16 }}>
-        <form onSubmit={addDef} style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input placeholder="Nazwa właściwości" value={name} onChange={(e) => setName(e.target.value)} style={{ ...inputStyle, flex: "2 1 200px" }} />
-            <select value={type} onChange={(e) => setType(e.target.value as PropertyType)} style={{ ...inputStyle, flex: "1 1 160px" }}>
+      <div style={{ borderTop: `1px solid ${tokens.borderSoft}`, paddingTop: 14 }}>
+        <form onSubmit={addDef} style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input placeholder="Nazwa właściwości" value={name} onChange={(e) => setName(e.target.value)} style={{ ...inputStyle, flex: "2 1 180px" }} />
+            <select value={type} onChange={(e) => setType(e.target.value as PropertyType)} style={{ ...inputStyle, flex: "1 1 150px" }}>
               {PROPERTY_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
-            <button type="submit" disabled={adding} style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6 }}>
-              <Plus size={16} /> Dodaj
+            <ScopeSelect value={newScopes} onChange={setNewScopes} />
+            <button type="submit" disabled={adding} style={primaryButton}>
+              <MIcon name="add" size={15} /> Dodaj
             </button>
           </div>
           {hasOptions(type) && (
-            <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 10, padding: 12 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: tokens.muted, marginBottom: 8 }}>Opcje listy</div>
+            <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 8, padding: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: tokens.muted, marginBottom: 8 }}>Opcje listy</div>
               <OptionsEditor options={newOptions} onChange={setNewOptions} />
             </div>
           )}
@@ -1015,14 +1282,16 @@ function PropertiesTab() {
   );
 }
 
-// Wiersz właściwości użytkownika: nazwa, typ (zmiana z potwierdzeniem), edytor
-// opcji dla list, archiwizacja. Przeciągalny (zmiana kolejności).
+// Wiersz właściwości użytkownika: nazwa, typ (zmiana z potwierdzeniem), zakres,
+// edytor opcji dla list, archiwizacja. Przeciągalny (zmiana kolejności).
 function UserPropertyRow({
   def,
+  scopes,
   onPatch,
   onArchive,
 }: {
   def: PropertyDef;
+  scopes: ScopeValue[];
   onPatch: (id: string, patch: Partial<PropertyDef>) => void;
   onArchive: (def: PropertyDef) => void;
 }) {
@@ -1038,10 +1307,10 @@ function UserPropertyRow({
   }
 
   return (
-    <Reorder.Item value={def} dragListener={false} dragControls={controls} style={{ listStyle: "none", border: `1px solid ${tokens.border}`, borderRadius: 10, background: tokens.card }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
+    <Reorder.Item value={def} dragListener={false} dragControls={controls} style={{ listStyle: "none", border: `1px solid ${tokens.border}`, borderRadius: 8, background: tokens.card }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px" }}>
         <button onPointerDown={(e) => controls.start(e)} aria-label="Przeciągnij" style={{ border: "none", background: "none", cursor: "grab", padding: 0, color: tokens.muted, touchAction: "none", flexShrink: 0 }}>
-          <GripVertical size={15} />
+          <MIcon name="drag_indicator" size={15} />
         </button>
         <input
           value={labelDraft}
@@ -1051,24 +1320,25 @@ function UserPropertyRow({
             if (v && v !== propLabel(def)) onPatch(def.id, { label: v });
             else setLabelDraft(propLabel(def));
           }}
-          style={{ ...inputStyle, flex: 1, minWidth: 0, fontWeight: 600, padding: "6px 10px" }}
+          style={{ ...inputStyle, flex: 1, minWidth: 0, fontWeight: 500, padding: "4px 8px" }}
         />
-        <select value={def.type} onChange={(e) => changeType(e.target.value as PropertyType)} style={{ ...inputStyle, width: 170, padding: "6px 10px", flexShrink: 0 }}>
+        <select value={def.type} onChange={(e) => changeType(e.target.value as PropertyType)} style={{ ...inputStyle, width: 160, padding: "4px 8px", flexShrink: 0 }}>
           {PROPERTY_TYPES.map((t) => (
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
         </select>
+        <ScopeSelect value={scopes} onChange={(next) => onPatch(def.id, { scopes: next })} />
         {hasOptions(def.type) && (
           <button onClick={() => setExpanded((s) => !s)} title="Opcje listy" style={{ ...iconBtn }}>
-            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            <MIcon name={expanded ? "expand_more" : "chevron_right"} size={15} />
           </button>
         )}
         <button onClick={() => onArchive(def)} title="Archiwizuj" aria-label="Archiwizuj właściwość" style={{ ...iconBtn }}>
-          <Archive size={15} color={tokens.muted} />
+          <MIcon name="archive" size={15} color={tokens.muted} />
         </button>
       </div>
       {hasOptions(def.type) && expanded && (
-        <div style={{ borderTop: `1px solid ${tokens.border}`, padding: 12 }}>
+        <div style={{ borderTop: `1px solid ${tokens.borderSoft}`, padding: 12 }}>
           <OptionsEditor options={options} onChange={(next) => onPatch(def.id, { options: next })} />
         </div>
       )}
@@ -1077,8 +1347,21 @@ function UserPropertyRow({
 }
 
 // Właściwość systemowa (Kategoria / Cel kontaktu) — dane w dedykowanej tabeli
-// (lead_categories / contact_purposes). Edytor opcji zapisuje wprost do tabeli.
-function SystemPropertyCard({ title, typeLabel, table }: { title: string; typeLabel: string; table: "lead_categories" | "contact_purposes" }) {
+// (lead_categories / contact_purposes). Edytor opcji zapisuje wprost do tabeli;
+// zakres (gdzie widoczna) można zawęzić.
+function SystemPropertyCard({
+  title,
+  typeLabel,
+  table,
+  scopes,
+  onScopesChange,
+}: {
+  title: string;
+  typeLabel: string;
+  table: "lead_categories" | "contact_purposes";
+  scopes: ScopeValue[];
+  onScopesChange: (next: ScopeValue[]) => void;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const { reload } = useClassification();
@@ -1141,17 +1424,19 @@ function SystemPropertyCard({ title, typeLabel, table }: { title: string; typeLa
   }
 
   return (
-    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 10, background: tokens.card }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
-        <Lock size={14} color={tokens.muted} style={{ flexShrink: 0 }} />
-        <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{title}</span>
-        <span style={{ fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 999, background: tokens.accentSoft, color: tokens.accent }}>{typeLabel}</span>
+    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 8, background: tokens.card }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px" }}>
+        <MIcon name="lock" size={13} color={tokens.muted} />
+        <span style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{title}</span>
+        <span style={{ fontSize: 11.5, color: tokens.muted, flexShrink: 0 }}>{typeLabel}</span>
+        <ScopeSelect value={scopes} onChange={onScopesChange} />
+        <SystemBadge />
         <button onClick={() => setExpanded((s) => !s)} title="Opcje listy" style={{ ...iconBtn }}>
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          <MIcon name={expanded ? "expand_more" : "chevron_right"} size={15} />
         </button>
       </div>
       {expanded && (
-        <div style={{ borderTop: `1px solid ${tokens.border}`, padding: 12 }}>
+        <div style={{ borderTop: `1px solid ${tokens.borderSoft}`, padding: 12 }}>
           {!loaded ? (
             <p style={{ fontSize: 13, color: tokens.muted, margin: 0 }}>Wczytywanie…</p>
           ) : (
@@ -1242,7 +1527,7 @@ function OptionsEditor({
           style={{ ...inputStyle, flex: 1, padding: "7px 10px" }}
         />
         <button type="button" onClick={add} style={{ ...ghostButton, padding: "7px 12px", display: "flex", alignItems: "center", gap: 5 }}>
-          <Plus size={15} /> Dodaj
+          <MIcon name="add" size={15} /> Dodaj
         </button>
       </div>
     </div>
@@ -1256,7 +1541,7 @@ function OptionRow({ option, onEdit, onRemove }: { option: PropertyOption; onEdi
   return (
     <Reorder.Item value={option} dragListener={false} dragControls={controls} style={{ listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
       <button onPointerDown={(e) => controls.start(e)} aria-label="Przeciągnij" style={{ border: "none", background: "none", cursor: "grab", padding: 0, color: tokens.muted, touchAction: "none", flexShrink: 0 }}>
-        <GripVertical size={14} />
+        <MIcon name="drag_indicator" size={14} />
       </button>
       <input type="color" value={option.color ?? "#6C5CE7"} onChange={(e) => onEdit(option.key, { color: e.target.value })} style={{ width: 30, height: 30, padding: 0, border: `1px solid ${tokens.border}`, borderRadius: 7, cursor: "pointer", flexShrink: 0 }} />
       <input
@@ -1270,7 +1555,7 @@ function OptionRow({ option, onEdit, onRemove }: { option: PropertyOption; onEdi
         style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "6px 10px" }}
       />
       <button onClick={() => onRemove(option.key)} aria-label="Usuń opcję" style={{ ...iconBtn }}>
-        <Trash2 size={14} color={tokens.muted} />
+        <MIcon name="delete" size={14} color={tokens.muted} />
       </button>
     </Reorder.Item>
   );
@@ -1618,7 +1903,7 @@ function IntegrationsTab() {
   return (
     <Section>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <Mail size={16} color={tokens.accent} />
+        <MIcon name="mail" size={16} color={tokens.accent} />
         <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Wysyłka e-mail (Resend)</h3>
       </div>
       <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px", lineHeight: 1.6 }}>
@@ -1889,7 +2174,7 @@ function SmsGatewayTab() {
   return (
     <Section>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <Smartphone size={16} color={tokens.accent} />
+        <MIcon name="smartphone" size={16} color={tokens.accent} />
         <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Bramka SMS (SMSAPI)</h3>
       </div>
       <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px", lineHeight: 1.6 }}>
@@ -2266,13 +2551,13 @@ function RuleListEditor({
               aria-label="Usuń regułę"
               style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
             >
-              <Trash2 size={13} color={tokens.muted} />
+              <MIcon name="delete" size={13} color={tokens.muted} />
             </button>
           </div>
         ))}
       </div>
       <button onClick={add} style={{ ...ghostButton, marginTop: 8, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px" }}>
-        <Plus size={14} /> Dodaj regułę
+        <MIcon name="add" size={14} /> Dodaj regułę
       </button>
     </div>
   );

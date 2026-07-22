@@ -5,13 +5,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Pencil, Mail, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
 import type { EmailTemplate } from "@/lib/types";
 import { SAMPLE_VALUES, renderText } from "@/lib/emailTemplates";
 import { RichTextEditor, SubjectField, TemplatePreview } from "@/components/email/EmailComposer";
+import MIcon from "@/components/MaterialIcon";
 
 const DEFAULT_BODY = `<p>Cześć {{first_name}},</p>
 <p>piszę z Selltic. Zauważyłem, że {{company}} działa w branży {{industry}} — mamy kilka pomysłów, które mogą pomóc pozyskać więcej klientów.</p>
@@ -81,11 +81,11 @@ export function EmailTemplatesTab() {
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <FileText size={16} color={tokens.accent} />
+          <MIcon name="description" size={16} color={tokens.accent} />
           <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Szablony e-mail</h3>
         </div>
         <button onClick={() => setEditing({ mode: "new" })} style={{ ...primaryButton, display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <Plus size={15} /> Nowy szablon
+          <MIcon name="add" size={15} /> Nowy szablon
         </button>
       </div>
       <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 18px" }}>
@@ -135,7 +135,7 @@ export function EmailTemplatesTab() {
                   placeItems: "center",
                 }}
               >
-                <Mail size={16} />
+                <MIcon name="mail" size={16} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: tokens.text }}>{t.name}</div>
@@ -149,10 +149,10 @@ export function EmailTemplatesTab() {
                 aria-label="Edytuj"
                 style={iconBtn(tokens.muted)}
               >
-                <Pencil size={15} />
+                <MIcon name="edit" size={15} />
               </button>
               <button onClick={() => remove(t)} title="Usuń" aria-label="Usuń" style={iconBtn(tokens.danger)}>
-                <Trash2 size={15} />
+                <MIcon name="delete" size={15} />
               </button>
             </div>
           ))}

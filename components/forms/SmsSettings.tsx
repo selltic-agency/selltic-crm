@@ -5,7 +5,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MessageSquare, AlertTriangle, Send, Info } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
@@ -15,6 +14,7 @@ import type { SmsTemplate } from "@/lib/types";
 import { isE164, toE164 } from "@/lib/phone";
 import { renderSmsTemplate, SMS_SAMPLE_VALUES } from "@/lib/sms/templates";
 import { SmsCounter } from "@/components/sms/SmsCounter";
+import MIcon from "@/components/MaterialIcon";
 
 type FieldOpt = { id: string; label: string };
 
@@ -234,7 +234,7 @@ export default function SmsSettings({
       <section style={card}>
         <Header />
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start", color: tokens.muted, fontSize: 13.5, marginTop: 8 }}>
-          <Info size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+          <MIcon name="info" size={18} style={{ flexShrink: 0, marginTop: 1 }} />
           <div>
             Ten formularz nie ma pola typu <b>telefon</b>. Dodaj krok/pole „Telefon”, aby móc wysyłać
             automatyczne potwierdzenia SMS. Alert wewnętrzny do zespołu możesz skonfigurować mimo to —
@@ -302,7 +302,7 @@ export default function SmsSettings({
               </Labeled>
               {marketingWithoutConsent && (
                 <div style={warn}>
-                  <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <MIcon name="warning" size={16} style={{ flexShrink: 0, marginTop: 1 }} />
                   Wybrano szablon <b>marketingowy</b>, ale nie zmapowano pola zgody. Bez zaznaczonej zgody w
                   zgłoszeniu potwierdzenie NIE zostanie wysłane.
                 </div>
@@ -366,7 +366,7 @@ export default function SmsSettings({
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="+48601234567" style={{ ...inputStyle, maxWidth: 220 }} />
           <button onClick={sendTest} disabled={testing} style={{ ...ghostButton, display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Send size={14} /> {testing ? "Wysyłanie…" : "Wyślij test"}
+            <MIcon name="send" size={14} /> {testing ? "Wysyłanie…" : "Wyślij test"}
           </button>
         </div>
       </div>
@@ -377,7 +377,7 @@ export default function SmsSettings({
 function Header() {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <MessageSquare size={16} color={tokens.accent} />
+      <MIcon name="chat" size={16} color={tokens.accent} />
       <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Automatyzacja SMS</h3>
     </div>
   );

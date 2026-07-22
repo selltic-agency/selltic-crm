@@ -8,11 +8,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Cell, ResponsiveContainer, Tooltip,
 } from "recharts";
-import { Eye, Users, CheckCircle2, Percent } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens } from "@/lib/ui";
 import type { FormSchema, Step } from "@/lib/forms";
 import { stepFields } from "@/lib/forms";
+import MIcon from "@/components/MaterialIcon";
 
 const BRAND_RED = "#E8194B";
 
@@ -116,10 +116,10 @@ export default function FormStats({ formId }: { formId: string }) {
         <>
           {/* Cztery kafelki */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 22 }}>
-            <Tile icon={<Eye size={16} />} label="Wyświetlenia" value={stats?.views ?? 0} />
-            <Tile icon={<Users size={16} />} label="Unikalni użytkownicy" value={stats?.unique_users ?? 0} />
-            <Tile icon={<CheckCircle2 size={16} />} label="Zgłoszenia" value={stats?.completions ?? 0} />
-            <Tile icon={<Percent size={16} />} label="Konwersja" value={conversion == null ? "—" : `${conversion.toFixed(1)}%`} />
+            <Tile icon={<MIcon name="visibility" size={16} />} label="Wyświetlenia" value={stats?.views ?? 0} />
+            <Tile icon={<MIcon name="group" size={16} />} label="Unikalni użytkownicy" value={stats?.unique_users ?? 0} />
+            <Tile icon={<MIcon name="check_circle" size={16} />} label="Zgłoszenia" value={stats?.completions ?? 0} />
+            <Tile icon={<MIcon name="percent" size={16} />} label="Konwersja" value={conversion == null ? "—" : `${conversion.toFixed(1)}%`} />
           </div>
 
           {/* Lejek krokowy */}

@@ -5,12 +5,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, formatRelative, formatDateTime } from "@/lib/ui";
 import type { FormSchema, Step, FormField } from "@/lib/forms";
 import { stepFields } from "@/lib/forms";
 import { dropOffLabel } from "@/lib/formSessions";
+import MIcon from "@/components/MaterialIcon";
 
 const AMBER = "#F2994A";
 
@@ -240,7 +240,7 @@ function Drawer({ session, fields, onClose }: { session: SessionRow; fields: For
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Zgłoszenie</h3>
           <button onClick={onClose} aria-label="Zamknij" style={{ border: "none", background: "none", cursor: "pointer", color: tokens.muted }}>
-            <X size={20} />
+            <MIcon name="close" size={20} />
           </button>
         </div>
 

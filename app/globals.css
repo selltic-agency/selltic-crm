@@ -38,9 +38,45 @@ select {
   }
 }
 
+/* ── Ikony Material Symbols (wyłącznie panel admina) ─────────────────────
+   Font zmienny ładowany linkiem w app/admin/shell.tsx; klasa .msym nie jest
+   używana w publicznym rendererze formularzy. Do czasu załadowania fontu
+   ligatura (tekstowa nazwa ikony) jest ukrywana przez font-display: block. */
+.msym {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "liga";
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* ── Stany fokusa/hover panelu admina (scope .selltic-admin — nie wycieka
+   do publicznych formularzy na go.selltic-agency.pl) ───────────────────── */
+.selltic-admin :is(input, select, textarea):focus-visible {
+  border-color: rgba(108, 92, 231, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.12);
+}
+.selltic-admin button:focus-visible,
+.selltic-admin a:focus-visible {
+  outline: 2px solid rgba(108, 92, 231, 0.45);
+  outline-offset: 1px;
+}
+.selltic-admin ::placeholder {
+  color: #9aa0b0;
+}
+
 /* Obszar główny panelu — mniejszy padding na małych ekranach. */
 .selltic-main {
-  padding: 28px 24px;
+  padding: 20px 24px;
 }
 
 @media (max-width: 900px) {
@@ -80,25 +116,25 @@ select {
 }
 
 /* Strona wypełniająca dokładnie widoczny obszar (bez przewijania całej
-   strony) — wysokość = viewport minus topbar (64px) i pionowe paddingi
-   .selltic-main (28/18/14px góra + dół). Przewijanie żyje wtedy w środku,
-   np. w kolumnach etapów kanbana. */
+   strony) — wysokość = viewport minus pionowe paddingi .selltic-main
+   (na desktopie nie ma już topbara; na mobile topbar ma 56px). Przewijanie
+   żyje wtedy w środku, np. w kolumnach etapów kanbana. */
 .selltic-page-fill {
-  height: calc(100vh - 64px - 56px);
-  height: calc(100dvh - 64px - 56px);
+  height: calc(100vh - 40px);
+  height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
 }
 @media (max-width: 900px) {
   .selltic-page-fill {
-    height: calc(100vh - 64px - 36px);
-    height: calc(100dvh - 64px - 36px);
+    height: calc(100vh - 56px - 36px);
+    height: calc(100dvh - 56px - 36px);
   }
 }
 @media (max-width: 480px) {
   .selltic-page-fill {
-    height: calc(100vh - 64px - 28px);
-    height: calc(100dvh - 64px - 28px);
+    height: calc(100vh - 56px - 28px);
+    height: calc(100dvh - 56px - 28px);
   }
 }
 

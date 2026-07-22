@@ -5,10 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, X, Clock, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, formatDateTime } from "@/lib/ui";
 import type { Assignee, Task } from "@/lib/types";
+import MIcon from "@/components/MaterialIcon";
 
 const WEEKDAYS = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"];
 const MONTH_NAMES = [
@@ -183,7 +183,7 @@ export default function CalendarPage() {
           gap: 12,
         }}
       >
-        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Kalendarz</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: 0 }}>Kalendarz</h1>
 
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <ViewSwitcher value={view} onChange={setView} />
@@ -191,13 +191,13 @@ export default function CalendarPage() {
 
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <IconButton onClick={prev} label="Poprzedni">
-              <ChevronLeft size={16} />
+              <MIcon name="chevron_left" size={16} />
             </IconButton>
             <span style={{ fontSize: 14, fontWeight: 700, minWidth: 190, textAlign: "center", textTransform: "capitalize" }}>
               {rangeLabel}
             </span>
             <IconButton onClick={next} label="Następny">
-              <ChevronRight size={16} />
+              <MIcon name="chevron_right" size={16} />
             </IconButton>
           </div>
 
@@ -629,7 +629,7 @@ function DayPanel({
             {day.toLocaleDateString("pl-PL", { day: "2-digit", month: "long", year: "numeric" })}
           </h2>
           <button onClick={onClose} aria-label="Zamknij" style={closeBtn}>
-            <X size={16} color={tokens.muted} />
+            <MIcon name="close" size={16} color={tokens.muted} />
           </button>
         </div>
 
@@ -675,13 +675,13 @@ function DayPanel({
                     <div style={{ display: "flex", gap: 12, marginTop: 3, flexWrap: "wrap" }}>
                       {t.due_at && (
                         <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.muted }}>
-                          <Clock size={12} />
+                          <MIcon name="schedule" size={12} />
                           {formatDateTime(t.due_at)}
                         </span>
                       )}
                       {t.deals && (
                         <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.accent, fontWeight: 600 }}>
-                          <User size={12} />
+                          <MIcon name="person" size={12} />
                           {t.deals.name || "Deal"}
                         </span>
                       )}

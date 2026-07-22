@@ -1,15 +1,15 @@
-// components/GlobalSearch.tsx — globalna wyszukiwarka w topbarze.
+// components/GlobalSearch.tsx — globalna wyszukiwarka (kompaktowa, w sidebarze).
 // Szuka JEDNOCZEŚNIE po dealach i prospektach (po nazwie / e-mailu / firmie /
 // mieście) oraz po numerze telefonu odpornym na formatowanie (porównanie na
-// cyfrach: „500 123 456”, „500123456”, „+48500123456”, „48 500 123 456” dają
-// ten sam wynik). Wynik jest wyraźnie oznaczony jako Deal lub Prospekt.
+// cyfrach). Wynik jest wyraźnie oznaczony jako Deal lub Prospekt. W wariancie
+// sidebar panel wyników jest pozycjonowany fixed (szerszy niż sam sidebar).
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens } from "@/lib/ui";
+import { tokens, menuPanel } from "@/lib/ui";
 import { digitsOnly } from "@/lib/phone";
+import MIcon from "@/components/MaterialIcon";
 
 type Kind = "deal" | "prospect";
 
@@ -27,11 +27,12 @@ type ProspectHitRow = { id: string; name: string | null; phone: string | null; c
 export default function GlobalSearch({
   onOpenContact,
   onOpenProspect,
-  fullWidth,
+  variant = "default",
 }: {
   onOpenContact: (contactId: string) => void;
   onOpenProspect?: (prospectId: string) => void;
-  fullWidth?: boolean;
+  /** 'sidebar' = kompaktowe pole; panel wyników wychodzi poza sidebar. */
+  variant?: "default" | "sidebar";
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [q, setQ] = useState("");
@@ -121,33 +122,35 @@ export default function GlobalSearch({
   }
 
   const showPanel = open && q.trim().length >= 2;
+  const sidebar = variant === "sidebar";
 
   return (
-    <div ref={ref} style={{ position: "relative", flex: 1, maxWidth: fullWidth ? "none" : 420 }}>
+    <div ref={ref} style={{ position: "relative", flex: 1, maxWidth: sidebar ? "none" : 420 }}>
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          background: tokens.bg,
+          gap: 7,
+          background: sidebar ? "#fff" : tokens.bg,
           border: `1px solid ${tokens.border}`,
-          borderRadius: 10,
-          padding: "8px 12px",
+          borderRadius: tokens.radiusSm,
+          padding: sidebar ? "4px 8px" : "6px 10px",
         }}
       >
-        <Search size={16} color={tokens.muted} />
+        <MIcon name="search" size={15} color={tokens.muted} />
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="Szukaj deali i prospektów…"
+          placeholder="Szukaj…"
           style={{
             border: "none",
             outline: "none",
             background: "transparent",
-            fontSize: 14,
+            fontSize: 13,
             width: "100%",
             color: tokens.text,
+            boxShadow: "none",
           }}
         />
         {q && (
@@ -157,9 +160,9 @@ export default function GlobalSearch({
               setHits([]);
             }}
             aria-label="Wyczyść"
-            style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "grid", placeItems: "center" }}
+            style={{ border: "none", background: "none", cursor: "pointer", padding: 0, display: "grid", placeItems: "center", color: tokens.muted }}
           >
-            <X size={15} color={tokens.muted} />
+            <MIcon name="close" size={14} />
           </button>
         )}
       </div>
@@ -167,46 +170,45 @@ export default function GlobalSearch({
       {showPanel && (
         <div
           style={{
+            ...menuPanel,
             position: "absolute",
-            top: 44,
+            top: "100%",
+            marginTop: 6,
             left: 0,
-            right: 0,
-            background: tokens.card,
-            border: `1px solid ${tokens.border}`,
-            borderRadius: 12,
-            boxShadow: "0 16px 50px rgba(15,18,28,0.18)",
-            zIndex: 80,
-            overflow: "hidden",
+            width: sidebar ? "min(380px, calc(100vw - 24px))" : "100%",
+            zIndex: 95,
           }}
         >
           {loading ? (
-            <p style={{ padding: 16, margin: 0, color: tokens.muted, fontSize: 14 }}>Szukam…</p>
+            <p style={{ padding: 14, margin: 0, color: tokens.muted, fontSize: 13 }}>Szukam…</p>
           ) : hits.length === 0 ? (
-            <p style={{ padding: 16, margin: 0, color: tokens.muted, fontSize: 14 }}>
+            <p style={{ padding: 14, margin: 0, color: tokens.muted, fontSize: 13 }}>
               Brak wyników dla „{q.trim()}”.
             </p>
           ) : (
-            hits.map((h) => (
+            hits.map((h, i) => (
               <button
                 key={`${h.kind}-${h.id}`}
                 onClick={() => pick(h)}
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 10,
+                  gap: 9,
                   width: "100%",
                   textAlign: "left",
-                  padding: "10px 14px",
+                  padding: "8px 12px",
                   border: "none",
-                  borderTop: `1px solid ${tokens.border}`,
+                  borderTop: i === 0 ? "none" : `1px solid ${tokens.borderSoft}`,
                   background: "transparent",
                   cursor: "pointer",
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
                 <KindBadge kind={h.kind} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{h.title}</div>
-                  <div style={{ fontSize: 12, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{h.title}</div>
+                  <div style={{ fontSize: 11.5, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {h.subtitle}
                   </div>
                 </div>
@@ -225,12 +227,12 @@ function KindBadge({ kind }: { kind: Kind }) {
     <span
       style={{
         flexShrink: 0,
-        fontSize: 10.5,
-        fontWeight: 700,
+        fontSize: 10,
+        fontWeight: 600,
         textTransform: "uppercase",
         letterSpacing: 0.3,
-        padding: "3px 7px",
-        borderRadius: 6,
+        padding: "2px 6px",
+        borderRadius: 5,
         background: isDeal ? tokens.accentSoft : "rgba(26,115,231,0.10)",
         color: isDeal ? tokens.accent : "#1A73E7",
       }}

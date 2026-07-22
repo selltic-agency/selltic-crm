@@ -31,10 +31,14 @@ export function toDisplayStatus(dbStatus: string): DisplayStatus {
 
 export const DISPLAY_STATUSES: DisplayStatus[] = ["new", "no_answer", "not_interested", "converted"];
 
+// „Nie nasz target" zastąpił dawnego „Niezainteresowanego" — w bazie to wciąż
+// wartość 'not_interested' (zero-loss: stare dane mapują się 1:1 na nowy
+// status), ale semantyka jest szersza: prospekt jest archiwizowany i znika
+// z kolejki dzwonienia.
 export const STATUS_LABEL: Record<DisplayStatus, string> = {
   new: "Nowy",
   no_answer: "Nie odbiera",
-  not_interested: "Niezainteresowany",
+  not_interested: "Nie nasz target",
   converted: "Skonwertowany",
 };
 
