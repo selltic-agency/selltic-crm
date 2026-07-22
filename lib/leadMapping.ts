@@ -26,14 +26,14 @@ export const BUILTIN_TARGET_TYPE: Record<string, MapTargetType> = {
 
 // Które typy pól są zgodne z danym typem docelowym właściwości.
 const COMPAT: Record<MapTargetType, FieldType[]> = {
-  text: ["short_text", "long_text", "email", "phone", "single_choice", "multi_choice"],
+  text: ["short_text", "long_text", "email", "phone", "link", "number", "single_choice", "multi_choice", "dropdown", "checkbox", "yes_no"],
   email: ["email", "short_text"],
   phone: ["phone", "short_text"],
-  number: ["short_text", "single_choice"],
+  number: ["short_text", "number", "single_choice"],
   date: ["short_text", "single_choice"],
-  select: ["single_choice", "short_text"],
-  multi_select: ["multi_choice", "single_choice"],
-  boolean: ["single_choice", "short_text"],
+  select: ["single_choice", "short_text", "dropdown"],
+  multi_select: ["multi_choice", "single_choice", "dropdown"],
+  boolean: ["single_choice", "short_text", "checkbox", "yes_no"],
 };
 
 export function isCompatible(fieldType: FieldType, targetType: MapTargetType): boolean {

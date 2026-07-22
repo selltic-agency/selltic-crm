@@ -5,11 +5,11 @@
 // wysuwanego panelu (hamburger w wąskim topbarze).
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, menuPanel } from "@/lib/ui";
+import { tokens } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
 import MIcon from "@/components/MaterialIcon";
 import NotificationBell from "@/components/NotificationBell";
@@ -22,6 +22,7 @@ const MAIN_NAV = [
   { href: "/admin/tasks", label: "Zadania", icon: "task_alt" },
   { href: "/admin/calendar", label: "Kalendarz", icon: "calendar_month" },
   { href: "/admin/analytics", label: "Raporty", icon: "monitoring" },
+  { href: "/admin/submissions", label: "Zgłoszenia", icon: "move_to_inbox" },
   { href: "/admin/forms", label: "Formularze", icon: "description" },
   { href: "/admin/scraper", label: "Scraper", icon: "travel_explore" },
 ];
@@ -145,7 +146,12 @@ export default function Shell({
           </>
         ) : (
           <>
-            <CompanyMenu companyName={companyName} email={email} onLogout={logout} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <Logo />
+              <span style={{ fontWeight: 600, fontSize: 13.5, color: tokens.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {companyName}
+              </span>
+            </div>
             <div style={{ flex: 1 }} />
             <NotificationBell onOpenContact={openContact} />
             {!isMobile && (
@@ -199,14 +205,18 @@ export default function Shell({
         ))}
       </nav>
 
-      {/* W wąskiej szynie dropdown z nagłówka jest ukryty — daj bezpośredni
-          dostęp do Ustawień gestem gwiazdki na dole (w pełnym menu Ustawienia
-          są w rozwijanym menu firmy). */}
-      {railed && (
-        <div style={{ borderTop: `1px solid ${tokens.borderSoft}`, paddingTop: 8 }}>
-          <NavItem href="/admin/settings" label="Ustawienia" icon="settings" active={isActive("/admin/settings")} railed />
-        </div>
-      )}
+      {/* Blok dolny: Ustawienia + Wyloguj się — przypięte do dołu sidebara
+          (dawniej w rozwijanym menu firmy). Działa w trybie pełnym, zwiniętym
+          i w panelu mobilnym. */}
+      <div style={{ borderTop: `1px solid ${tokens.borderSoft}`, paddingTop: 8, marginTop: 4, display: "flex", flexDirection: "column", gap: 1 }}>
+        {!railed && (
+          <div title={email} style={{ padding: "2px 10px 6px", fontSize: 11.5, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {email}
+          </div>
+        )}
+        <NavItem href="/admin/settings" label="Ustawienia" icon="settings" active={isActive("/admin/settings")} railed={railed} />
+        <LogoutItem onLogout={logout} railed={railed} />
+      </div>
     </aside>
   );
 
@@ -299,109 +309,36 @@ function Logo() {
   );
 }
 
-// Nagłówek sidebara: logo + nazwa firmy; klik otwiera dropdown z Ustawieniami
-// i wylogowaniem (adres e-mail konta jako podpis).
-function CompanyMenu({
-  companyName,
-  email,
-  onLogout,
-}: {
-  companyName: string;
-  email: string;
-  onLogout: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
-  return (
-    <div ref={ref} style={{ position: "relative", minWidth: 0 }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "5px 7px",
-          borderRadius: tokens.radiusSm,
-          border: "1px solid transparent",
-          background: open ? tokens.bg : "transparent",
-          cursor: "pointer",
-          minWidth: 0,
-          maxWidth: 158,
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
-        onMouseLeave={(e) => (e.currentTarget.style.background = open ? tokens.bg : "transparent")}
-      >
-        <Logo />
-        <span style={{ fontWeight: 600, fontSize: 13.5, color: tokens.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {companyName}
-        </span>
-        <MIcon name="expand_more" size={16} color={tokens.muted} />
-      </button>
-
-      {open && (
-        <div style={{ ...menuPanel, position: "absolute", top: "100%", left: 0, marginTop: 4, width: 220, zIndex: 90 }}>
-          <div style={{ padding: "9px 12px 7px", borderBottom: `1px solid ${tokens.borderSoft}` }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{companyName}</div>
-            <div style={{ fontSize: 11.5, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis" }}>{email}</div>
-          </div>
-          <MenuItem
-            icon="settings"
-            label="Ustawienia"
-            onClick={() => {
-              setOpen(false);
-              router.push("/admin/settings");
-            }}
-          />
-          <MenuItem
-            icon="logout"
-            label="Wyloguj się"
-            onClick={() => {
-              setOpen(false);
-              onLogout();
-            }}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MenuItem({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+// Przycisk „Wyloguj się" w dolnym bloku sidebara — styl spójny z NavItem
+// (pełny i zwinięty).
+function LogoutItem({ onLogout, railed }: { onLogout: () => void; railed: boolean }) {
+  const [hover, setHover] = useState(false);
   return (
     <button
-      onClick={onClick}
-      role="menuitem"
+      onClick={onLogout}
+      title={railed ? "Wyloguj się" : undefined}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 9,
+        justifyContent: railed ? "center" : "flex-start",
+        gap: railed ? 0 : 9,
+        padding: railed ? "8px 0" : "6px 10px",
+        borderRadius: tokens.radiusSm,
+        border: "none",
         width: "100%",
         textAlign: "left",
-        padding: "7px 12px",
-        border: "none",
-        background: "none",
-        cursor: "pointer",
         fontSize: 13,
-        color: tokens.text,
+        fontWeight: 500,
+        color: tokens.muted,
+        background: hover ? "#FAFAFB" : "transparent",
+        cursor: "pointer",
+        transition: `background .15s ${tokens.ease}`,
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
     >
-      <MIcon name={icon} size={16} color={tokens.muted} />
-      {label}
+      <MIcon name="logout" size={18} color={tokens.muted} style={{ flexShrink: 0 }} />
+      {!railed && <span>Wyloguj się</span>}
     </button>
   );
 }
