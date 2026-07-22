@@ -7,13 +7,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Users,
-  TrendingUp,
-  Trophy,
-  Wallet,
-  Target,
-} from "lucide-react";
-import {
   ResponsiveContainer,
   AreaChart,
   Area,
@@ -30,6 +23,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { tokens, formatPLN } from "@/lib/ui";
 import { useStages } from "@/lib/stages";
+import MIcon from "@/components/MaterialIcon";
 
 type Kpis = {
   prospects: number;
@@ -148,7 +142,7 @@ export default function AnalyticsPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 20px" }}>Analityka</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Raporty</h1>
 
       {/* KPI */}
       <div
@@ -159,11 +153,11 @@ export default function AnalyticsPage() {
           marginBottom: 18,
         }}
       >
-        <Kpi icon={Users} label="Prospekty" value={loading ? null : String(kpis.prospects)} />
-        <Kpi icon={Target} label="Leady" value={loading ? null : String(kpis.leads)} />
-        <Kpi icon={TrendingUp} label="Konwersja" value={loading ? null : `${kpis.conversion}%`} />
-        <Kpi icon={Trophy} label="Wygrane" value={loading ? null : String(kpis.won)} />
-        <Kpi icon={Wallet} label="Wartość wygranych" value={loading ? null : formatPLN(kpis.wonValue)} />
+        <Kpi icon="group" label="Prospekty" value={loading ? null : String(kpis.prospects)} />
+        <Kpi icon="target" label="Leady" value={loading ? null : String(kpis.leads)} />
+        <Kpi icon="trending_up" label="Konwersja" value={loading ? null : `${kpis.conversion}%`} />
+        <Kpi icon="trophy" label="Wygrane" value={loading ? null : String(kpis.won)} />
+        <Kpi icon="wallet" label="Wartość wygranych" value={loading ? null : formatPLN(kpis.wonValue)} />
       </div>
 
       {/* Zgłoszenia / dzień */}
@@ -290,11 +284,11 @@ const tooltipProps = {
 };
 
 function Kpi({
-  icon: Icon,
+  icon,
   label,
   value,
 }: {
-  icon: typeof Users;
+  icon: string;
   label: string;
   value: string | null;
 }) {
@@ -322,7 +316,7 @@ function Kpi({
           flexShrink: 0,
         }}
       >
-        <Icon size={22} />
+        <MIcon name={icon} size={22} />
       </span>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 12, color: tokens.muted, fontWeight: 600 }}>{label}</div>

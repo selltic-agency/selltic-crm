@@ -25,26 +25,6 @@ import {
 } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Reorder, useDragControls } from "framer-motion";
-import {
-  ArrowLeft,
-  StickyNote,
-  Phone,
-  Mail,
-  FileText,
-  CircleDot,
-  CheckSquare,
-  PhoneCall,
-  Calendar,
-  AlertCircle,
-  CheckCircle2,
-  Circle,
-  GripVertical,
-  GitBranch,
-  Pencil,
-  Trash2,
-  X,
-  MessageSquare,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   tokens,
@@ -70,16 +50,14 @@ import { useToast } from "@/components/Toast";
 import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
-import { normalizeOptions, propLabel, type PropertyView } from "@/lib/properties";
+import { normalizeOptions, propLabel, defInScope, type PropertyView } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
 import { SendEmailModal } from "@/components/email/SendEmailModal";
 import { SendSmsModal } from "@/components/sms/SendSmsModal";
 import StageSelector from "@/components/StageSelector";
+import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
-// Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
-// (28+28) trzeba odjąć od 100vh, żeby dwa panele zmieściły się bez
-// przewijania całej strony. Wartości pochodzą z shell.tsx i globals.css.
-const DESKTOP_PAGE_H = "calc(100vh - 120px)";
 // Poniżej tej szerokości panele układają się pionowo (kolumny są za ciasne).
 const STACK_BREAKPOINT = 1024;
 
@@ -96,14 +74,14 @@ type Composer =
 // wolno tylko usuwać.
 const EDITABLE_ACTIVITY_TYPES = new Set<string>(["note", "call", "email"]);
 
-const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
-  note: StickyNote,
-  call: Phone,
-  email: Mail,
-  sms: MessageSquare,
-  submission: FileText,
-  stage: GitBranch,
-  task: CheckSquare,
+const ACTIVITY_ICON: Record<string, string> = {
+  note: "sticky_note_2",
+  call: "call",
+  email: "mail",
+  sms: "chat",
+  submission: "description",
+  stage: "account_tree",
+  task: "check_box",
 };
 
 const ACTIVITY_LABEL: Record<string, string> = {
@@ -162,8 +140,6 @@ export default function DealPage() {
   // obiekcie deal) — dzięki temu niezapisany szkic nie ginie przy innych
   // akcjach na stronie (np. zmianie etapu, która też robi setDeal(...)).
   const [contactDraft, setContactDraft] = useState({ name: "", company: "", email: "", phone: "" });
-  const [contactSaving, setContactSaving] = useState(false);
-  const [contactSavedAt, setContactSavedAt] = useState<number | null>(null);
 
   const [propsDraft, setPropsDraft] = useState<{ value: string; assignee: Assignee | ""; category: string; purposes: string[]; custom: Record<string, unknown> }>({
     value: "",
@@ -172,8 +148,9 @@ export default function DealPage() {
     purposes: [],
     custom: {},
   });
-  const [propsSaving, setPropsSaving] = useState(false);
-  const [propsSavedAt, setPropsSavedAt] = useState<number | null>(null);
+  // Jeden globalny zapis dla całego panelu (dane kontaktowe + właściwości).
+  const [savingAll, setSavingAll] = useState(false);
+  const [savedAllAt, setSavedAllAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!deal) return;
@@ -239,7 +216,8 @@ export default function DealPage() {
 
     const dealRow = d as Deal | null;
     setDeal(dealRow ?? null);
-    setPropertyDefs((defs as PropertyDef[]) ?? []);
+    // Tylko właściwości w zakresie „Deals" (scopes; brak kolumny = obie encje).
+    setPropertyDefs(((defs as PropertyDef[]) ?? []).filter((def) => defInScope(def, "deals")));
     if (dealRow) await reloadFeed();
     setLoading(false);
   }, [supabase, dealId, reloadFeed]);
@@ -284,51 +262,40 @@ export default function DealPage() {
     return !!(s?.is_won || s?.is_lost);
   }
 
-  // Zapis całej sekcji „Dane kontaktowe” jednym zapytaniem, jednym kliknięciem.
-  async function saveContact() {
-    if (!deal || !contactDirty || contactSaving) return;
-    setContactSaving(true);
-    const patch = {
-      name: contactDraft.name.trim() || null,
-      company: contactDraft.company.trim() || null,
-      email: contactDraft.email.trim() || null,
-      phone: contactDraft.phone.trim() || null,
-    };
+  // Jeden globalny zapis: dane kontaktowe + właściwości jednym zapytaniem.
+  async function saveAll() {
+    if (!deal || savingAll || (!contactDirty && !propsDirty)) return;
+    setSavingAll(true);
+    const patch: Record<string, unknown> = {};
+    if (contactDirty) {
+      patch.name = contactDraft.name.trim() || null;
+      patch.company = contactDraft.company.trim() || null;
+      patch.email = contactDraft.email.trim() || null;
+      patch.phone = contactDraft.phone.trim() || null;
+    }
+    if (propsDirty) {
+      patch.value = propsDraft.value ? Number(propsDraft.value) : 0;
+      patch.assignee = propsDraft.assignee || null;
+      patch.category = propsDraft.category || null;
+      patch.purposes = propsDraft.purposes;
+      const props = { ...(deal.props ?? {}) };
+      for (const def of propertyDefs) {
+        const raw = propsDraft.custom[def.key];
+        const empty = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
+        if (empty) delete props[def.key];
+        else props[def.key] = typeof raw === "string" ? raw.trim() : raw;
+      }
+      patch.props = props;
+    }
     const { error } = await supabase.from("deals").update(patch).eq("id", deal.id);
-    setContactSaving(false);
+    setSavingAll(false);
     if (error) {
-      toast.error("Nie udało się zapisać danych kontaktowych.");
+      toast.error("Nie udało się zapisać zmian.");
       return;
     }
-    setDeal({ ...deal, ...patch });
-    setContactSavedAt(Date.now());
-    setTimeout(() => setContactSavedAt(null), 2000);
-  }
-
-  // Zapis całej sekcji „Właściwości” (wbudowane + konfigurowalne) jednym zapytaniem.
-  async function saveProps() {
-    if (!deal || !propsDirty || propsSaving) return;
-    setPropsSaving(true);
-    const value = propsDraft.value ? Number(propsDraft.value) : 0;
-    const assignee = propsDraft.assignee || null;
-    const category = propsDraft.category || null;
-    const purposes = propsDraft.purposes;
-    const props = { ...(deal.props ?? {}) };
-    for (const def of propertyDefs) {
-      const raw = propsDraft.custom[def.key];
-      const empty = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
-      if (empty) delete props[def.key];
-      else props[def.key] = typeof raw === "string" ? raw.trim() : raw;
-    }
-    const { error } = await supabase.from("deals").update({ value, assignee, category, purposes, props }).eq("id", deal.id);
-    setPropsSaving(false);
-    if (error) {
-      toast.error("Nie udało się zapisać właściwości.");
-      return;
-    }
-    setDeal({ ...deal, value, assignee, category, purposes, props });
-    setPropsSavedAt(Date.now());
-    setTimeout(() => setPropsSavedAt(null), 2000);
+    setDeal({ ...deal, ...(patch as Partial<Deal>) });
+    setSavedAllAt(Date.now());
+    setTimeout(() => setSavedAllAt(null), 2000);
   }
 
   // Nowa kolejność właściwości → zapis position do property_defs (globalnie,
@@ -472,21 +439,20 @@ export default function DealPage() {
 
   const dealName = deal.name || "Bez nazwy";
   // ── Kontener strony ────────────────────────────────────────────────────
-  // Desktop: 100vh, dwie kolumny, każdy panel przewija się w środku.
+  // Desktop: pełnoekranowo (100vh), dwie kolumny bez zaokrągleń i marginesów;
+  // każdy panel przewija się w środku, rozdzielone cienką linią.
   // Wąski ekran: panele jeden pod drugim, przewija się cała strona.
   const containerStyle: CSSProperties = isNarrow
     ? { display: "flex", flexDirection: "column", gap: 16 }
     : {
-        height: DESKTOP_PAGE_H,
         display: "grid",
-        gridTemplateColumns: "minmax(300px, 380px) minmax(0, 1fr)",
-        gap: 16,
+        gridTemplateColumns: "minmax(320px, 400px) minmax(0, 1fr)",
       };
 
   return (
-    <div style={containerStyle}>
+    <div className={isNarrow ? undefined : "selltic-fullbleed"} style={containerStyle}>
       {/* ── LEWY PANEL: tożsamość + akcje + właściwości ───────────────── */}
-      <Panel fill={!isNarrow}>
+      <Panel fill={!isNarrow} flat divider={!isNarrow}>
         {/* Nagłówek panelu (nie przewija się) */}
         <div
           style={{
@@ -514,7 +480,7 @@ export default function DealPage() {
                   cursor: "pointer",
                 }}
               >
-                <PhoneCall size={13} /> Dzwonienie
+                <MIcon name="call" size={13} /> Dzwonienie
               </button>
             )}
           </div>
@@ -540,7 +506,7 @@ export default function DealPage() {
                   cursor: deal.phone ? "pointer" : "not-allowed", textDecoration: "none",
                 }}
               >
-                <Phone size={16} />
+                <MIcon name="call" size={16} />
               </a>
               <button
                 onClick={() => setEmailOpen(true)}
@@ -548,7 +514,7 @@ export default function DealPage() {
                 title="Wyślij e-mail"
                 style={{ width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", border: `1px solid ${tokens.border}`, background: "#fff", color: tokens.accent, cursor: "pointer" }}
               >
-                <Mail size={16} />
+                <MIcon name="mail" size={16} />
               </button>
             </div>
           </div>
@@ -571,28 +537,28 @@ export default function DealPage() {
               E-mail / Kalendarz wyłączone (pod przyszłą integrację Google). */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 22 }}>
             <ActionButton
-              icon={StickyNote}
+              icon="sticky_note_2"
               label="Notatka"
               onClick={() => setComposer({ open: true, editor: "text", mode: "create" })}
             />
             <ActionButton
-              icon={CheckSquare}
+              icon="add_task"
               label="Zadanie"
               onClick={() => setComposer({ open: true, editor: "task", mode: "create" })}
             />
             <ActionButton
-              icon={Mail}
+              icon="mail"
               label="E-mail"
               onClick={() => setEmailOpen(true)}
               title="Wyślij e-mail z szablonu"
             />
             <ActionButton
-              icon={MessageSquare}
+              icon="chat"
               label="SMS"
               onClick={() => setSmsOpen(true)}
               title="Wyślij SMS z szablonu"
             />
-            <ActionButton icon={Calendar} label="Kalendarz" disabled title="Wkrótce — integracja Google" />
+            <ActionButton icon="calendar_month" label="Kalendarz" disabled title="Wkrótce — integracja Google" />
           </div>
 
           {/* Kontakt / tożsamość — edycja wsadowa: jeden „Zapisz” dla całej sekcji */}
@@ -628,13 +594,7 @@ export default function DealPage() {
               />
             </FieldLabel>
           </div>
-          <SectionSaveBar
-            dirty={contactDirty}
-            saving={contactSaving}
-            savedAt={contactSavedAt}
-            onSave={saveContact}
-            style={{ marginBottom: 22 }}
-          />
+          <div style={{ marginBottom: 22 }} />
 
           {/* Etap przeniesiony do przypiętego nagłówka (§8) — brak duplikatu tutaj. */}
 
@@ -718,7 +678,7 @@ export default function DealPage() {
                 ))}
               </Reorder.Group>
               <p style={{ fontSize: 11.5, color: tokens.muted, margin: "10px 0 0" }}>
-                Przeciągnij <GripVertical size={11} style={{ verticalAlign: "-1px" }} />, by zmienić kolejność — dotyczy wszystkich deali.
+                Przeciągnij <MIcon name="drag_indicator" size={11} style={{ verticalAlign: "-1px" }} />, by zmienić kolejność — dotyczy wszystkich deali.
               </p>
             </>
           ) : (
@@ -727,21 +687,47 @@ export default function DealPage() {
             </p>
           )}
 
-          <SectionSaveBar
-            dirty={propsDirty}
-            saving={propsSaving}
-            savedAt={propsSavedAt}
-            onSave={saveProps}
-            style={{ marginTop: 14 }}
-          />
-
           {/* Dane z Google Maps (tylko dla deali ze scrapera) */}
-          <ProspectingDataCard deal={deal} />
+          <div style={{ marginTop: 14 }}>
+            <ProspectingDataCard deal={deal} />
+          </div>
+        </div>
+
+        {/* Jeden globalny przycisk zapisu — przypięty na dole panelu, zapisuje
+            dane kontaktowe i właściwości naraz. */}
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: `1px solid ${tokens.border}`,
+            padding: "10px 18px",
+            background: tokens.card,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <button
+            onClick={saveAll}
+            disabled={savingAll || (!contactDirty && !propsDirty)}
+            style={{
+              ...primaryButton,
+              padding: "8px 18px",
+              opacity: (contactDirty || propsDirty) && !savingAll ? 1 : 0.5,
+              cursor: (contactDirty || propsDirty) && !savingAll ? "pointer" : "not-allowed",
+            }}
+          >
+            {savingAll ? "Zapisywanie…" : "Zapisz zmiany"}
+          </button>
+          {contactDirty || propsDirty ? (
+            <span style={{ fontSize: 12.5, color: tokens.warning, fontWeight: 600 }}>Niezapisane zmiany</span>
+          ) : savedAllAt ? (
+            <span style={{ fontSize: 12.5, color: tokens.success, fontWeight: 600 }}>Zapisano ✓</span>
+          ) : null}
         </div>
       </Panel>
 
       {/* ── PRAWY PANEL: oś czasu aktywności ──────────────────────────── */}
-      <Panel fill={!isNarrow}>
+      <Panel fill={!isNarrow} flat>
         <div
           style={{
             flexShrink: 0,
@@ -808,22 +794,36 @@ export default function DealPage() {
   );
 }
 
-/* ── Panel (karta z wewnętrznym przewijaniem) ───────────────────────────── */
-function Panel({ fill, children }: { fill: boolean; children: React.ReactNode }) {
+/* ── Panel (kolumna z wewnętrznym przewijaniem) ─────────────────────────── */
+// `flat` = pełnoekranowy wariant bez zaokrągleń/cienia (karta deala wypełnia
+// cały obszar). `divider` = cienka linia po prawej (rozdziela dwie kolumny).
+function Panel({
+  fill,
+  flat = false,
+  divider = false,
+  children,
+}: {
+  fill: boolean;
+  flat?: boolean;
+  divider?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <section
       style={{
         background: tokens.card,
-        border: `1px solid ${tokens.border}`,
-        borderRadius: tokens.radius,
-        boxShadow: "0 1px 2px rgba(15,18,28,0.04)",
+        border: flat ? "none" : `1px solid ${tokens.border}`,
+        borderRight: divider ? `1px solid ${tokens.border}` : flat ? "none" : `1px solid ${tokens.border}`,
+        borderRadius: flat ? 0 : tokens.radius,
+        boxShadow: flat ? "none" : "0 1px 2px rgba(15,18,28,0.04)",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
+        height: fill ? "100%" : undefined,
         overflow: "hidden",
         // Na wąskim ekranie panel rośnie z treścią (przewija się cała strona),
         // ograniczamy tylko wysokość osi czasu, by nie była nieskończona.
-        ...(fill ? {} : { maxHeight: "calc(100vh - 96px)" }),
+        ...(fill ? {} : { maxHeight: "calc(100vh - 96px)", borderRadius: tokens.radius, border: `1px solid ${tokens.border}`, borderRight: `1px solid ${tokens.border}` }),
       }}
     >
       {children}
@@ -833,14 +833,14 @@ function Panel({ fill, children }: { fill: boolean; children: React.ReactNode })
 
 /* ── Przycisk akcji (Notatka / Zadanie / E-mail / Kalendarz) ────────────── */
 function ActionButton({
-  icon: Icon,
+  icon,
   label,
   active = false,
   disabled = false,
   title,
   onClick,
 }: {
-  icon: typeof StickyNote;
+  icon: string;
   label: string;
   active?: boolean;
   disabled?: boolean;
@@ -867,7 +867,7 @@ function ActionButton({
         transition: `all .15s ${tokens.ease}`,
       }}
     >
-      <Icon size={14} />
+      <MIcon name={icon} size={14} />
       {label}
     </button>
   );
@@ -915,7 +915,7 @@ function PropertyReorderRow({
           flexShrink: 0,
         }}
       >
-        <GripVertical size={15} />
+        <MIcon name="drag_indicator" size={15} />
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
         <FieldLabel label={view.label}>
@@ -1049,7 +1049,7 @@ function FeedRow({
     const t = item.task;
     const overdue = !t.done && !!t.due_at && new Date(t.due_at).getTime() < now;
     const color = t.done ? tokens.success : overdue ? tokens.danger : tokens.warning;
-    const Icon = t.done ? CheckCircle2 : overdue ? AlertCircle : Circle;
+    const taskIcon = t.done ? "check_circle" : overdue ? "error" : "circle";
     const stripe = overdue ? tokens.danger : t.done ? tokens.success : tokens.warning;
 
     return (
@@ -1071,7 +1071,7 @@ function FeedRow({
             placeItems: "center",
           }}
         >
-          <Icon size={16} />
+          <MIcon name={taskIcon} size={16} />
         </button>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -1112,7 +1112,7 @@ function FeedRow({
   const a = item.activity;
   // Nieudany SMS wyróżniamy wizualnie (czerwony) — porażki nie mogą być ciche.
   const smsFailed = a.type === "sms" && (a.meta as { status?: string } | null)?.status === "failed";
-  const Icon = ACTIVITY_ICON[a.type] ?? CircleDot;
+  const iconName = ACTIVITY_ICON[a.type] ?? "adjust";
   const color = smsFailed ? tokens.danger : ACTIVITY_COLOR[a.type] ?? tokens.accent;
   const editable = EDITABLE_ACTIVITY_TYPES.has(a.type);
 
@@ -1130,7 +1130,7 @@ function FeedRow({
           placeItems: "center",
         }}
       >
-        <Icon size={15} />
+        <MIcon name={iconName} size={15} />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -1168,26 +1168,26 @@ function RowActions({
     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
       {onToggleComplete && (
         <IconAction
-          icon={completed ? Circle : CheckCircle2}
+          icon={completed ? "circle" : "check_circle"}
           label={completed ? "Oznacz jako niewykonane" : "Oznacz jako wykonane"}
           active={!completed}
           onClick={onToggleComplete}
         />
       )}
-      {onEdit && <IconAction icon={Pencil} label={editLabel} onClick={onEdit} />}
-      <IconAction icon={Trash2} label="Usuń" danger onClick={onDelete} />
+      {onEdit && <IconAction icon="edit" label={editLabel} onClick={onEdit} />}
+      <IconAction icon="delete" label="Usuń" danger onClick={onDelete} />
     </div>
   );
 }
 
 function IconAction({
-  icon: Icon,
+  icon,
   label,
   danger = false,
   active = false,
   onClick,
 }: {
-  icon: typeof Pencil;
+  icon: string;
   label: string;
   danger?: boolean;
   active?: boolean;
@@ -1211,7 +1211,7 @@ function IconAction({
         color: danger ? tokens.danger : active ? tokens.success : tokens.muted,
       }}
     >
-      <Icon size={14} />
+      <MIcon name={icon} size={14} />
     </button>
   );
 }
@@ -1240,6 +1240,7 @@ function ComposerModal({
     updateTask: (id: string, patch: { title: string; due_at: string | null; done: boolean }) => Promise<void>;
   };
 }) {
+  useScrollLock();
   const isTask = composer.editor === "task";
   const [saving, setSaving] = useState(false);
   const [body, setBody] = useState(
@@ -1311,7 +1312,7 @@ function ComposerModal({
             aria-label="Zamknij"
             style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}
           >
-            <X size={15} color={tokens.muted} />
+            <MIcon name="close" size={15} color={tokens.muted} />
           </button>
         </div>
 
@@ -1536,46 +1537,6 @@ function FieldLabel({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-// Pasek zapisu dla sekcji z wsadową edycją: jeden przycisk „Zapisz zmiany”
-// dla dowolnej liczby pól naraz + jawny stan (niezapisane / zapisano ✓),
-// żeby zawsze było wiadomo, czy zmiana faktycznie poszła do bazy.
-function SectionSaveBar({
-  dirty,
-  saving,
-  savedAt,
-  onSave,
-  style,
-}: {
-  dirty: boolean;
-  saving: boolean;
-  savedAt: number | null;
-  onSave: () => void;
-  style?: CSSProperties;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, ...style }}>
-      <button
-        onClick={onSave}
-        disabled={!dirty || saving}
-        style={{
-          ...primaryButton,
-          padding: "8px 16px",
-          fontSize: 13,
-          opacity: dirty && !saving ? 1 : 0.5,
-          cursor: dirty && !saving ? "pointer" : "not-allowed",
-        }}
-      >
-        {saving ? "Zapisywanie…" : "Zapisz zmiany"}
-      </button>
-      {dirty ? (
-        <span style={{ fontSize: 12.5, color: tokens.warning, fontWeight: 600 }}>Niezapisane zmiany</span>
-      ) : savedAt ? (
-        <span style={{ fontSize: 12.5, color: tokens.success, fontWeight: 600 }}>Zapisano ✓</span>
-      ) : null}
-    </div>
-  );
-}
-
 function BackLink({ router }: { router: ReturnType<typeof useRouter> }) {
   return (
     <button
@@ -1593,7 +1554,7 @@ function BackLink({ router }: { router: ReturnType<typeof useRouter> }) {
         padding: 0,
       }}
     >
-      <ArrowLeft size={16} />
+      <MIcon name="arrow_back" size={16} />
       Wstecz
     </button>
   );

@@ -1,22 +1,21 @@
-// components/ViewTabs.tsx — zakładki zapisanych widoków w stylu kart przeglądarki
-// (Chrome-tabs). Współdzielone przez Leady i Prospecting — IDENTYCZNY komponent,
-// interakcje i wygląd na obu stronach.
+// components/ViewTabs.tsx — zakładki zapisanych widoków (Attio-style, płaskie).
+// Współdzielone przez Leady i Prospecting.
 //
 // Model:
 //   • „Wszystkie" — stała pierwsza zakładka: brak filtrów (stan domyślny).
-//   • zapisane widoki — po jednej zakładce na widok (przełączanie / zmiana
-//     nazwy / usuwanie), ŻADEN nie jest aktywny na wejściu.
-//   • „+" — zapisz bieżący stan jako nowy widok (nowa zakładka).
-//   • filtr tymczasowy (ad-hoc) — gdy bieżące filtry różnią się od aktywnej
-//     zakładki, pojawia się WYRÓŻNIONA (przerywana) zakładka tymczasowa,
-//     nałożona na bieżącą. Wyczyszczenie jej NIE rusza żadnego zapisanego
-//     widoku; można ją zapisać jako nowy widok lub (na widoku) zapisać zmiany.
+//   • zapisane widoki — po jednej zakładce na widok; menu ⋯: zmiana nazwy,
+//     duplikacja, przesunięcie w lewo/prawo (kolejność), usunięcie.
+//   • „+" — zapisz bieżący stan jako nowy widok.
+//   • zmiany na AKTYWNYM widoku zapisują się automatycznie (autosave) —
+//     zakładka tymczasowa istnieje tylko na „Wszystkie" (adhoc), skąd można
+//     stan zapisać jako nowy widok.
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, MoreHorizontal, Plus, Save, X } from "lucide-react";
-import { tokens, inputStyle, primaryButton } from "@/lib/ui";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { tokens, inputStyle, primaryButton, menuPanel } from "@/lib/ui";
 import type { SavedView, SavedViewStorage } from "@/lib/savedViews";
+import MIcon from "@/components/MaterialIcon";
 
 export default function ViewTabs({
   views,
@@ -30,30 +29,26 @@ export default function ViewTabs({
   onSelectView,
   onCreate,
   onRename,
+  onDuplicate,
   onDelete,
-  onSaveChanges,
-  onClearAdhoc,
+  onMove,
 }: {
   views: SavedView[];
   activeId: string | null;
-  /** true → na bieżącej zakładce leży niezapisany filtr tymczasowy. */
+  /** true → na „Wszystkie" leży niezapisany stan (filtry/sort/kolumny). */
   adhoc: boolean;
   loading: boolean;
   storage?: SavedViewStorage;
   error?: string | null;
-  /**
-   * Opcjonalna zakładka „Archiwum" — zachowuje się jak „Wszystkie", tylko
-   * filtruje rekordy zarchiwizowane. Używa jej Prospecting; Leady nie mają
-   * archiwum i nie przekazują tej właściwości.
-   */
+  /** Opcjonalna zakładka „Archiwum" (Prospecting). */
   archiveTab?: { active: boolean; count: number; onSelect: () => void } | null;
   onSelectAll: () => void;
   onSelectView: (id: string) => void;
   onCreate: (name: string) => void;
   onRename: (id: string, name: string) => void;
+  onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
-  onSaveChanges: () => void;
-  onClearAdhoc: () => void;
+  onMove: (id: string, dir: -1 | 1) => void;
 }) {
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
@@ -61,12 +56,9 @@ export default function ViewTabs({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
-  if (loading) return null;
+  if (loading) return <div style={{ height: 34, marginBottom: 10 }} />;
 
-  const activeView = views.find((v) => v.id === activeId) ?? null;
-  // Zakładka „bazowa" jest aktywna tylko, gdy NIE leży na niej filtr tymczasowy
-  // i nie oglądamy Archiwum.
-  const allActive = activeId === null && !adhoc && !archiveTab?.active;
+  const allActive = activeId === null && !archiveTab?.active;
 
   function submitNew() {
     if (newName.trim()) {
@@ -77,26 +69,27 @@ export default function ViewTabs({
   }
 
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 4, borderBottom: `1px solid ${tokens.border}`, paddingBottom: 0 }}>
-        {/* Zakładka „Wszystkie" — stan domyślny (brak filtrów). */}
-        <Tab active={allActive} onClick={onSelectAll} label="Wszystkie" />
+    <div style={{ marginBottom: 10 }}>
+      <div
+        className="selltic-scroll-x"
+        style={{ display: "flex", alignItems: "center", gap: 2, borderBottom: `1px solid ${tokens.border}`, overflowX: "auto" }}
+      >
+        <Tab active={allActive} onClick={onSelectAll} label="Wszystkie" adhoc={allActive && adhoc} />
 
-        {/* Zakładka „Archiwum" — jak „Wszystkie", tylko rekordy zarchiwizowane. */}
         {archiveTab && (
           <Tab
             active={archiveTab.active}
             onClick={archiveTab.onSelect}
-            label={archiveTab.count > 0 ? `Archiwum (${archiveTab.count})` : "Archiwum"}
+            label="Archiwum"
+            count={archiveTab.count > 0 ? archiveTab.count : undefined}
           />
         )}
 
-        {/* Zakładki zapisanych widoków. */}
-        {views.map((v) => {
-          const isActive = activeId === v.id && !adhoc;
+        {views.map((v, i) => {
+          const isActive = activeId === v.id;
           if (renaming === v.id) {
             return (
-              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 6px" }}>
+              <div key={v.id} style={{ display: "flex", alignItems: "center", padding: "3px 4px" }}>
                 <input
                   autoFocus
                   value={renameValue}
@@ -112,44 +105,65 @@ export default function ViewTabs({
                     if (renameValue.trim()) onRename(v.id, renameValue.trim());
                     setRenaming(null);
                   }}
-                  style={{ ...inputStyle, width: 140, padding: "6px 10px", fontSize: 13 }}
+                  style={{ ...inputStyle, width: 140, padding: "4px 8px", fontSize: 12.5 }}
                 />
               </div>
             );
           }
           return (
-            <div key={v.id} style={{ position: "relative" }}>
+            <div key={v.id} style={{ position: "relative", flexShrink: 0 }}>
               <Tab
                 active={isActive}
                 onClick={() => onSelectView(v.id)}
                 label={v.name}
+                // Menu widoku (zmiana nazwy / duplikacja / kolejność / usuń)
+                // tylko na AKTYWNEJ zakładce — mniej wizualnego szumu, a samo
+                // menu renderujemy przez portal (niżej), by nie przycinał go
+                // poziomy pasek przewijania zakładek.
                 trailing={
-                  !v.is_default ? (
+                  isActive ? (
                     <span
                       role="button"
                       tabIndex={0}
                       aria-label="Menu widoku"
+                      data-viewmenu-open={menuFor === v.id ? "1" : undefined}
                       onClick={(e) => {
                         e.stopPropagation();
                         setMenuFor(menuFor === v.id ? null : v.id);
                       }}
-                      style={{ display: "flex", padding: 2, borderRadius: 4, marginLeft: 2, color: isActive ? tokens.accent : tokens.muted }}
+                      style={{ display: "flex", padding: 1, borderRadius: 4, marginLeft: 2, color: tokens.muted }}
                     >
-                      <MoreHorizontal size={14} />
+                      <MIcon name="expand_more" size={15} />
                     </span>
                   ) : null
                 }
               />
               {menuFor === v.id && (
                 <ViewMenu
+                  canMoveLeft={i > 0}
+                  canMoveRight={i < views.length - 1}
                   onClose={() => setMenuFor(null)}
                   onRename={() => {
                     setRenameValue(v.name);
                     setRenaming(v.id);
                     setMenuFor(null);
                   }}
+                  onDuplicate={() => {
+                    onDuplicate(v.id);
+                    setMenuFor(null);
+                  }}
+                  onMoveLeft={() => {
+                    onMove(v.id, -1);
+                    setMenuFor(null);
+                  }}
+                  onMoveRight={() => {
+                    onMove(v.id, 1);
+                    setMenuFor(null);
+                  }}
                   onDelete={() => {
-                    onDelete(v.id);
+                    if (window.confirm(`Usunąć widok „${v.name}"? Tej operacji nie można cofnąć.`)) {
+                      onDelete(v.id);
+                    }
                     setMenuFor(null);
                   }}
                 />
@@ -158,74 +172,39 @@ export default function ViewTabs({
           );
         })}
 
-        {/* Zakładka tymczasowa (ad-hoc) — wyróżniona, nietrwała. */}
-        {adhoc && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "8px 12px",
-              borderTopLeftRadius: 10,
-              borderTopRightRadius: 10,
-              border: `1px dashed ${tokens.accent}`,
-              borderBottom: "none",
-              background: tokens.accentSoft,
-              color: tokens.accent,
-              fontSize: 13,
-              fontWeight: 600,
-              fontStyle: "italic",
-              position: "relative",
-              top: 1,
-            }}
-            title="Filtr tymczasowy — nałożony na bieżącą zakładkę, niezapisany."
-          >
-            <span>Filtr tymczasowy</span>
-            <button
-              onClick={onClearAdhoc}
-              aria-label="Wyczyść filtr tymczasowy"
-              title="Wyczyść filtr tymczasowy"
-              style={{ border: "none", background: "none", cursor: "pointer", display: "flex", padding: 0, color: tokens.accent }}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
         {/* „+" — zapisz bieżący stan jako nowy widok. */}
-        <div style={{ position: "relative", padding: "4px 4px 6px" }}>
+        <div style={{ position: "relative", padding: "3px 2px", flexShrink: 0 }}>
           <button
             onClick={() => setShowNew((s) => !s)}
-            title="Zapisz jako nowy widok"
-            aria-label="Zapisz jako nowy widok"
+            title="Nowy widok z bieżącego stanu"
+            aria-label="Nowy widok"
             style={{
-              width: 30,
-              height: 30,
-              borderRadius: 8,
-              border: `1px dashed ${tokens.border}`,
-              background: "#fff",
+              width: 26,
+              height: 26,
+              borderRadius: 6,
+              border: "none",
+              background: "transparent",
               display: "grid",
               placeItems: "center",
               cursor: "pointer",
               color: tokens.muted,
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            <Plus size={15} />
+            <MIcon name="add" size={16} />
           </button>
 
           {showNew && (
             <div
               style={{
+                ...menuPanel,
                 position: "absolute",
                 top: "100%",
                 left: 0,
                 marginTop: 4,
                 zIndex: 30,
-                background: "#fff",
-                border: `1px solid ${tokens.border}`,
-                borderRadius: 12,
-                boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-                padding: 14,
+                padding: 12,
                 display: "flex",
                 gap: 8,
                 alignItems: "center",
@@ -234,7 +213,7 @@ export default function ViewTabs({
             >
               <input
                 autoFocus
-                placeholder="Nazwa widoku..."
+                placeholder="Nazwa widoku…"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
@@ -243,39 +222,12 @@ export default function ViewTabs({
                 }}
                 style={{ ...inputStyle, flex: 1 }}
               />
-              <button onClick={submitNew} style={{ ...primaryButton, padding: "9px 14px" }}>
+              <button onClick={submitNew} style={primaryButton}>
                 Zapisz
               </button>
             </div>
           )}
         </div>
-
-        {/* Zapisz zmiany do aktywnego widoku (gdy leży na nim filtr tymczasowy). */}
-        {adhoc && activeView && (
-          <button
-            onClick={onSaveChanges}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              marginLeft: 4,
-              marginBottom: 6,
-              alignSelf: "center",
-              padding: "6px 12px",
-              borderRadius: 8,
-              border: `1px solid ${tokens.accent}`,
-              background: "#fff",
-              color: tokens.accent,
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Save size={13} />
-            Zapisz zmiany w „{activeView.name}"
-          </button>
-        )}
       </div>
 
       {(error || storage === "local") && (
@@ -284,13 +236,13 @@ export default function ViewTabs({
             display: "flex",
             alignItems: "flex-start",
             gap: 6,
-            marginTop: 8,
+            marginTop: 6,
             fontSize: 12,
-            fontWeight: 600,
+            fontWeight: 500,
             color: error ? tokens.danger : tokens.warning,
           }}
         >
-          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <MIcon name="warning" size={14} style={{ marginTop: 1 }} />
           <span>
             {error ??
               "Widoki zapisują się tylko w tej przeglądarce — tabela saved_views nie istnieje w bazie. Uruchom migration_saved_views.sql (Supabase → SQL Editor), aby zapisywać je na stałe."}
@@ -301,90 +253,151 @@ export default function ViewTabs({
   );
 }
 
-// Pojedyncza zakładka w stylu karty przeglądarki: zaokrąglona góra, aktywna
-// „wtapia się" w treść (tło karty, brak dolnej krawędzi).
+// Płaska zakładka: aktywna = ciemny tekst + akcentowe podkreślenie.
 function Tab({
   active,
   onClick,
   label,
+  count,
+  adhoc,
   trailing,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  count?: number;
+  /** Kropka „niezapisane zmiany" (stan tymczasowy na „Wszystkie"). */
+  adhoc?: boolean;
   trailing?: React.ReactNode;
 }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "7px 10px",
+        border: "none",
+        borderBottom: `2px solid ${active ? tokens.accent : "transparent"}`,
+        background: "transparent",
+        color: active ? tokens.text : hover ? tokens.text : tokens.muted,
+        fontSize: 13,
+        fontWeight: active ? 600 : 500,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        maxWidth: 220,
+        flexShrink: 0,
+        marginBottom: -1,
+      }}
+    >
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      {typeof count === "number" && (
+        <span style={{ fontSize: 11, fontWeight: 500, color: tokens.muted, background: tokens.bg, borderRadius: 999, padding: "0 6px", lineHeight: "16px" }}>
+          {count}
+        </span>
+      )}
+      {adhoc && (
+        <span
+          title="Niezapisany stan — zapisz jako widok przyciskiem +"
+          style={{ width: 6, height: 6, borderRadius: "50%", background: tokens.accent, flexShrink: 0 }}
+        />
+      )}
+      {trailing}
+    </button>
+  );
+}
+
+// Menu widoku renderowane PRZEZ PORTAL do <body> i pozycjonowane „fixed" —
+// dzięki temu nie przycina go poziomy pasek przewijania zakładek (wcześniej
+// menu było niewidoczne i nie dało się usuwać widoków).
+function ViewMenu({
+  canMoveLeft,
+  canMoveRight,
+  onClose,
+  onRename,
+  onDuplicate,
+  onMoveLeft,
+  onMoveRight,
+  onDelete,
+}: {
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
+  onClose: () => void;
+  onRename: () => void;
+  onDuplicate: () => void;
+  onMoveLeft: () => void;
+  onMoveRight: () => void;
+  onDelete: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  // Kotwica: aktywny trigger „⋯" oznaczony atrybutem data-viewmenu-open.
+  useLayoutEffect(() => {
+    const trigger = document.querySelector('[data-viewmenu-open="1"]') as HTMLElement | null;
+    const r = trigger?.getBoundingClientRect();
+    if (r) {
+      const width = 176;
+      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+      setPos({ top: r.bottom + 6, left });
+    }
+  }, []);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      ref={ref}
+      style={{
+        ...menuPanel,
+        position: "fixed",
+        top: pos?.top ?? -9999,
+        left: pos?.left ?? -9999,
+        zIndex: 120,
+        minWidth: 176,
+        visibility: pos ? "visible" : "hidden",
+      }}
+    >
+      <MenuItem icon="edit" label="Zmień nazwę" onClick={onRename} />
+      <MenuItem icon="content_copy" label="Duplikuj" onClick={onDuplicate} />
+      {canMoveLeft && <MenuItem icon="arrow_back" label="Przesuń w lewo" onClick={onMoveLeft} />}
+      {canMoveRight && <MenuItem icon="arrow_forward" label="Przesuń w prawo" onClick={onMoveRight} />}
+      <MenuItem icon="delete" label="Usuń widok" danger onClick={onDelete} />
+    </div>,
+    document.body
+  );
+}
+
+function MenuItem({ icon, label, onClick, danger }: { icon: string; label: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
       onClick={onClick}
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 4,
-        padding: "8px 14px",
-        borderTopLeftRadius: 10,
-        borderTopRightRadius: 10,
-        border: `1px solid ${active ? tokens.border : "transparent"}`,
-        borderBottom: active ? `1px solid ${tokens.card}` : "1px solid transparent",
-        background: active ? tokens.card : "transparent",
-        color: active ? tokens.text : tokens.muted,
-        fontSize: 13,
-        fontWeight: active ? 700 : 600,
-        cursor: "pointer",
-        position: "relative",
-        top: 1,
-        maxWidth: 220,
-      }}
-    >
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-      {trailing}
-    </button>
-  );
-}
-
-function ViewMenu({ onClose, onRename, onDelete }: { onClose: () => void; onRename: () => void; onDelete: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [onClose]);
-
-  return (
-    <div
-      ref={ref}
-      style={{
-        position: "absolute",
-        top: "100%",
-        right: 0,
-        marginTop: 4,
-        zIndex: 40,
-        background: "#fff",
-        border: `1px solid ${tokens.border}`,
-        borderRadius: 10,
-        boxShadow: "0 10px 25px rgba(0,0,0,0.12)",
-        minWidth: 140,
-        overflow: "hidden",
-      }}
-    >
-      <MenuItem label="Zmień nazwę" onClick={onRename} />
-      <MenuItem label="Usuń" danger onClick={onDelete} />
-    </div>
-  );
-}
-
-function MenuItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "block",
+        gap: 9,
         width: "100%",
         textAlign: "left",
-        padding: "9px 12px",
+        padding: "7px 11px",
         border: "none",
         background: "none",
         cursor: "pointer",
@@ -394,6 +407,7 @@ function MenuItem({ label, onClick, danger }: { label: string; onClick: () => vo
       onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
       onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
     >
+      <MIcon name={icon} size={15} color={danger ? tokens.danger : tokens.muted} />
       {label}
     </button>
   );

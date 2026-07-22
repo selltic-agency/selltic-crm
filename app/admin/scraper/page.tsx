@@ -10,10 +10,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Rocket, RefreshCw, CheckSquare, Square, ArrowRightCircle, Loader2,
-  Archive, RotateCcw, Pause, Play, Ban, ChevronRight, ChevronDown, X,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
 import { useToast } from "@/components/Toast";
@@ -22,6 +18,7 @@ import { ScoreBadge } from "@/components/ScoreBreakdown";
 import { useClassification } from "@/lib/classification";
 import { useIsMobile } from "@/lib/responsive";
 import type { LeadCategory, ScrapeJob, ScrapeBatch, ScrapeBatchStatus, ScrapedLead, Prospect } from "@/lib/types";
+import MIcon from "@/components/MaterialIcon";
 
 type Tab = "leads" | "duplicates" | "archive";
 
@@ -461,7 +458,7 @@ export default function ScraperPage() {
 
   return (
     <div style={{ maxWidth: 980 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 20px" }}>Scraper</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Scraper</h1>
 
       <section
         style={{
@@ -541,7 +538,7 @@ export default function ScraperPage() {
           disabled={starting}
           style={{ ...primaryButton, marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}
         >
-          <Rocket size={16} />
+          <MIcon name="rocket_launch" size={16} />
           {starting ? "Uruchamianie…" : "Rozpocznij scrapowanie"}
         </button>
       </section>
@@ -564,7 +561,7 @@ export default function ScraperPage() {
               disabled={refreshing}
               style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", opacity: refreshing ? 0.6 : 1 }}
             >
-              <RefreshCw size={14} className={refreshing ? "selltic-spin" : undefined} />
+              <MIcon name="refresh" size={14} className={refreshing ? "selltic-spin" : undefined} />
               {refreshing ? "Odświeżanie…" : "Odśwież"}
             </button>
           </div>
@@ -606,7 +603,7 @@ export default function ScraperPage() {
               disabled={refreshing}
               style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", opacity: refreshing ? 0.6 : 1 }}
             >
-              <RefreshCw size={14} className={refreshing ? "selltic-spin" : undefined} />
+              <MIcon name="refresh" size={14} className={refreshing ? "selltic-spin" : undefined} />
               {refreshing ? "Odświeżanie…" : "Odśwież"}
             </button>
           )}
@@ -774,7 +771,7 @@ function AssignCategoriesModal({
             aria-label="Zamknij"
             style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0 }}
           >
-            <X size={15} color={tokens.muted} />
+            <MIcon name="close" size={15} color={tokens.muted} />
           </button>
         </div>
         <p style={{ fontSize: 13.5, color: tokens.muted, margin: "0 0 14px", flexShrink: 0 }}>
@@ -803,7 +800,7 @@ function AssignCategoriesModal({
               onClick={toggleAll}
               style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: tokens.text, padding: 0 }}
             >
-              {allSelected ? <CheckSquare size={16} color={tokens.accent} /> : <Square size={16} color={tokens.muted} />}
+              {allSelected ? <MIcon name="check_box" size={16} color={tokens.accent} /> : <MIcon name="check_box_outline_blank" size={16} color={tokens.muted} />}
               Zaznacz wszystkie
             </button>
             <div style={{ flex: 1, minWidth: 8 }} />
@@ -856,7 +853,7 @@ function AssignCategoriesModal({
                       aria-label={isSel ? "Odznacz" : "Zaznacz"}
                       style={{ background: "none", border: "none", cursor: "pointer", display: "grid", placeItems: "center", padding: 0, flexShrink: 0 }}
                     >
-                      {isSel ? <CheckSquare size={16} color={tokens.accent} /> : <Square size={16} color={tokens.muted} />}
+                      {isSel ? <MIcon name="check_box" size={16} color={tokens.accent} /> : <MIcon name="check_box_outline_blank" size={16} color={tokens.muted} />}
                     </button>
                   )}
                   <span
@@ -951,9 +948,9 @@ function BatchCard({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", minWidth: 0 }}>
           {expanded ? (
-            <ChevronDown size={16} color={tokens.muted} style={{ flexShrink: 0 }} />
+            <MIcon name="expand_more" size={16} color={tokens.muted} style={{ flexShrink: 0 }} />
           ) : (
-            <ChevronRight size={16} color={tokens.muted} style={{ flexShrink: 0 }} />
+            <MIcon name="chevron_right" size={16} color={tokens.muted} style={{ flexShrink: 0 }} />
           )}
           <span
             style={{
@@ -987,7 +984,7 @@ function BatchCard({
               padding: "3px 10px",
             }}
           >
-            {eff === "running" && <Loader2 size={12} className="selltic-spin" />}
+            {eff === "running" && <MIcon name="progress_activity" size={12} className="selltic-spin" />}
             {BATCH_STATUS_LABEL[eff]}
           </span>
 
@@ -996,7 +993,7 @@ function BatchCard({
             {eff === "running" && (
               <ControlButton
                 label="Pauza"
-                icon={<Pause size={13} />}
+                icon={<MIcon name="pause" size={13} />}
                 busy={controlBusy === `${batch.id}:pause`}
                 disabled={anyBusy}
                 onClick={() => onControl("pause", batch.id)}
@@ -1005,7 +1002,7 @@ function BatchCard({
             {eff === "paused" && (
               <ControlButton
                 label="Wznów"
-                icon={<Play size={13} />}
+                icon={<MIcon name="play_arrow" size={13} />}
                 busy={controlBusy === `${batch.id}:resume`}
                 disabled={anyBusy}
                 onClick={() => onControl("resume", batch.id)}
@@ -1014,7 +1011,7 @@ function BatchCard({
             {(eff === "running" || eff === "paused") && (
               <ControlButton
                 label="Stop"
-                icon={<Ban size={13} />}
+                icon={<MIcon name="block" size={13} />}
                 danger
                 busy={controlBusy === `${batch.id}:stop`}
                 disabled={anyBusy}
@@ -1124,7 +1121,7 @@ function ControlButton({
         opacity: disabled && !busy ? 0.5 : 1,
       }}
     >
-      {busy ? <Loader2 size={13} className="selltic-spin" /> : icon}
+      {busy ? <MIcon name="progress_activity" size={13} className="selltic-spin" /> : icon}
       {label}
     </button>
   );
@@ -1151,7 +1148,7 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
     >
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
         {j.status === "running" ? (
-          <Loader2 size={13} className="selltic-spin" color={color} style={{ flexShrink: 0 }} />
+          <MIcon name="progress_activity" size={13} className="selltic-spin" color={color} style={{ flexShrink: 0 }} />
         ) : (
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
         )}
@@ -1361,7 +1358,7 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
     <section style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "12px 16px", borderBottom: `1px solid ${tokens.border}` }}>
         <button onClick={toggleAll} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: tokens.text, fontSize: 13, fontWeight: 600 }}>
-          {allSelected ? <CheckSquare size={17} color={tokens.accent} /> : <Square size={17} color={tokens.muted} />}
+          {allSelected ? <MIcon name="check_box" size={17} color={tokens.accent} /> : <MIcon name="check_box_outline_blank" size={17} color={tokens.muted} />}
           Zaznacz wszystkie
         </button>
         <div style={{ flex: 1, minWidth: 8 }} />
@@ -1370,7 +1367,7 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
           disabled={selected.size === 0 || busy}
           style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, opacity: selected.size === 0 ? 0.5 : 1 }}
         >
-          <Archive size={15} />
+          <MIcon name="archive" size={15} />
           {rejecting ? "Odrzucanie…" : `Odrzuć zaznaczone (${selected.size})`}
         </button>
         <button
@@ -1378,7 +1375,7 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
           disabled={selected.size === 0 || busy}
           style={{ ...primaryButton, display: "flex", alignItems: "center", gap: 6, opacity: selected.size === 0 ? 0.5 : 1 }}
         >
-          <ArrowRightCircle size={16} />
+          <MIcon name="arrow_circle_right" size={16} />
           {moving ? "Przenoszenie…" : `Przenieś do Prospectingu (${selected.size})`}
         </button>
       </div>
@@ -1389,7 +1386,7 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
             style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${tokens.border}` }}
           >
             <button onClick={() => toggleOne(l.id)} style={{ background: "none", border: "none", cursor: "pointer", flexShrink: 0 }}>
-              {selected.has(l.id) ? <CheckSquare size={17} color={tokens.accent} /> : <Square size={17} color={tokens.muted} />}
+              {selected.has(l.id) ? <MIcon name="check_box" size={17} color={tokens.accent} /> : <MIcon name="check_box_outline_blank" size={17} color={tokens.muted} />}
             </button>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.business_name}</div>
@@ -1430,7 +1427,7 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
                 opacity: rejectingId === l.id ? 0.5 : 1,
               }}
             >
-              {rejectingId === l.id ? <Loader2 size={15} className="selltic-spin" /> : <Archive size={15} />}
+              {rejectingId === l.id ? <MIcon name="progress_activity" size={15} className="selltic-spin" /> : <MIcon name="archive" size={15} />}
             </button>
           </div>
         ))}
@@ -1522,7 +1519,7 @@ function ArchiveTab({
               disabled={restoringId !== null}
               style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", flexShrink: 0, opacity: restoringId === l.id ? 0.5 : 1 }}
             >
-              {restoringId === l.id ? <Loader2 size={14} className="selltic-spin" /> : <RotateCcw size={14} />}
+              {restoringId === l.id ? <MIcon name="progress_activity" size={14} className="selltic-spin" /> : <MIcon name="history" size={14} />}
               Przywróć
             </button>
           </div>
@@ -1603,7 +1600,7 @@ function DuplicatesTab({
                 title="Cofnij flagę duplikatu — lead wróci do listy „Leady”"
                 style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", flexShrink: 0, opacity: restoringId === l.id ? 0.5 : 1 }}
               >
-                {restoringId === l.id ? <Loader2 size={14} className="selltic-spin" /> : <RotateCcw size={14} />}
+                {restoringId === l.id ? <MIcon name="progress_activity" size={14} className="selltic-spin" /> : <MIcon name="history" size={14} />}
                 Wróć do Leadów
               </button>
             </div>

@@ -6,18 +6,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  FilePlus2,
-  UserPlus,
-  CheckSquare,
-  BarChart3,
-  Clock,
-  StickyNote,
-  Phone,
-  Mail,
-  FileText,
-  CircleDot,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 import { tokens, formatDateTime, formatPLN } from "@/lib/ui";
@@ -27,21 +15,22 @@ import {
   type Task,
 } from "@/lib/types";
 import { useStages } from "@/lib/stages";
+import MIcon from "@/components/MaterialIcon";
 
-const ACTIVITY_ICON: Record<string, typeof StickyNote> = {
-  note: StickyNote,
-  call: Phone,
-  email: Mail,
-  submission: FileText,
-  stage: CircleDot,
-  task: CheckSquare,
+const ACTIVITY_ICON: Record<string, string> = {
+  note: "sticky_note_2",
+  call: "call",
+  email: "mail",
+  submission: "description",
+  stage: "adjust",
+  task: "check_box",
 };
 
 const QUICK = [
-  { href: "/admin/forms", label: "Nowy formularz", icon: FilePlus2 },
-  { href: "/admin/pipeline", label: "Nowy deal", icon: UserPlus },
-  { href: "/admin/tasks", label: "Nowe zadanie", icon: CheckSquare },
-  { href: "/admin/analytics", label: "Analityka", icon: BarChart3 },
+  { href: "/admin/forms", label: "Nowy formularz", icon: "note_add" },
+  { href: "/admin/pipeline", label: "Nowy deal", icon: "person_add" },
+  { href: "/admin/tasks", label: "Nowe zadanie", icon: "add_task" },
+  { href: "/admin/analytics", label: "Analityka", icon: "monitoring" },
 ];
 
 export default function DashboardPage() {
@@ -109,7 +98,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 20px" }}>Pulpit</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Start</h1>
 
       {/* Szybkie akcje */}
       <div
@@ -121,7 +110,6 @@ export default function DashboardPage() {
         }}
       >
         {QUICK.map((q, i) => {
-          const Icon = q.icon;
           return (
             <motion.div
               key={q.href}
@@ -161,7 +149,7 @@ export default function DashboardPage() {
                     placeItems: "center",
                   }}
                 >
-                  <Icon size={19} />
+                  <MIcon name={q.icon} size={19} />
                 </span>
                 {q.label}
               </Link>
@@ -205,26 +193,28 @@ export default function DashboardPage() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {l.name || "Bez nazwy"}
                       </div>
-                      <div style={{ fontSize: 12, color: tokens.muted }}>
+                      <div style={{ fontSize: 12, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {l.company || "—"}
                       </div>
                     </div>
                     <span
                       style={{
-                        fontSize: 12,
+                        fontSize: 11.5,
                         fontWeight: 600,
-                        padding: "3px 10px",
+                        padding: "2px 9px",
                         borderRadius: 999,
                         background: `${sm.color}1A`,
                         color: sm.color,
+                        flexShrink: 0,
+                        whiteSpace: "nowrap",
                       }}
                     >
                       {sm.label}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, minWidth: 70, textAlign: "right" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 62, textAlign: "right", flexShrink: 0 }}>
                       {formatPLN(l.value)}
                     </span>
                   </button>
@@ -263,7 +253,7 @@ export default function DashboardPage() {
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{t.title}</div>
                     {t.due_at && (
                       <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: tokens.muted }}>
-                        <Clock size={12} />
+                        <MIcon name="schedule" size={12} />
                         {formatDateTime(t.due_at)}
                       </div>
                     )}
@@ -283,7 +273,7 @@ export default function DashboardPage() {
           ) : (
             <div style={{ display: "grid", gap: 14 }}>
               {activities.map((a) => {
-                const Icon = ACTIVITY_ICON[a.type] ?? CircleDot;
+                const iconName = ACTIVITY_ICON[a.type] ?? "adjust";
                 return (
                   <div key={a.id} style={{ display: "flex", gap: 11 }}>
                     <div
@@ -298,16 +288,23 @@ export default function DashboardPage() {
                         placeItems: "center",
                       }}
                     >
-                      <Icon size={15} />
+                      <MIcon name={iconName} size={15} />
                     </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: 13.5,
+                          lineHeight: 1.4,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
                         {a.body || "—"}
-                        {a.deals?.name ? (
-                          <span style={{ color: tokens.muted }}> · {a.deals.name}</span>
-                        ) : null}
+                        {a.deals?.name ? <span style={{ color: tokens.muted }}> · {a.deals.name}</span> : null}
                       </div>
-                      <div style={{ fontSize: 12, color: tokens.muted }}>
+                      <div style={{ fontSize: 12, color: tokens.muted, marginTop: 2 }}>
                         {formatDateTime(a.created_at)}
                       </div>
                     </div>

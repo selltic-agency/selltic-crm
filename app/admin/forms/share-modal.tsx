@@ -3,9 +3,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X, Copy, Check, ExternalLink } from "lucide-react";
 import { tokens } from "@/lib/ui";
 import { publicFormUrl } from "@/lib/publicUrl";
+import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 type Props = {
   slug: string;
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export default function ShareModal({ slug, title, onClose }: Props) {
+  useScrollLock();
   // origin znamy dopiero w przeglądarce.
   const [origin, setOrigin] = useState("");
   const [copied, setCopied] = useState<"link" | "embed" | null>(null);
@@ -108,7 +110,7 @@ export default function ShareModal({ slug, title, onClose }: Props) {
               cursor: "pointer",
             }}
           >
-            <X size={16} color={tokens.muted} />
+            <MIcon name="close" size={16} color={tokens.muted} />
           </button>
         </div>
 
@@ -124,7 +126,7 @@ export default function ShareModal({ slug, title, onClose }: Props) {
             aria-label="Otwórz"
             style={{ ...iconBtn, display: "grid", placeItems: "center", color: tokens.muted, textDecoration: "none" }}
           >
-            <ExternalLink size={16} />
+            <MIcon name="open_in_new" size={16} />
           </a>
         </div>
 
@@ -177,7 +179,7 @@ function CopyBtn({ active, onClick, withLabel }: { active: boolean; onClick: () 
       }}
       aria-label="Kopiuj"
     >
-      {active ? <Check size={15} /> : <Copy size={15} />}
+      {active ? <MIcon name="check" size={15} /> : <MIcon name="content_copy" size={15} />}
       {withLabel && (active ? "Skopiowano" : "Kopiuj")}
     </button>
   );

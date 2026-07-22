@@ -3,6 +3,7 @@
 import assert from "node:assert";
 import {
   toDisplayStatus,
+  displayStatusOf,
   dbStatusForWrite,
   isCallable,
   isClosedBusiness,
@@ -58,9 +59,20 @@ assert.strictEqual(toDisplayStatus(""), "no_answer");
 // ── dbStatusForWrite: status UI → wartość zapisywana w kolumnie ──────────────
 assert.strictEqual(dbStatusForWrite("no_answer"), "contact_attempted");
 assert.strictEqual(dbStatusForWrite("not_interested"), "not_interested");
+// „Nie nasz target" dzieli kolumnę z „Niezainteresowany" (rozróżnia props.disposition).
+assert.strictEqual(dbStatusForWrite("not_target"), "not_interested");
 
-// Zbiór statusów UI jest kompletny i w ustalonej kolejności.
-assert.deepStrictEqual(DISPLAY_STATUSES, ["new", "no_answer", "not_interested", "converted"]);
+// ── displayStatusOf: rozróżnia not_target po props.disposition ───────────────
+assert.strictEqual(displayStatusOf(makeProspect({ prospecting_status: "not_interested" })), "not_interested");
+assert.strictEqual(
+  displayStatusOf(makeProspect({ prospecting_status: "not_interested", props: { disposition: "not_target" } })),
+  "not_target"
+);
+assert.strictEqual(displayStatusOf(makeProspect({ prospecting_status: "new" })), "new");
+
+// Zbiór statusów UI jest kompletny i w ustalonej kolejności. „not_target"
+// (Nie nasz target) to odrębny status obok „not_interested" (Niezainteresowany).
+assert.deepStrictEqual(DISPLAY_STATUSES, ["new", "no_answer", "not_interested", "not_target", "converted"]);
 
 // ── isClosedBusiness: firma inna niż OPERATIONAL jest „zamknięta” ────────────
 assert.strictEqual(isClosedBusiness(makeProspect({ business_status: "OPERATIONAL" })), false);

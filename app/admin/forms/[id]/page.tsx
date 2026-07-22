@@ -7,42 +7,6 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Reorder, useDragControls } from "framer-motion";
-import {
-  ArrowLeft,
-  Plus,
-  Trash2,
-  ChevronUp,
-  ChevronDown,
-  Hand,
-  Type,
-  AlignLeft,
-  AtSign,
-  Phone,
-  CircleDot,
-  ListChecks,
-  MessageSquare,
-  Flag,
-  Upload,
-  Link2,
-  ImageIcon,
-  X,
-  Bold,
-  Italic,
-  Mail,
-  GripVertical,
-  MoreVertical,
-  Copy,
-  Monitor,
-  Smartphone,
-  PanelRightClose,
-  PanelRightOpen,
-  AlertTriangle,
-  SlidersHorizontal,
-  Palette,
-  Layers,
-  Undo2,
-  Redo2,
-} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import { useIsMobile } from "@/lib/responsive";
@@ -93,32 +57,32 @@ import FormStats from "@/components/forms/FormStats";
 import FormSubmissions from "@/components/forms/FormSubmissions";
 import MetaSettings from "@/components/forms/MetaSettings";
 import SmsSettings from "@/components/forms/SmsSettings";
-import { BarChart3, Inbox as InboxIcon, PencilRuler } from "lucide-react";
+import MIcon from "@/components/MaterialIcon";
 
 // ── Upload obrazków (przez serwerowy endpoint /api/forms/upload) ──────────
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
-const TYPE_ICON: Record<string, typeof Type> = {
-  welcome: Hand,
-  question: Layers,
-  short_text: Type,
-  long_text: AlignLeft,
-  email: AtSign,
-  phone: Phone,
-  single_choice: CircleDot,
-  multi_choice: ListChecks,
-  statement: MessageSquare,
-  end: Flag,
+const TYPE_ICON: Record<string, string> = {
+  welcome: "waving_hand",
+  question: "layers",
+  short_text: "text_fields",
+  long_text: "notes",
+  email: "alternate_email",
+  phone: "call",
+  single_choice: "radio_button_checked",
+  multi_choice: "checklist",
+  statement: "chat",
+  end: "flag",
 };
 
 // Ikona kroku: dla kontenera pól bierzemy typ pierwszego pola.
-function stepIcon(step: Step): typeof Type {
+function stepIcon(step: Step): string {
   if (step.type === "question") {
     const f = stepFields(step)[0];
-    return (f && TYPE_ICON[f.type]) || Layers;
+    return (f && TYPE_ICON[f.type]) || "layers";
   }
-  return TYPE_ICON[step.type] || Type;
+  return TYPE_ICON[step.type] || "text_fields";
 }
 
 // Nazwa wyświetlana kroku na liście (nagłówek lub etykieta pierwszego pola).
@@ -502,7 +466,7 @@ export default function FormEditorPage() {
       {/* ── Pasek górny ─────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <button onClick={() => router.push("/admin/forms")} style={iconBtn} aria-label="Wróć">
-          <ArrowLeft size={18} color={tokens.muted} />
+          <MIcon name="arrow_back" size={18} color={tokens.muted} />
         </button>
         <input
           value={schema.title}
@@ -547,7 +511,7 @@ export default function FormEditorPage() {
           aria-label="Cofnij"
           title="Cofnij (Ctrl+Z)"
         >
-          <Undo2 size={17} color={tokens.muted} />
+          <MIcon name="undo" size={17} color={tokens.muted} />
         </button>
         <button
           onClick={redo}
@@ -556,7 +520,7 @@ export default function FormEditorPage() {
           aria-label="Ponów"
           title="Ponów (Ctrl+Shift+Z)"
         >
-          <Redo2 size={17} color={tokens.muted} />
+          <MIcon name="redo" size={17} color={tokens.muted} />
         </button>
         <button onClick={saveChanges} style={ghostButton}>
           Zapisz zmiany
@@ -573,10 +537,10 @@ export default function FormEditorPage() {
 
       {/* ── Przełącznik widoku: Kreator / Ustawienia / Statystyki / Zgłoszenia ── */}
       <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: `1px solid ${tokens.border}`, paddingBottom: 2, flexWrap: "wrap" }}>
-        <ViewTab active={view === "build"} onClick={() => setView("build")} icon={PencilRuler} label="Kreator" />
-        <ViewTab active={view === "settings"} onClick={() => setView("settings")} icon={SlidersHorizontal} label="Ustawienia" />
-        <ViewTab active={view === "stats"} onClick={() => setView("stats")} icon={BarChart3} label="Statystyki" />
-        <ViewTab active={view === "submissions"} onClick={() => setView("submissions")} icon={InboxIcon} label="Zgłoszenia" />
+        <ViewTab active={view === "build"} onClick={() => setView("build")} icon="design_services" label="Kreator" />
+        <ViewTab active={view === "settings"} onClick={() => setView("settings")} icon="tune" label="Ustawienia" />
+        <ViewTab active={view === "stats"} onClick={() => setView("stats")} icon="monitoring" label="Statystyki" />
+        <ViewTab active={view === "submissions"} onClick={() => setView("submissions")} icon="inbox" label="Zgłoszenia" />
       </div>
 
       {view === "settings" && (
@@ -611,7 +575,7 @@ export default function FormEditorPage() {
             fontWeight: 600,
           }}
         >
-          <AlertTriangle size={15} />
+          <MIcon name="warning" size={15} />
           {stepsWithIssues.length === 1
             ? "1 krok wymaga uzupełnienia przed publikacją."
             : `${stepsWithIssues.length} kroków wymaga uzupełnienia przed publikacją.`}
@@ -689,7 +653,7 @@ export default function FormEditorPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={paneTitle}>Kroki i pytania</span>
             <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj krok">
-              <Plus size={16} color={tokens.accent} />
+              <MIcon name="add" size={16} color={tokens.accent} />
             </button>
           </div>
 
@@ -709,7 +673,7 @@ export default function FormEditorPage() {
               }}
             >
               {STEP_TYPES.filter((t) => t.type !== "end").map((t) => {
-                const Icon = TYPE_ICON[t.type];
+                const iconName = TYPE_ICON[t.type] ?? "text_fields";
                 return (
                   <button
                     key={t.type}
@@ -729,7 +693,7 @@ export default function FormEditorPage() {
                       textAlign: "left",
                     }}
                   >
-                    <Icon size={15} color={tokens.muted} />
+                    <MIcon name={iconName} size={15} color={tokens.muted} />
                     {t.label}
                   </button>
                 );
@@ -807,7 +771,7 @@ export default function FormEditorPage() {
                   color: tokens.muted,
                 }}
               >
-                <PanelRightOpen size={18} />
+                <MIcon name="right_panel_open" size={18} />
               </button>
             ) : (
               <>
@@ -828,7 +792,7 @@ export default function FormEditorPage() {
                       aria-label="Podgląd desktop"
                       style={deviceBtn(previewDevice === "desktop")}
                     >
-                      <Monitor size={15} />
+                      <MIcon name="desktop_windows" size={15} />
                     </button>
                     <button
                       onClick={() => setPreviewDevice("mobile")}
@@ -836,7 +800,7 @@ export default function FormEditorPage() {
                       aria-label="Podgląd mobile"
                       style={deviceBtn(previewDevice === "mobile")}
                     >
-                      <Smartphone size={15} />
+                      <MIcon name="smartphone" size={15} />
                     </button>
                   </div>
                   {!isMobile && (
@@ -846,7 +810,7 @@ export default function FormEditorPage() {
                       aria-label="Zwiń podgląd"
                       style={deviceBtn(false)}
                     >
-                      <PanelRightClose size={15} />
+                      <MIcon name="right_panel_close" size={15} />
                     </button>
                   )}
                 </div>
@@ -927,10 +891,10 @@ function FormSettingsView({
     >
       <div style={{ ...pane, overflowY: "auto", maxHeight: isMobile ? undefined : "calc(100vh - 220px)" }}>
         <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-          <TabButton active={formTab === "brand"} onClick={() => setFormTab("brand")} icon={ImageIcon} label="Marka" />
-          <TabButton active={formTab === "design"} onClick={() => setFormTab("design")} icon={Palette} label="Wygląd" />
-          <TabButton active={formTab === "settings"} onClick={() => setFormTab("settings")} icon={SlidersHorizontal} label="Ustawienia" />
-          <TabButton active={formTab === "sms"} onClick={() => setFormTab("sms")} icon={MessageSquare} label="SMS" />
+          <TabButton active={formTab === "brand"} onClick={() => setFormTab("brand")} icon="image" label="Marka" />
+          <TabButton active={formTab === "design"} onClick={() => setFormTab("design")} icon="palette" label="Wygląd" />
+          <TabButton active={formTab === "settings"} onClick={() => setFormTab("settings")} icon="tune" label="Ustawienia" />
+          <TabButton active={formTab === "sms"} onClick={() => setFormTab("sms")} icon="chat" label="SMS" />
         </div>
 
         {/* Doprecyzowanie zapisu (item 6): które zakładki zapisują się same,
@@ -945,7 +909,7 @@ function FormSettingsView({
         >
           {formTab === "sms" ? (
             <>
-              <AlertTriangle size={14} />
+              <MIcon name="warning" size={14} />
               Ta zakładka ma własny przycisk „Zapisz konfigurację" — zmiany zapisują się dopiero po jego kliknięciu.
             </>
           ) : formTab === "settings" ? (
@@ -1017,7 +981,7 @@ function StepRow({
 }) {
   const controls = useDragControls();
   const [menuOpen, setMenuOpen] = useState(false);
-  const Icon = stepIcon(step);
+  const iconName = stepIcon(step);
   const isLast = index === total - 1;
 
   return (
@@ -1049,9 +1013,9 @@ function StepRow({
             flexShrink: 0,
           }}
         >
-          <GripVertical size={15} />
+          <MIcon name="drag_indicator" size={15} />
         </button>
-        <Icon size={15} color={active ? tokens.accent : tokens.muted} style={{ flexShrink: 0, marginTop: 3 }} />
+        <MIcon name={iconName} size={15} color={active ? tokens.accent : tokens.muted} style={{ flexShrink: 0, marginTop: 3 }} />
         <span
           onClick={onSelect}
           style={{
@@ -1072,7 +1036,7 @@ function StepRow({
         </span>
         {issues.length > 0 && (
           <span title={issues.join("\n")} style={{ flexShrink: 0, marginTop: 2, color: tokens.warning }}>
-            <AlertTriangle size={14} />
+            <MIcon name="warning" size={14} />
           </span>
         )}
         <button
@@ -1083,16 +1047,16 @@ function StepRow({
           style={miniBtn}
           aria-label="Więcej akcji"
         >
-          <MoreVertical size={15} />
+          <MIcon name="more_vert" size={15} />
         </button>
       </div>
 
       {menuOpen && (
         <div style={{ display: "flex", gap: 4, padding: "0 8px 8px 30px", flexWrap: "wrap" }}>
-          <KebabAction disabled={index === 0} onClick={() => { onMove(step.id, -1); }} icon={ChevronUp} label="W górę" />
-          <KebabAction disabled={isLast} onClick={() => { onMove(step.id, 1); }} icon={ChevronDown} label="W dół" />
-          <KebabAction onClick={() => { setMenuOpen(false); onDuplicate(step.id); }} icon={Copy} label="Duplikuj" />
-          <KebabAction danger onClick={() => { setMenuOpen(false); onDelete(step.id); }} icon={Trash2} label="Usuń" />
+          <KebabAction disabled={index === 0} onClick={() => { onMove(step.id, -1); }} icon="keyboard_arrow_up" label="W górę" />
+          <KebabAction disabled={isLast} onClick={() => { onMove(step.id, 1); }} icon="keyboard_arrow_down" label="W dół" />
+          <KebabAction onClick={() => { setMenuOpen(false); onDuplicate(step.id); }} icon="content_copy" label="Duplikuj" />
+          <KebabAction danger onClick={() => { setMenuOpen(false); onDelete(step.id); }} icon="delete" label="Usuń" />
         </div>
       )}
     </Reorder.Item>
@@ -1100,13 +1064,13 @@ function StepRow({
 }
 
 function KebabAction({
-  icon: Icon,
+  icon,
   label,
   onClick,
   disabled,
   danger,
 }: {
-  icon: typeof Type;
+  icon: string;
   label: string;
   onClick: () => void;
   disabled?: boolean;
@@ -1134,7 +1098,7 @@ function KebabAction({
         color: danger ? tokens.danger : tokens.muted,
       }}
     >
-      <Icon size={13} />
+      <MIcon name={icon} size={13} />
       {label}
     </button>
   );
@@ -1143,12 +1107,12 @@ function KebabAction({
 function TabButton({
   active,
   onClick,
-  icon: Icon,
+  icon,
   label,
 }: {
   active: boolean;
   onClick: () => void;
-  icon: typeof Type;
+  icon: string;
   label: string;
 }) {
   return (
@@ -1168,7 +1132,7 @@ function TabButton({
         color: active ? tokens.accent : tokens.muted,
       }}
     >
-      <Icon size={14} />
+      <MIcon name={icon} size={14} />
       {label}
     </button>
   );
@@ -1176,9 +1140,9 @@ function TabButton({
 
 // Zakładka widoku najwyższego poziomu (Kreator / Statystyki / Zgłoszenia).
 function ViewTab({
-  active, onClick, icon: Icon, label,
+  active, onClick, icon, label,
 }: {
-  active: boolean; onClick: () => void; icon: typeof Type; label: string;
+  active: boolean; onClick: () => void; icon: string; label: string;
 }) {
   return (
     <button
@@ -1190,7 +1154,7 @@ function ViewTab({
         color: active ? tokens.accent : tokens.muted, marginBottom: -2,
       }}
     >
-      <Icon size={15} />
+      <MIcon name={icon} size={15} />
       {label}
     </button>
   );
@@ -1333,7 +1297,7 @@ function AddFieldButton({ onAdd }: { onAdd: (type: FieldType) => void }) {
         onClick={() => setOpen((o) => !o)}
         style={{ ...ghostButton, justifySelf: "start", display: "flex", alignItems: "center", gap: 6, padding: "8px 12px" }}
       >
-        <Plus size={15} /> Dodaj pole
+        <MIcon name="add" size={15} /> Dodaj pole
       </button>
       {open && (
         <div
@@ -1351,7 +1315,7 @@ function AddFieldButton({ onAdd }: { onAdd: (type: FieldType) => void }) {
           }}
         >
           {FIELD_TYPE_MENU.map((t) => {
-            const Icon = TYPE_ICON[t.type];
+            const iconName = TYPE_ICON[t.type] ?? "text_fields";
             return (
               <button
                 key={t.type}
@@ -1374,7 +1338,7 @@ function AddFieldButton({ onAdd }: { onAdd: (type: FieldType) => void }) {
                   textAlign: "left",
                 }}
               >
-                <Icon size={15} color={tokens.muted} />
+                <MIcon name={iconName} size={15} color={tokens.muted} />
                 {t.label}
               </button>
             );
@@ -1401,7 +1365,7 @@ function FieldEditor({
   onRemove: () => void;
 }) {
   const controls = useDragControls();
-  const Icon = TYPE_ICON[field.type];
+  const iconName = TYPE_ICON[field.type] ?? "text_fields";
 
   return (
     <Reorder.Item
@@ -1425,9 +1389,9 @@ function FieldEditor({
           title="Przeciągnij, aby zmienić kolejność pól"
           style={{ border: "none", background: "transparent", cursor: "grab", color: tokens.muted, touchAction: "none", padding: 0 }}
         >
-          <GripVertical size={15} />
+          <MIcon name="drag_indicator" size={15} />
         </button>
-        <Icon size={15} color={tokens.accent} />
+        <MIcon name={iconName} size={15} color={tokens.accent} />
         <select
           value={field.type}
           onChange={(e) => onPatch(changeFieldType(field, e.target.value as FieldType))}
@@ -1446,7 +1410,7 @@ function FieldEditor({
           title={canRemove ? "Usuń pole" : "Krok musi mieć co najmniej jedno pole"}
           style={{ ...miniBtn, opacity: canRemove ? 1 : 0.4, cursor: canRemove ? "pointer" : "not-allowed" }}
         >
-          <Trash2 size={14} />
+          <MIcon name="delete" size={14} />
         </button>
       </div>
 
@@ -1704,7 +1668,7 @@ function ImageField({
             background: "#fff",
           }}
         >
-          <Link2 size={14} color={tokens.muted} style={{ flexShrink: 0 }} />
+          <MIcon name="link" size={14} color={tokens.muted} style={{ flexShrink: 0 }} />
           <input
             value={value}
             onChange={(e) => {
@@ -1721,7 +1685,7 @@ function ImageField({
           disabled={uploading}
           style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0 }}
         >
-          <Upload size={14} /> {uploading ? "Wgrywanie…" : "Wgraj"}
+          <MIcon name="upload" size={14} /> {uploading ? "Wgrywanie…" : "Wgraj"}
         </button>
         <input
           ref={inputRef}
@@ -1764,12 +1728,12 @@ function ImageField({
               boxShadow: "0 2px 6px rgba(15,18,28,0.12)",
             }}
           >
-            <X size={12} color={tokens.muted} />
+            <MIcon name="close" size={12} color={tokens.muted} />
           </button>
         </div>
       ) : value && broken ? (
         <p style={{ fontSize: 12, color: tokens.danger, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
-          <ImageIcon size={13} /> Nie można wczytać obrazka z tego adresu.
+          <MIcon name="image" size={13} /> Nie można wczytać obrazka z tego adresu.
         </p>
       ) : (
         <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>JPEG, PNG, WEBP lub GIF, maks. 5 MB. Możesz też wkleić gotowy adres URL.</p>
@@ -1823,10 +1787,10 @@ function OptionsEditor({
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
               <button onClick={() => move(o.id, -1)} disabled={i === 0} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w górę">
-                <ChevronUp size={12} />
+                <MIcon name="expand_less" size={12} />
               </button>
               <button onClick={() => move(o.id, 1)} disabled={i === options.length - 1} style={{ ...miniBtn, height: 18 }} aria-label="Opcja w dół">
-                <ChevronDown size={12} />
+                <MIcon name="expand_more" size={12} />
               </button>
             </div>
             <input
@@ -1839,7 +1803,7 @@ function OptionsEditor({
             />
             <input value={o.label} onChange={(e) => update(o.id, { label: e.target.value })} placeholder="Etykieta opcji" style={{ ...inputStyle, flex: "1 1 100px", minWidth: 0 }} />
             <button onClick={() => remove(o.id)} style={miniBtn} aria-label="Usuń opcję">
-              <Trash2 size={14} />
+              <MIcon name="delete" size={14} />
             </button>
           </div>
           <input
@@ -1854,7 +1818,7 @@ function OptionsEditor({
         </div>
       ))}
       <button onClick={add} style={{ ...ghostButton, justifySelf: "start", display: "flex", alignItems: "center", gap: 6, padding: "7px 12px" }}>
-        <Plus size={14} /> Dodaj opcję
+        <MIcon name="add" size={14} /> Dodaj opcję
       </button>
       {branching && (
         <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
@@ -2259,7 +2223,7 @@ function TeamPropsEditor({ value, onChange }: { value: TeamProperty[]; onChange:
               aria-label="Usuń właściwość"
               style={{ ...iconBtn, width: 32, height: 32 }}
             >
-              <X size={14} color={tokens.muted} />
+              <MIcon name="close" size={14} color={tokens.muted} />
             </button>
           </div>
         );
@@ -2270,7 +2234,7 @@ function TeamPropsEditor({ value, onChange }: { value: TeamProperty[]; onChange:
         onClick={addRow}
         style={{ ...ghostButton, display: "inline-flex", alignItems: "center", gap: 6, width: "fit-content", padding: "7px 12px", fontSize: 13 }}
       >
-        <Plus size={14} /> Dodaj właściwość
+        <MIcon name="add" size={14} /> Dodaj właściwość
       </button>
     </div>
   );
@@ -2356,7 +2320,7 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
 
       {!hasContactMap && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "#FDF1E3", border: `1px solid ${tokens.warning}`, color: "#8a5a1a", fontSize: 13, fontWeight: 600 }}>
-          <AlertTriangle size={15} />
+          <MIcon name="warning" size={15} />
           Żadne pole nie jest zmapowane na e-mail ani telefon — ten formularz nie utworzy kontaktowalnego leadu.
         </div>
       )}
@@ -2421,7 +2385,7 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
 
       <div style={{ display: "grid", gap: 12, padding: 12, borderRadius: 12, border: `1px solid ${tokens.border}`, background: tokens.bg }}>
         <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, fontWeight: 700 }}>
-          <Mail size={15} color={tokens.accent} />
+          <MIcon name="mail" size={15} color={tokens.accent} />
           <input type="checkbox" checked={email.enabled} onChange={(e) => setEmail({ enabled: e.target.checked })} style={{ width: 16, height: 16, accentColor: tokens.accent }} />
           Wyślij automatyczny mail „dziękujemy”
         </label>
@@ -2436,13 +2400,13 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
               <span style={{ fontSize: 13, fontWeight: 600 }}>Treść (HTML)</span>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button type="button" onClick={() => applyWrap("<b>", "</b>")} style={fmtBtn} aria-label="Pogrubienie" title="Pogrubienie">
-                  <Bold size={13} />
+                  <MIcon name="format_bold" size={13} />
                 </button>
                 <button type="button" onClick={() => applyWrap("<i>", "</i>")} style={fmtBtn} aria-label="Kursywa" title="Kursywa">
-                  <Italic size={13} />
+                  <MIcon name="format_italic" size={13} />
                 </button>
                 <button type="button" onClick={insertLink} style={{ ...fmtBtn, width: "auto", padding: "0 10px", gap: 6, display: "inline-flex", alignItems: "center" }} title="Wstaw link">
-                  <Link2 size={13} /> Link
+                  <MIcon name="link" size={13} /> Link
                 </button>
                 <button type="button" onClick={() => setEmail(defaultThankYouEmail())} style={{ ...ghostButton, padding: "6px 10px", fontSize: 12.5, marginLeft: "auto" }}>
                   Domyślny szablon

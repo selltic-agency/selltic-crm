@@ -1,93 +1,72 @@
-// components/prospecting/ProspectDetailDrawer.tsx — szczegóły prospektu w
-// wysuwanym panelu (wzorowane na pełnoekranowych modalach istniejących w
-// aplikacji, np. NotInterestedModal w dawnej wersji strony Prospecting).
+// components/prospecting/ProspectDetailDrawer.tsx — szeroka szuflada (760 px)
+// w układzie dwukolumnowym (HubSpot-style): lewa kolumna = właściwości
+// pogrupowane i edytowalne inline (na górze kontrola statusu + szybka akcja
+// „Nie odbiera"), prawa kolumna = kompozytor notatek + oś czasu (te same dane
+// co historia trybu dzwonienia). Przewijanie żyje wewnątrz kolumn.
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { X, MapPin, Phone, Globe, Star, ExternalLink, ArrowRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, inputStyle, primaryButton, formatDateTime } from "@/lib/ui";
+import { tokens, inputStyle, ghostButton, primaryButton, menuPanel } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
-import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
-import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
+import MIcon from "@/components/MaterialIcon";
 import { useClassification } from "@/lib/classification";
-import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { useEntityProperties } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
+import { useToast } from "@/components/Toast";
+import { useIsMobile } from "@/lib/responsive";
 import {
   STATUS_LABEL,
   STATUS_COLOR,
-  DISPLAY_STATUSES,
-  toDisplayStatus,
+  displayStatusOf,
   isClosedBusiness,
   scoreColor,
   scoreLabel,
-  notesFromProps,
   googleMapsUrl,
-  type WritableDisplayStatus,
 } from "@/lib/prospectStatus";
+import { attemptsFromProps } from "@/lib/prospectHistory";
+import { useScrollLock } from "@/lib/useScrollLock";
+import { logNoAnswer, markNotOurTarget, markNotInterested, addProspectNote, revertProspect } from "@/lib/prospectActions";
+import ProspectTimeline from "@/components/prospecting/ProspectTimeline";
+import ConvertModal, { type ConvertOptions } from "@/components/prospecting/ConvertModal";
 
 export default function ProspectDetailDrawer({
   prospect,
   onClose,
   onConvert,
-  onSetStatus,
-  onAddNote,
+  onUpdated,
   onSetCategory,
   onAddPurpose,
+  onRemovePurpose,
   onSaveProps,
 }: {
   prospect: Prospect;
   onClose: () => void;
-  onConvert: (p: Prospect) => Promise<void>;
-  onSetStatus: (p: Prospect, status: WritableDisplayStatus) => Promise<void>;
-  onAddNote: (p: Prospect, body: string) => Promise<void>;
+  /** Konwersja przez endpoint API (modal wybiera etap/źródło). */
+  onConvert: (p: Prospect, opts: ConvertOptions) => Promise<string | null>;
+  /** Propagacja zaktualizowanego rekordu do listy na stronie. */
+  onUpdated: (p: Prospect) => void;
   onSetCategory: (p: Prospect, categoryKey: string) => Promise<void>;
   onAddPurpose: (p: Prospect, purposeKey: string) => Promise<void>;
-  // Zapis wartości właściwości własnych (props jsonb) — opcjonalny.
-  onSaveProps?: (p: Prospect, props: Record<string, unknown>) => Promise<void>;
+  onRemovePurpose: (p: Prospect, purposeKey: string) => Promise<void>;
+  onSaveProps: (p: Prospect, props: Record<string, unknown>) => Promise<void>;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const isMobile = useIsMobile(860);
   const { categories, purposes } = useClassification();
   const { customViews } = useEntityProperties("prospects");
+  useScrollLock();
   const p = prospect;
 
-  // Szkic wartości właściwości własnych + zapis całej sekcji jednym przyciskiem.
-  const [propsDraft, setPropsDraft] = useState<Record<string, unknown>>({});
-  const [propsSaving, setPropsSaving] = useState(false);
-  useEffect(() => {
-    setPropsDraft({ ...(p.props ?? {}) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.id]);
-  const propsDirty = customViews.some(
-    (v) => JSON.stringify(propsDraft[v.key] ?? null) !== JSON.stringify((p.props ?? {})[v.key] ?? null)
-  );
-  async function saveCustomProps() {
-    if (!onSaveProps || !propsDirty || propsSaving) return;
-    setPropsSaving(true);
-    const next = { ...(p.props ?? {}) };
-    for (const v of customViews) {
-      const raw = propsDraft[v.key];
-      const empty = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
-      if (empty) delete next[v.key];
-      else next[v.key] = typeof raw === "string" ? raw.trim() : raw;
-    }
-    await onSaveProps(p, next);
-    setPropsSaving(false);
-  }
-  const display = toDisplayStatus(p.prospecting_status);
+  const display = displayStatusOf(p);
   const closed = isClosedBusiness(p);
+  const attempts = attemptsFromProps(p.props);
 
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [converting, setConverting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
   const [deal, setDeal] = useState<{ id: string; name: string | null; stage: string } | null>(null);
-
-  const notes = useMemo(
-    () => [...notesFromProps(p.props)].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
-    [p.props]
-  );
 
   useEffect(() => {
     if (!p.converted_deal_id) {
@@ -102,441 +81,431 @@ export default function ProspectDetailDrawer({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !convertOpen) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, convertOpen]);
 
-  async function saveNote() {
-    if (!note.trim() || saving) return;
-    setSaving(true);
-    await onAddNote(p, note.trim());
-    setNote("");
-    setSaving(false);
+  // ── Akcje statusu (identyczna semantyka jak w trybie dzwonienia) ────────
+  async function handleNoAnswer() {
+    if (busy) return;
+    setBusy(true);
+    const res = await logNoAnswer(supabase, p);
+    setBusy(false);
+    if (!res) {
+      toast.error("Nie udało się zapisać próby kontaktu.");
+      return;
+    }
+    onUpdated(res.updated);
+    const n = attemptsFromProps(res.updated.props);
+    toast.undo(`Nie odbiera — ${n}. próba`, async () => {
+      const restored = await revertProspect(supabase, p.id, res.snapshot);
+      if (restored) onUpdated(restored);
+    });
   }
 
-  async function handleConvert() {
-    if (converting) return;
-    setConverting(true);
-    await onConvert(p);
-    setConverting(false);
+  async function handleNotOurTarget() {
+    if (busy) return;
+    setBusy(true);
+    const res = await markNotOurTarget(supabase, p);
+    setBusy(false);
+    if (!res) {
+      toast.error("Nie udało się zaktualizować prospektu.");
+      return;
+    }
+    onUpdated(res.updated);
+    toast.undo("Nie nasz target — zarchiwizowano", async () => {
+      const restored = await revertProspect(supabase, p.id, res.snapshot);
+      if (restored) onUpdated(restored);
+    });
   }
+
+  async function handleNotInterested() {
+    if (busy) return;
+    setBusy(true);
+    const res = await markNotInterested(supabase, p);
+    setBusy(false);
+    if (!res) {
+      toast.error("Nie udało się zaktualizować prospektu.");
+      return;
+    }
+    onUpdated(res.updated);
+    toast.undo("Niezainteresowany — zarchiwizowano", async () => {
+      const restored = await revertProspect(supabase, p.id, res.snapshot);
+      if (restored) onUpdated(restored);
+    });
+  }
+
+  async function handleAddNote(body: string) {
+    const res = await addProspectNote(supabase, p, body);
+    if (!res) {
+      toast.error("Nie udało się zapisać notatki.");
+      return;
+    }
+    onUpdated(res.updated);
+  }
+
+  async function handleConvert(opts: ConvertOptions) {
+    const dealId = await onConvert(p, opts);
+    if (dealId) setConvertOpen(false);
+    return dealId;
+  }
+
+  // Zapis pojedynczej właściwości własnej (inline).
+  async function savePropValue(key: string, value: unknown) {
+    const next = { ...(p.props ?? {}) };
+    const empty = value == null || value === "" || (Array.isArray(value) && value.length === 0);
+    if (empty) delete next[key];
+    else next[key] = typeof value === "string" ? value.trim() : value;
+    await onSaveProps(p, next);
+  }
+
+  const canAct = !closed && (display === "new" || display === "no_answer");
 
   return (
     <>
-      <div
-        onClick={onClose}
-        style={{ position: "fixed", inset: 0, background: "rgba(15,18,28,0.40)", zIndex: 70 }}
-      />
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,18,28,0.40)", zIndex: 70 }} />
       <motion.div
         role="dialog"
         aria-modal="true"
         initial={{ x: 40, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
         transition={{ type: "spring", stiffness: 320, damping: 32 }}
+        className="selltic-admin"
         style={{
           position: "fixed",
           top: 0,
           right: 0,
           height: "100vh",
-          width: "min(560px, 100vw)",
-          background: tokens.bg,
+          width: "min(760px, 100vw)",
+          background: tokens.card,
           borderLeft: `1px solid ${tokens.border}`,
-          boxShadow: "-20px 0 60px rgba(15,18,28,0.18)",
+          boxShadow: "-16px 0 48px rgba(15,18,28,0.14)",
           zIndex: 71,
           display: "flex",
           flexDirection: "column",
+          overflow: "hidden",
         }}
       >
-        {/* Nagłówek */}
+        {/* ── Nagłówek ── */}
         <div
           style={{
             display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
+            alignItems: "center",
             gap: 12,
-            padding: "20px 22px",
-            background: tokens.card,
+            padding: "12px 16px",
             borderBottom: `1px solid ${tokens.border}`,
             flexShrink: 0,
           }}
         >
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{ fontSize: 19, fontWeight: 800, margin: 0, overflowWrap: "break-word" }}>{p.name}</h2>
-            <div style={{ fontSize: 13, color: tokens.muted, marginTop: 4 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h2 style={{ fontSize: 15.5, fontWeight: 600, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {p.name}
+            </h2>
+            <div style={{ fontSize: 12, color: tokens.muted, marginTop: 1 }}>
               {[p.industry, p.city].filter(Boolean).join(" · ") || "—"}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Zamknij" style={closeBtn}>
-            <X size={18} color={tokens.muted} />
+          {canAct && (
+            <button onClick={() => setConvertOpen(true)} style={{ ...primaryButton, background: tokens.success }}>
+              <MIcon name="check_circle" size={15} /> Konwertuj na lead
+            </button>
+          )}
+          <button onClick={onClose} aria-label="Zamknij" style={{ width: 28, height: 28, borderRadius: tokens.radiusSm, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer", color: tokens.muted, flexShrink: 0 }}>
+            <MIcon name="close" size={16} />
           </button>
         </div>
 
-        <div style={{ overflowY: "auto", flex: 1, padding: 22 }}>
-          {/* Akcja konwersji — zawsze widoczna bez przewijania */}
-          <div style={{ marginBottom: 18 }}>
-            {closed ? (
-              <div style={badgeBox(tokens.danger)}>🚫 Firma zamknięta — nie kontaktuj</div>
-            ) : display === "converted" ? (
-              <div style={badgeBox(tokens.success)}>
-                ✅ Skonwertowany
-                {p.converted_deal_id && (
-                  <>
-                    {" "}
-                    →{" "}
-                    <a href={`/admin/leads/${p.converted_deal_id}`} style={{ color: tokens.success, fontWeight: 700 }}>
-                      zobacz deal
-                    </a>
-                  </>
+        {/* ── Dwie kolumny ── */}
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: isMobile ? "column" : "row" }}>
+          {/* Lewa: właściwości */}
+          <div
+            className="selltic-scroll-y"
+            style={{
+              width: isMobile ? "100%" : 340,
+              flexShrink: 0,
+              borderRight: isMobile ? "none" : `1px solid ${tokens.borderSoft}`,
+              borderBottom: isMobile ? `1px solid ${tokens.borderSoft}` : "none",
+              overflowY: "auto",
+              padding: 16,
+              background: "#FCFCFD",
+            }}
+          >
+            {/* Aktualny status (tylko wyświetlanie) — oddzielony od akcji */}
+            <section style={{ marginBottom: 14 }}>
+              <h3 style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, margin: "0 0 8px" }}>
+                Aktualny status
+              </h3>
+              <div style={{ ...menuPanel, boxShadow: "none", padding: "10px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 11px",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    background: `${STATUS_COLOR[display]}14`,
+                    color: STATUS_COLOR[display],
+                    border: `1px solid ${STATUS_COLOR[display]}30`,
+                  }}
+                >
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: STATUS_COLOR[display] }} />
+                  {STATUS_LABEL[display]}
+                </span>
+                {p.archived_at && <span style={{ fontSize: 11.5, color: tokens.muted }}>w Archiwum</span>}
+                {closed && (
+                  <span style={{ fontSize: 12, color: tokens.danger, fontWeight: 600, marginLeft: "auto" }}>
+                    Firma zamknięta — nie kontaktuj
+                  </span>
                 )}
               </div>
-            ) : display === "not_interested" ? (
-              <div style={badgeBox(tokens.danger)}>✗ Niezainteresowany</div>
-            ) : (
-              <button
-                onClick={handleConvert}
-                disabled={converting}
-                style={{
-                  width: "100%",
-                  padding: "16px 20px",
-                  borderRadius: 14,
-                  border: "none",
-                  background: tokens.success,
-                  color: "#fff",
-                  fontSize: 17,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                }}
+            </section>
+
+            {/* Akcje zmiany statusu — osobna sekcja pod statusem */}
+            {canAct && (
+              <section style={{ marginBottom: 14 }}>
+                <h3 style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, margin: "0 0 8px" }}>
+                  Zmień status
+                </h3>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    onClick={handleNoAnswer}
+                    disabled={busy}
+                    style={{ ...ghostButton, borderColor: `${tokens.warning}55`, color: tokens.warning, fontWeight: 600 }}
+                  >
+                    <MIcon name="phone_missed" size={15} /> Nie odbiera
+                  </button>
+                  <button
+                    onClick={handleNotInterested}
+                    disabled={busy}
+                    style={{ ...ghostButton, borderColor: `${tokens.danger}45`, color: tokens.danger, fontWeight: 600 }}
+                  >
+                    <MIcon name="thumb_down" size={15} /> Niezainteresowany
+                  </button>
+                  <button
+                    onClick={handleNotOurTarget}
+                    disabled={busy}
+                    style={{ ...ghostButton }}
+                  >
+                    <MIcon name="block" size={15} /> Nie nasz target
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {/* Metryki */}
+            <Group title="Kontakt">
+              <PropRow label="Próby kontaktu">
+                <span style={{ fontWeight: 600, color: attempts > 0 ? tokens.warning : tokens.text }}>{attempts}</span>
+              </PropRow>
+              {deal && (
+                <PropRow label="Deal">
+                  <a href={`/admin/leads/${deal.id}`} style={{ color: tokens.accent, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    {deal.name || "Bez nazwy"} <MIcon name="open_in_new" size={12} />
+                  </a>
+                </PropRow>
+              )}
+            </Group>
+
+            {/* Klasyfikacja — kategoria (jednokrotny wybór) + cele kontaktu
+                (wielokrotne, z możliwością usuwania pojedynczych chipów). */}
+            <section style={{ marginBottom: 14 }}>
+              <h3 style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, margin: "0 0 8px" }}>
+                Klasyfikacja
+              </h3>
+              <div style={{ ...menuPanel, boxShadow: "none", padding: 12, display: "grid", gap: 12 }}>
+                <label style={{ display: "grid", gap: 5 }}>
+                  <span style={{ fontSize: 12, color: tokens.muted, fontWeight: 500 }}>Kategoria</span>
+                  <select value={p.category ?? ""} onChange={(e) => onSetCategory(p, e.target.value)} style={inputStyle}>
+                    <option value="">— brak —</option>
+                    {categories.map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: tokens.muted, fontWeight: 500 }}>Cel kontaktu</span>
+                  {(p.purposes ?? []).length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                      {(p.purposes ?? []).map((k) => {
+                        const meta = purposes.find((x) => x.key === k);
+                        const color = meta?.color ?? tokens.muted;
+                        return (
+                          <span
+                            key={k}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 500, padding: "3px 6px 3px 9px", borderRadius: 6, background: `${color}14`, color, border: `1px solid ${color}2E` }}
+                          >
+                            {meta?.label ?? k}
+                            <button
+                              onClick={() => onRemovePurpose(p, k)}
+                              aria-label={`Usuń cel ${meta?.label ?? k}`}
+                              title="Usuń"
+                              style={{ border: "none", background: "none", cursor: "pointer", color, display: "grid", placeItems: "center", padding: 0, lineHeight: 0 }}
+                            >
+                              <MIcon name="close" size={13} />
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      e.currentTarget.value = "";
+                      if (v) onAddPurpose(p, v);
+                    }}
+                    style={inputStyle}
+                  >
+                    <option value="">Dodaj cel kontaktu…</option>
+                    {purposes
+                      .filter((pp) => !(p.purposes ?? []).includes(pp.key))
+                      .map((pp) => (
+                        <option key={pp.key} value={pp.key}>
+                          {pp.label}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            {/* Dane firmy (Google Maps) */}
+            <Group title="Dane firmy">
+              <PropRow label="Telefon">
+                {p.phone ? (
+                  <a href={`tel:${p.phone}`} style={{ color: tokens.accent, fontWeight: 600, textDecoration: "none" }}>
+                    {p.phone}
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </PropRow>
+              <PropRow label="Ocena">
+                {p.rating != null ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <MIcon name="star" size={13} fill color={tokens.warning} /> {p.rating.toFixed(1)} ({p.review_count ?? 0})
+                  </span>
+                ) : (
+                  "—"
+                )}
+              </PropRow>
+              <PropRow label="Strona">
+                {p.website ? (
+                  <a href={p.website} target="_blank" rel="noreferrer" style={{ color: tokens.accent, textDecoration: "none", wordBreak: "break-all", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    {p.website.replace(/^https?:\/\//, "")} <MIcon name="open_in_new" size={11} />
+                  </a>
+                ) : (
+                  <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>
+                )}
+              </PropRow>
+              <PropRow label="Adres">{p.address || "—"}</PropRow>
+              <PropRow label="Miasto">{p.city || "—"}</PropRow>
+              <PropRow label="Branża">{p.industry || "—"}</PropRow>
+              <PropRow label="Status firmy">{p.business_status || "—"}</PropRow>
+              {p.lead_score != null && (
+                <PropRow label="Score">
+                  <span style={{ fontSize: 12, fontWeight: 600, padding: "1px 8px", borderRadius: 6, background: `${scoreColor(p.lead_score)}14`, color: scoreColor(p.lead_score) }}>
+                    {p.lead_score} · {scoreLabel(p.lead_score)}
+                  </span>
+                </PropRow>
+              )}
+              <PropRow label="Źródło">{p.source || "—"}</PropRow>
+              <a
+                href={googleMapsUrl(p)}
+                target="_blank"
+                rel="noreferrer"
+                style={{ ...ghostButton, textDecoration: "none", marginTop: 8, alignSelf: "flex-start" }}
               >
-                {converting ? "Konwertowanie…" : "Konwertuj na lead"} <ArrowRight size={18} />
-              </button>
+                <MIcon name="location_on" size={15} color={tokens.accent} /> Google Maps
+              </a>
+            </Group>
+
+            {/* Właściwości własne — edycja inline */}
+            {customViews.length > 0 && (
+              <Group title="Właściwości">
+                {customViews.map((v) => (
+                  <PropRow key={v.key} label={v.label}>
+                    <InlineProp
+                      view={v}
+                      value={(p.props ?? {})[v.key]}
+                      onCommit={(val) => savePropValue(v.key, val)}
+                    />
+                  </PropRow>
+                ))}
+              </Group>
             )}
           </div>
 
-          {deal && (
-            <Card>
-              <SectionTitle>Powiązany deal</SectionTitle>
-              <a
-                href={`/admin/leads/${deal.id}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  color: tokens.text,
-                  textDecoration: "none",
-                }}
-              >
-                <span style={{ fontWeight: 700 }}>{deal.name || "Bez nazwy"}</span>
-                <span style={{ fontSize: 12, color: tokens.accent, fontWeight: 700 }}>Etap: {deal.stage} →</span>
-              </a>
-            </Card>
-          )}
-
-          {/* Klasyfikacja (Feature 1 + 2): kategoria (jednowartościowa, można
-              zmienić przy błędnej klasyfikacji) + cele kontaktu (wielowartościowe,
-              dokładane bez nadpisywania). */}
-          <Card>
-            <SectionTitle>Klasyfikacja</SectionTitle>
-            <div style={{ display: "grid", gap: 14 }}>
-              <div style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 12.5, color: tokens.muted, fontWeight: 600 }}>Kategoria branży</span>
-                <div><CategoryBadge categoryKey={p.category} /></div>
-                <select
-                  value={p.category ?? ""}
-                  onChange={(e) => onSetCategory(p, e.target.value)}
-                  style={{ ...inputStyle, maxWidth: 320 }}
-                >
-                  <option value="">— brak —</option>
-                  {categories.map((c) => (
-                    <option key={c.key} value={c.key}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 12.5, color: tokens.muted, fontWeight: 600 }}>Cele kontaktu</span>
-                <div><PurposeBadges purposeKeys={p.purposes} /></div>
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    e.currentTarget.value = "";
-                    if (v) onAddPurpose(p, v);
-                  }}
-                  style={{ ...inputStyle, maxWidth: 320 }}
-                >
-                  <option value="">Dodaj cel kontaktu…</option>
-                  {purposes.map((pp) => (
-                    <option key={pp.key} value={pp.key}>
-                      {pp.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </Card>
-
-          {/* Właściwości */}
-          <Card>
-            <SectionTitle>Dane firmy</SectionTitle>
-            <div style={{ display: "grid", gap: 10 }}>
-              <Row label="Telefon">
-                {p.phone ? (
-                  <a href={`tel:${p.phone}`} style={{ color: tokens.accent, fontWeight: 700, display: "inline-flex", gap: 6, alignItems: "center" }}>
-                    <Phone size={14} /> {p.phone}
-                  </a>
-                ) : (
-                  "—"
-                )}
-              </Row>
-              <Row label="Strona">
-                {p.website ? (
-                  <a href={p.website} target="_blank" rel="noreferrer" style={{ color: tokens.accent, display: "inline-flex", gap: 6, alignItems: "center" }}>
-                    <Globe size={14} /> {p.website} <ExternalLink size={11} />
-                  </a>
-                ) : (
-                  <span style={{ color: tokens.success, fontWeight: 700 }}>Brak strony</span>
-                )}
-              </Row>
-              <Row label="Adres">{p.address || "—"}</Row>
-              <Row label="Ocena">
-                {p.rating != null ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <Star size={14} fill={tokens.warning} color={tokens.warning} /> {p.rating.toFixed(1)} ({p.review_count ?? 0} opinii)
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </Row>
-              <Row label="Branża">{p.industry || "—"}</Row>
-              <Row label="Miasto">{p.city || "—"}</Row>
-              <Row label="Status firmy">{p.business_status || "—"}</Row>
-              <Row label="Score">
-                {p.lead_score != null ? (
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 800,
-                      padding: "3px 10px",
-                      borderRadius: 999,
-                      background: `${scoreColor(p.lead_score)}1A`,
-                      color: scoreColor(p.lead_score),
-                    }}
-                  >
-                    {p.lead_score} · {scoreLabel(p.lead_score)}
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </Row>
-              {parseScoreBreakdown(p.lead_score_breakdown, p.props?.score_reasons).items.length > 0 && (
-                <Row label="Wyjaśnienie">
-                  <ScoreBreakdownList
-                    score={p.lead_score}
-                    breakdown={p.lead_score_breakdown}
-                    fallbackReasons={p.props?.score_reasons}
-                  />
-                </Row>
-              )}
-            </div>
-
-            <a
-              href={googleMapsUrl(p)}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                marginTop: 14,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 16px",
-                borderRadius: 10,
-                background: tokens.accentSoft,
-                color: tokens.accent,
-                fontWeight: 700,
-                fontSize: 14,
-                textDecoration: "none",
-              }}
-            >
-              <MapPin size={16} /> Google Maps
-            </a>
-          </Card>
-
-          {/* Właściwości własne (custom fields) */}
-          {onSaveProps && customViews.length > 0 && (
-            <Card>
-              <SectionTitle>Właściwości</SectionTitle>
-              <div style={{ display: "grid", gap: 12 }}>
-                {customViews.map((v) => (
-                  <label key={v.key} style={{ display: "grid", gap: 5 }}>
-                    <span style={{ fontSize: 12.5, color: tokens.muted, fontWeight: 600 }}>{v.label}</span>
-                    <PropertyValueInput
-                      view={v}
-                      value={propsDraft[v.key]}
-                      onChange={(val) => setPropsDraft((d) => ({ ...d, [v.key]: val }))}
-                    />
-                  </label>
-                ))}
-              </div>
-              {propsDirty && (
-                <button
-                  onClick={saveCustomProps}
-                  disabled={propsSaving}
-                  style={{ ...primaryButton, marginTop: 12, opacity: propsSaving ? 0.6 : 1 }}
-                >
-                  {propsSaving ? "Zapisywanie…" : "Zapisz właściwości"}
-                </button>
-              )}
-            </Card>
-          )}
-
-          {/* Status */}
-          <Card>
-            <SectionTitle>Status</SectionTitle>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {DISPLAY_STATUSES.map((s) => {
-                const active = s === display;
-                const writable = s === "no_answer" || s === "not_interested";
-                const clickable = writable && !active;
-                return (
-                  <button
-                    key={s}
-                    disabled={!clickable}
-                    onClick={() => clickable && onSetStatus(p, s as WritableDisplayStatus)}
-                    style={{
-                      padding: "7px 14px",
-                      borderRadius: 999,
-                      fontSize: 13,
-                      fontWeight: 700,
-                      border: `1px solid ${active ? STATUS_COLOR[s] : tokens.border}`,
-                      background: active ? STATUS_COLOR[s] : "#fff",
-                      color: active ? "#fff" : clickable ? tokens.text : tokens.muted,
-                      cursor: clickable ? "pointer" : "default",
-                      opacity: !active && !clickable ? 0.5 : 1,
-                    }}
-                  >
-                    {STATUS_LABEL[s]}
-                  </button>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* Notatki */}
-          <Card>
-            <SectionTitle>Notatki</SectionTitle>
-            <textarea
-              placeholder="Dodaj notatkę…"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              style={{ ...inputStyle, resize: "vertical", width: "100%" }}
-            />
-            <div style={{ marginTop: 8 }}>
-              <button onClick={saveNote} disabled={saving || !note.trim()} style={primaryButton}>
-                {saving ? "Zapisywanie…" : "Zapisz notatkę"}
-              </button>
-            </div>
-
-            {(notes.length > 0 || p.note) && (
-              <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
-                {notes.map((n) => (
-                  <div key={n.id} style={{ borderLeft: `2px solid ${tokens.border}`, paddingLeft: 12 }}>
-                    <div style={{ fontSize: 11.5, color: tokens.muted, fontWeight: 600 }}>{formatDateTime(n.created_at)}</div>
-                    <div style={{ fontSize: 14, marginTop: 2, whiteSpace: "pre-wrap" }}>{n.body}</div>
-                  </div>
-                ))}
-                {p.note && (
-                  <div style={{ borderLeft: `2px solid ${tokens.border}`, paddingLeft: 12 }}>
-                    <div style={{ fontSize: 11.5, color: tokens.muted, fontWeight: 600 }}>
-                      {formatDateTime(p.last_contact_attempt_at ?? p.created_at)}
-                    </div>
-                    <div style={{ fontSize: 14, marginTop: 2, whiteSpace: "pre-wrap" }}>{p.note}</div>
-                  </div>
-                )}
-              </div>
-            )}
-            {notes.length === 0 && !p.note && (
-              <p style={{ fontSize: 13, color: tokens.muted, marginTop: 14 }}>Brak notatek.</p>
-            )}
-          </Card>
+          {/* Prawa: oś czasu */}
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, padding: 16, display: "flex", flexDirection: "column" }}>
+            <ProspectTimeline prospect={p} onAddNote={handleAddNote} />
+          </div>
         </div>
       </motion.div>
+
+      {convertOpen && <ConvertModal prospect={p} onClose={() => setConvertOpen(false)} onConvert={handleConvert} />}
     </>
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section
-      style={{
-        background: tokens.card,
-        border: `1px solid ${tokens.border}`,
-        borderRadius: tokens.radius,
-        padding: 18,
-        marginBottom: 16,
-      }}
-    >
-      {children}
+    <section style={{ marginBottom: 18 }}>
+      <h3 style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, margin: "0 0 8px" }}>
+        {title}
+      </h3>
+      <div style={{ ...menuPanel, boxShadow: "none", padding: "4px 12px 10px", display: "grid" }}>{children}</div>
     </section>
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function PropRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <h3
-      style={{
-        fontSize: 12,
-        fontWeight: 700,
-        letterSpacing: 0.4,
-        textTransform: "uppercase",
-        color: tokens.muted,
-        margin: "0 0 12px",
-      }}
-    >
-      {children}
-    </h3>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-      <span style={{ width: 100, flexShrink: 0, fontSize: 13, color: tokens.muted, fontWeight: 600, paddingTop: 1 }}>
-        {label}
-      </span>
-      <span style={{ fontSize: 14, color: tokens.text, minWidth: 0 }}>{children}</span>
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "6px 0", borderBottom: `1px solid ${tokens.borderSoft}`, fontSize: 13 }}>
+      <span style={{ width: 104, flexShrink: 0, fontSize: 12, color: tokens.muted, fontWeight: 500, paddingTop: 2 }}>{label}</span>
+      <span style={{ minWidth: 0, flex: 1, color: tokens.text }}>{children}</span>
     </div>
   );
 }
 
-function badgeBox(color: string): React.CSSProperties {
-  return {
-    padding: "14px 18px",
-    borderRadius: 12,
-    background: `${color}14`,
-    color,
-    fontWeight: 700,
-    fontSize: 14,
-    textAlign: "center",
-  };
-}
+// Edycja inline pojedynczej właściwości: pola tekstowe zapisują na blur,
+// listy/checkboxy natychmiast po zmianie.
+function InlineProp({
+  view,
+  value,
+  onCommit,
+}: {
+  view: Parameters<typeof PropertyValueInput>[0]["view"];
+  value: unknown;
+  onCommit: (value: unknown) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState<unknown>(value);
+  useEffect(() => setDraft(value), [value]);
 
-const closeBtn: React.CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: 10,
-  flexShrink: 0,
-  border: `1px solid ${tokens.border}`,
-  background: "#fff",
-  display: "grid",
-  placeItems: "center",
-  cursor: "pointer",
-};
+  const immediate = view.type === "select" || view.type === "multi_select" || view.type === "boolean";
+
+  return (
+    <div
+      onBlur={() => {
+        if (!immediate && JSON.stringify(draft ?? null) !== JSON.stringify(value ?? null)) onCommit(draft);
+      }}
+    >
+      <PropertyValueInput
+        view={view}
+        value={draft}
+        onChange={(val) => {
+          setDraft(val);
+          if (immediate) onCommit(val);
+        }}
+      />
+    </div>
+  );
+}

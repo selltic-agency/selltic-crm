@@ -4,8 +4,9 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import type { Prospect } from "@/lib/types";
+import { CONTACT_SOURCE_KEY, ensureContactSourceDef } from "@/lib/contactSource";
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createSupabaseServer();
   const {
@@ -13,6 +14,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Brak autoryzacji" }, { status: 401 });
+  }
+
+  // Opcjonalne parametry z modala konwersji: docelowy etap lejka (dowolny,
+  // zdefiniowany przez użytkownika), źródło kontaktu, nazwa i wartość deala.
+  let body: { stage?: string; contact_source?: string; name?: string; value?: number } = {};
+  try {
+    body = await req.json();
+  } catch {
+    /* brak body (stare wywołania) — zostają domyślne */
   }
 
   const { data: prospect, error: pErr } = await supabase
@@ -37,6 +47,23 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .limit(1)
     .maybeSingle();
 
+  // Etap z modala (walidowany po kluczach etapów właściciela); fallback: pierwszy.
+  let targetStage = firstStage?.key ?? "new";
+  if (body.stage) {
+    const { data: match } = await supabase
+      .from("pipeline_stages")
+      .select("key")
+      .eq("owner", user.id)
+      .eq("key", body.stage)
+      .maybeSingle();
+    if (match) targetStage = body.stage;
+  }
+
+  // Właściwość „Źródło kontaktu" — dosiej definicję (idempotentnie) i ustaw
+  // wartość: z modala albo domyślnie 'prospecting' (konwersja z prospectingu).
+  await ensureContactSourceDef(supabase, user.id);
+  const contactSource = body.contact_source?.trim() || "prospecting";
+
   const props = p.props ?? {};
   const googleMapsUrl =
     (props.google_maps_url as string | undefined) ??
@@ -47,11 +74,11 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   // kolumny niżej są tylko odpytywalnym duplikatem tego, co i tak jest w props.
   const corePayload = {
     owner: user.id,
-    name: p.name,
+    name: body.name?.trim() || p.name,
     phone: p.phone,
     company: p.name,
-    stage: firstStage?.key ?? "new",
-    value: 0,
+    stage: targetStage,
+    value: typeof body.value === "number" && Number.isFinite(body.value) ? body.value : 0,
     source: "prospecting",
     // props zachowane dla zgodności wstecznej (google_maps_url, score_reasons)
     // oraz komplet danych zdublowany, żeby nic nie zginęło.
@@ -70,6 +97,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       website_status: p.website_status,
       google_maps_url: googleMapsUrl,
       score_reasons: props.score_reasons ?? null,
+      // Właściwość „Źródło kontaktu" (select, edytowalna później na dealu).
+      [CONTACT_SOURCE_KEY]: contactSource,
     },
   };
 

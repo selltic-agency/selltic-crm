@@ -4,10 +4,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { SlidersHorizontal, X } from "lucide-react";
 import { tokens, inputStyle, primaryButton, ghostButton } from "@/lib/ui";
 import type { PropertyView } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
+import MIcon from "@/components/MaterialIcon";
 
 export default function BulkEditBar({
   properties,
@@ -63,7 +63,7 @@ export default function BulkEditBar({
           opacity: disabled ? 0.5 : 1,
         }}
       >
-        <SlidersHorizontal size={15} />
+        <MIcon name="tune" size={15} />
         Ustaw właściwość{count ? ` (${count})` : ""}
       </button>
 
@@ -89,7 +89,7 @@ export default function BulkEditBar({
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>Ustaw dla {count} zaznaczonych</span>
             <button onClick={() => setOpen(false)} aria-label="Zamknij" style={{ border: "none", background: "none", cursor: "pointer", color: tokens.muted, display: "grid", placeItems: "center" }}>
-              <X size={16} />
+              <MIcon name="close" size={16} />
             </button>
           </div>
 
