@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { tokens, inputStyle, primaryButton, ghostButton, formatDateTime } from "@/lib/ui";
+import { FieldLabel, Section } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { humanizeScrapeError, ZERO_RESULTS_MESSAGE, formatFound } from "@/lib/scraperMessages";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
@@ -458,24 +459,17 @@ export default function ScraperPage() {
 
   return (
     <div style={{ maxWidth: 980 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 16px" }}>Scraper</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 20px" }}>Scraper</h1>
 
-      <section
-        style={{
-          background: tokens.card,
-          border: `1px solid ${tokens.border}`,
-          borderRadius: tokens.radius,
-          padding: 20,
-          marginBottom: 20,
-        }}
-      >
-        <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 14px" }}>
+      {/* Formularz nowego scrapowania — płaska sekcja jak na ekranie leada:
+          etykieta + proste pola, bez opakowania w „pudełko". */}
+      <Section title="Nowe scrapowanie">
+        <p style={{ fontSize: 13, color: tokens.muted, margin: "-2px 0 14px" }}>
           Podaj słowa kluczowe i lokalizacje (po jednej w linii). Scraper wygeneruje zadanie
           dla każdej kombinacji słowo kluczowe × lokalizacja.
         </p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Słowa kluczowe</span>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+          <FieldLabel label="Słowa kluczowe">
             <textarea
               value={keywordsText}
               onChange={(e) => setKeywordsText(e.target.value)}
@@ -483,9 +477,8 @@ export default function ScraperPage() {
               rows={5}
               style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
             />
-          </label>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Lokalizacje</span>
+          </FieldLabel>
+          <FieldLabel label="Lokalizacje">
             <textarea
               value={locationsText}
               onChange={(e) => setLocationsText(e.target.value)}
@@ -493,39 +486,40 @@ export default function ScraperPage() {
               rows={5}
               style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
             />
-          </label>
+          </FieldLabel>
         </div>
         {/* Cel kontaktu (Feature 2) — wybrany dla całej paczki; każdy lead z
             niej dziedziczy ten cel jako pierwszy wpis historii. */}
-        <label style={{ display: "grid", gap: 6, marginTop: 14, maxWidth: 320 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Cel kontaktu (opcjonalnie)</span>
-          <select
-            value={contactPurpose}
-            onChange={(e) => setContactPurpose(e.target.value)}
-            style={inputStyle}
-          >
-            <option value="">— brak —</option>
-            {purposes.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div style={{ maxWidth: 320, marginTop: 14 }}>
+          <FieldLabel label="Cel kontaktu (opcjonalnie)">
+            <select
+              value={contactPurpose}
+              onChange={(e) => setContactPurpose(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">— brak —</option>
+              {purposes.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </FieldLabel>
+        </div>
 
         {/* Scoring opcjonalny — decyzja per paczka. Wyłączony → scraper nie
             sprawdza stron i nie liczy wyniku; leady mają „brak" zamiast score
             (poprawny stan, nie błąd). */}
-        <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginTop: 14, maxWidth: 460, cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginTop: 16, maxWidth: 460, cursor: "pointer" }}>
           <input
             type="checkbox"
             checked={scoringEnabled}
             onChange={(e) => setScoringEnabled(e.target.checked)}
-            style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0, cursor: "pointer" }}
+            style={{ marginTop: 2, width: 16, height: 16, flexShrink: 0, cursor: "pointer", accentColor: tokens.accent }}
           />
-          <span style={{ display: "grid", gap: 2 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Włącz scoring stron WWW</span>
-            <span style={{ fontSize: 12, color: tokens.muted }}>
+          <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: tokens.text }}>Włącz scoring stron WWW</span>
+            <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.45 }}>
               Sprawdza stronę firmy i liczy lead score (0–100). Wyłącz, gdy nie
               potrzebujesz oceny (np. paczki „Ads") — leady zostaną bez wyniku, co
               jest w porządku i nie blokuje przenoszenia do Prospectingu.
@@ -536,36 +530,29 @@ export default function ScraperPage() {
         <button
           onClick={startScraping}
           disabled={starting}
-          style={{ ...primaryButton, marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}
+          style={{ ...primaryButton, marginTop: 18, display: "flex", alignItems: "center", gap: 8 }}
         >
           <MIcon name="rocket_launch" size={16} />
           {starting ? "Uruchamianie…" : "Rozpocznij scrapowanie"}
         </button>
-      </section>
+      </Section>
 
-      {/* Aktywne scrapowania (w trakcie / wstrzymane) */}
+      {/* Aktywne scrapowania (w trakcie / wstrzymane) — płaska sekcja */}
       {activeViews.length > 0 && (
-        <section
-          style={{
-            background: tokens.card,
-            border: `1px solid ${tokens.border}`,
-            borderRadius: tokens.radius,
-            padding: 20,
-            marginBottom: 20,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Aktywne scrapowania</h2>
+        <Section
+          title="Aktywne scrapowania"
+          action={
             <button
               onClick={refresh}
               disabled={refreshing}
-              style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", opacity: refreshing ? 0.6 : 1 }}
+              style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, opacity: refreshing ? 0.6 : 1 }}
             >
               <MIcon name="refresh" size={14} className={refreshing ? "selltic-spin" : undefined} />
               {refreshing ? "Odświeżanie…" : "Odśwież"}
             </button>
-          </div>
-          <div style={{ display: "grid", gap: 12 }}>
+          }
+        >
+          <div style={{ display: "grid", gap: 10 }}>
             {activeViews.map((v) => (
               <BatchCard
                 key={v.batch.id}
@@ -580,42 +567,33 @@ export default function ScraperPage() {
               />
             ))}
           </div>
-        </section>
+        </Section>
       )}
 
-      {/* Historia scrapowania — wszystkie zakończone/zatrzymane paczki, paginowane */}
-      <section
-        style={{
-          background: tokens.card,
-          border: `1px solid ${tokens.border}`,
-          borderRadius: tokens.radius,
-          padding: 20,
-          marginBottom: 20,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
-            Historia scrapowania{historyViews.length > 0 ? ` (${historyViews.length})` : ""}
-          </h2>
-          {activeViews.length === 0 && (
+      {/* Historia scrapowania — wszystkie zakończone/zatrzymane paczki, paginowane.
+          Płaska lista wpisów (jak oś czasu na ekranie leada), bez opakowania. */}
+      <Section
+        title={`Historia scrapowania${historyViews.length > 0 ? ` (${historyViews.length})` : ""}`}
+        action={
+          activeViews.length === 0 ? (
             <button
               onClick={refresh}
               disabled={refreshing}
-              style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", opacity: refreshing ? 0.6 : 1 }}
+              style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, opacity: refreshing ? 0.6 : 1 }}
             >
               <MIcon name="refresh" size={14} className={refreshing ? "selltic-spin" : undefined} />
               {refreshing ? "Odświeżanie…" : "Odśwież"}
             </button>
-          )}
-        </div>
-
+          ) : undefined
+        }
+      >
         {historyViews.length === 0 ? (
-          <div style={{ padding: "20px 4px", textAlign: "center", color: tokens.muted, fontSize: 13 }}>
+          <div style={{ padding: "16px 2px", color: tokens.muted, fontSize: 13 }}>
             Brak zakończonych scrapowań — uruchom nowe powyżej.
           </div>
         ) : (
           <>
-            <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gap: 10 }}>
               {historySlice.map((v) => (
                 <BatchCard
                   key={v.batch.id}
@@ -654,7 +632,7 @@ export default function ScraperPage() {
             )}
           </>
         )}
-      </section>
+      </Section>
 
       <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
         <TabButton active={tab === "leads"} onClick={() => setTab("leads")}>
@@ -931,7 +909,15 @@ function BatchCard({
   );
 
   return (
-    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, overflow: "hidden" }}>
+    <div
+      style={{
+        border: `1px solid ${tokens.border}`,
+        borderLeft: `3px solid ${statusColor}`,
+        borderRadius: 10,
+        overflow: "hidden",
+        background: tokens.card,
+      }}
+    >
       {/* Nagłówek — klik rozwija/zwija listę zadań */}
       <button
         onClick={() => setExpanded((v) => !v)}
@@ -968,20 +954,19 @@ function BatchCard({
             {keywordsLabel}
           </span>
 
-          {/* Status */}
+          {/* Status — płaska, wersalikowa etykieta w kolorze statusu (jak wpisy
+              osi czasu na ekranie leada); kolor niesie też lewy pasek karty. */}
           <span
             style={{
               flexShrink: 0,
               display: "inline-flex",
               alignItems: "center",
               gap: 5,
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: 700,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
               color: statusColor,
-              background: `${statusColor}14`,
-              border: `1px solid ${tokens.border}`,
-              borderRadius: 999,
-              padding: "3px 10px",
             }}
           >
             {eff === "running" && <MIcon name="progress_activity" size={12} className="selltic-spin" />}
@@ -1140,9 +1125,9 @@ function JobRow({ job: j }: { job: ScrapeJob }) {
         display: "grid",
         gap: 6,
         padding: "7px 10px",
-        borderRadius: 10,
-        border: `1px solid ${tokens.border}`,
-        background: tokens.card,
+        borderRadius: 8,
+        border: `1px solid ${tokens.borderSoft}`,
+        background: tokens.bg,
         minWidth: 0,
       }}
     >
@@ -1441,9 +1426,9 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
     <button
       onClick={onClick}
       style={{
-        padding: "8px 16px",
-        borderRadius: 10,
-        fontSize: 14,
+        padding: "6px 13px",
+        borderRadius: tokens.radiusSm,
+        fontSize: 13,
         fontWeight: 600,
         cursor: "pointer",
         border: `1px solid ${active ? tokens.accent : tokens.border}`,

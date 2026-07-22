@@ -180,10 +180,10 @@ export default function SettingsPage() {
                         gap: 11,
                         width: "100%",
                         textAlign: "left",
-                        padding: "9px 11px",
-                        borderRadius: 10,
-                        fontSize: 14,
-                        fontWeight: 600,
+                        padding: "8px 11px",
+                        borderRadius: tokens.radiusSm,
+                        fontSize: 13.5,
+                        fontWeight: on ? 600 : 500,
                         cursor: "pointer",
                         border: "1px solid transparent",
                         background: on ? tokens.accentSoft : "transparent",
@@ -201,14 +201,11 @@ export default function SettingsPage() {
           </nav>
 
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 11, display: "grid", placeItems: "center", background: tokens.accentSoft, color: tokens.accent, flexShrink: 0 }}>
-                <MIcon name={active.icon} size={19} />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 16.5, fontWeight: 700, lineHeight: 1.2 }}>{active.label}</div>
-                {active.hint && <div style={{ fontSize: 12.5, color: tokens.muted }}>{active.hint}</div>}
-              </div>
+            {/* Nagłówek sekcji — płaski, jak referencyjny nagłówek strony:
+                sam tytuł + podpis, bez ozdobnego kafla z ikoną. */}
+            <div style={{ minWidth: 0, marginBottom: 18, paddingBottom: 14, borderBottom: `1px solid ${tokens.border}` }}>
+              <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.2, color: tokens.text }}>{active.label}</div>
+              {active.hint && <div style={{ fontSize: 12.5, color: tokens.muted, marginTop: 3 }}>{active.hint}</div>}
             </div>
             <TabContent tab={tab} />
           </div>

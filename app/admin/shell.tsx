@@ -443,8 +443,10 @@ function NavItem({
         outline: "none",
       }}
     >
-      <MIcon name={icon} size={18} fill={active} color={active ? tokens.accent : tokens.muted} />
-      {!railed && <span style={{ whiteSpace: "nowrap", overflow: "hidden" }}>{label}</span>}
+      <MIcon name={icon} size={18} fill={active} color={active ? tokens.accent : tokens.muted} style={{ flexShrink: 0 }} />
+      {!railed && (
+        <span style={{ minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      )}
     </Link>
   );
 }

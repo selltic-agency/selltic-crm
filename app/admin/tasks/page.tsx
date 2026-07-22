@@ -231,7 +231,7 @@ function TaskRow({
         gap: 12,
         background: tokens.card,
         border: `1px solid ${tokens.border}`,
-        borderRadius: 12,
+        borderRadius: tokens.radius,
         padding: "12px 14px",
         opacity: task.done ? 0.6 : 1,
       }}
@@ -347,7 +347,7 @@ function Empty({ children }: { children: React.ReactNode }) {
         color: tokens.muted,
         background: tokens.card,
         border: `1px dashed ${tokens.border}`,
-        borderRadius: 12,
+        borderRadius: tokens.radius,
         padding: 16,
         marginBottom: 28,
       }}
