@@ -24,7 +24,6 @@ import {
   type ThankYouEmail,
   NEXT,
   SUBMIT,
-  STEP_TYPES,
   FONTS,
   VALIDATION_PRESETS,
   blankStep,
@@ -160,7 +159,6 @@ export default function FormEditorPage() {
   const [activeId, setActiveId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [addOpen, setAddOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
@@ -333,7 +331,6 @@ export default function FormEditorPage() {
   }, []);
 
   function addStep(type: StepType) {
-    setAddOpen(false);
     const step = blankStep(type);
     step.id = newStepId();
     setSchema((s) => {
@@ -476,11 +473,11 @@ export default function FormEditorPage() {
   return (
     <PropDefsCtx.Provider value={{ defs: propDefs, add: (def) => setPropDefs((p) => [...p, def]) }}>
     <div
+      className={isMobile ? undefined : "selltic-page-fill"}
       style={{
         display: "flex",
         flexDirection: "column",
-        height: isMobile ? "auto" : "calc(100vh - 120px)",
-        minHeight: isMobile ? "calc(100vh - 130px)" : undefined,
+        ...(isMobile ? { minHeight: "calc(100vh - 130px)" } : {}),
       }}
     >
       {/* ── Pasek górny ─────────────────────────────────────── */}
@@ -681,56 +678,15 @@ export default function FormEditorPage() {
               <span style={{ width: 3, background: tokens.border, borderRadius: 2 }} />
             </div>
           )}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={paneTitle}>Strony i pytania</span>
-            <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj stronę">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={paneTitle}>Strony</span>
+            <button onClick={() => addStep("question")} style={iconBtn} aria-label="Dodaj stronę" title="Dodaj stronę">
               <MIcon name="add" size={16} color={tokens.accent} />
             </button>
           </div>
-
-          {addOpen && (
-            <div
-              style={{
-                position: "absolute",
-                top: 44,
-                right: 12,
-                zIndex: 10,
-                background: "#fff",
-                border: `1px solid ${tokens.border}`,
-                borderRadius: 12,
-                boxShadow: "0 12px 30px rgba(15,18,28,0.12)",
-                padding: 6,
-                width: 200,
-              }}
-            >
-              {STEP_TYPES.filter((t) => t.type !== "end").map((t) => {
-                const iconName = TYPE_ICON[t.type] ?? "text_fields";
-                return (
-                  <button
-                    key={t.type}
-                    onClick={() => addStep(t.type)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 9,
-                      width: "100%",
-                      padding: "8px 10px",
-                      border: "none",
-                      background: "none",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      fontSize: 13.5,
-                      color: tokens.text,
-                      textAlign: "left",
-                    }}
-                  >
-                    <MIcon name={iconName} size={15} color={tokens.muted} />
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <p style={{ fontSize: 11.5, color: tokens.muted, margin: "0 0 10px" }}>
+            Strona = jeden ekran formularza. Pola (pytania) dodajesz w środkowej kolumnie.
+          </p>
 
           {/* Lista kroków — drag & drop (item 2). Uchwyt „⠿” po lewej inicjuje
               przeciąganie; kliknięcie treści zaznacza krok. Strzałki / duplikuj
@@ -1357,8 +1313,6 @@ function StepEditor({
         />
       </Field>
 
-      {step.type !== "end" && <ImageField value={step.image ?? ""} onChange={(url) => onPatch({ image: url })} formId={formId} />}
-
       {step.type === "welcome" && (
         <Field label="Etykieta przycisku (CTA)">
           <input value={step.cta ?? ""} onChange={(e) => onPatch({ cta: e.target.value })} style={inputStyle} />
@@ -1471,7 +1425,7 @@ function AddFieldButton({ onAdd }: { onAdd: (type: FieldType) => void }) {
           }}
         >
           {FIELD_TYPE_MENU.map((t) => {
-            const iconName = TYPE_ICON[t.type] ?? "text_fields";
+            const iconName = t.icon ?? TYPE_ICON[t.type] ?? "text_fields";
             return (
               <button
                 key={t.type}
