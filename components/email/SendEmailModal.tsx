@@ -12,6 +12,7 @@ import type { Deal, EmailTemplate } from "@/lib/types";
 import { dealFieldValues, renderText, renderHtml } from "@/lib/emailTemplates";
 import { RichTextEditor } from "@/components/email/EmailComposer";
 import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 export function SendEmailModal({
   deal,
@@ -23,6 +24,7 @@ export function SendEmailModal({
   onSent: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  useScrollLock();
   const toast = useToast();
   const values = useMemo(() => dealFieldValues(deal), [deal]);
 

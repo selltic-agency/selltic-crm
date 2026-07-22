@@ -10,6 +10,7 @@ import { notesFromProps } from "@/lib/prospectStatus";
 export type ProspectEventType =
   | "note" // notatka
   | "no_answer" // nieudana próba kontaktu (podbija licznik)
+  | "not_interested" // oznaczenie „Niezainteresowany" + archiwizacja
   | "not_our_target" // oznaczenie „Nie nasz target" + archiwizacja
   | "converted" // konwersja na lead/deal
   | "status"; // inna zmiana statusu (np. przywrócenie po cofnięciu)
@@ -108,6 +109,8 @@ export function eventLabel(e: ProspectEvent): string {
       return "Notatka";
     case "no_answer":
       return e.attempt ? `Nie odbiera · ${e.attempt}. próba` : "Nie odbiera";
+    case "not_interested":
+      return "Niezainteresowany";
     case "not_our_target":
       return "Nie nasz target";
     case "converted":
@@ -123,6 +126,8 @@ export function eventIcon(e: ProspectEvent): string {
       return "sticky_note_2";
     case "no_answer":
       return "phone_missed";
+    case "not_interested":
+      return "thumb_down";
     case "not_our_target":
       return "block";
     case "converted":
@@ -136,8 +141,10 @@ export function eventColor(e: ProspectEvent, palette: { warning: string; danger:
   switch (e.type) {
     case "no_answer":
       return palette.warning;
-    case "not_our_target":
+    case "not_interested":
       return palette.danger;
+    case "not_our_target":
+      return palette.muted;
     case "converted":
       return palette.success;
     default:

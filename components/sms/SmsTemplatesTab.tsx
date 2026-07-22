@@ -96,11 +96,7 @@ export function SmsTemplatesTab() {
 
   return (
     <section style={cardStyle}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <MIcon name="chat" size={16} color={tokens.accent} />
-          <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Szablony SMS</h3>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, marginBottom: 6 }}>
         <button onClick={() => setEditing({ mode: "new" })} style={{ ...primaryButton, display: "inline-flex", alignItems: "center", gap: 6 }}>
           <MIcon name="add" size={15} /> Nowy szablon
         </button>

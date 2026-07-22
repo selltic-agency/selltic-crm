@@ -11,6 +11,7 @@ import type { FormSchema, Step, FormField } from "@/lib/forms";
 import { stepFields } from "@/lib/forms";
 import { dropOffLabel } from "@/lib/formSessions";
 import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const AMBER = "#F2994A";
 
@@ -221,6 +222,7 @@ function extractContact(fields: FormField[], answers: Record<string, unknown>): 
 }
 
 function Drawer({ session, fields, onClose }: { session: SessionRow; fields: FormField[]; onClose: () => void }) {
+  useScrollLock();
   const meta = session.meta || {};
   const utm = (meta.utm as Record<string, string>) || {};
   const answered = fields.filter((f) => {

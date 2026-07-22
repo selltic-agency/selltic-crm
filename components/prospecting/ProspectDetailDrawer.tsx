@@ -19,14 +19,15 @@ import { useIsMobile } from "@/lib/responsive";
 import {
   STATUS_LABEL,
   STATUS_COLOR,
-  toDisplayStatus,
+  displayStatusOf,
   isClosedBusiness,
   scoreColor,
   scoreLabel,
   googleMapsUrl,
 } from "@/lib/prospectStatus";
 import { attemptsFromProps } from "@/lib/prospectHistory";
-import { logNoAnswer, markNotOurTarget, addProspectNote, revertProspect } from "@/lib/prospectActions";
+import { useScrollLock } from "@/lib/useScrollLock";
+import { logNoAnswer, markNotOurTarget, markNotInterested, addProspectNote, revertProspect } from "@/lib/prospectActions";
 import ProspectTimeline from "@/components/prospecting/ProspectTimeline";
 import ConvertModal, { type ConvertOptions } from "@/components/prospecting/ConvertModal";
 
@@ -37,6 +38,7 @@ export default function ProspectDetailDrawer({
   onUpdated,
   onSetCategory,
   onAddPurpose,
+  onRemovePurpose,
   onSaveProps,
 }: {
   prospect: Prospect;
@@ -47,6 +49,7 @@ export default function ProspectDetailDrawer({
   onUpdated: (p: Prospect) => void;
   onSetCategory: (p: Prospect, categoryKey: string) => Promise<void>;
   onAddPurpose: (p: Prospect, purposeKey: string) => Promise<void>;
+  onRemovePurpose: (p: Prospect, purposeKey: string) => Promise<void>;
   onSaveProps: (p: Prospect, props: Record<string, unknown>) => Promise<void>;
 }) {
   const supabase = useMemo(() => createClient(), []);
@@ -54,9 +57,10 @@ export default function ProspectDetailDrawer({
   const isMobile = useIsMobile(860);
   const { categories, purposes } = useClassification();
   const { customViews } = useEntityProperties("prospects");
+  useScrollLock();
   const p = prospect;
 
-  const display = toDisplayStatus(p.prospecting_status);
+  const display = displayStatusOf(p);
   const closed = isClosedBusiness(p);
   const attempts = attemptsFromProps(p.props);
 
@@ -112,6 +116,22 @@ export default function ProspectDetailDrawer({
     }
     onUpdated(res.updated);
     toast.undo("Nie nasz target — zarchiwizowano", async () => {
+      const restored = await revertProspect(supabase, p.id, res.snapshot);
+      if (restored) onUpdated(restored);
+    });
+  }
+
+  async function handleNotInterested() {
+    if (busy) return;
+    setBusy(true);
+    const res = await markNotInterested(supabase, p);
+    setBusy(false);
+    if (!res) {
+      toast.error("Nie udało się zaktualizować prospektu.");
+      return;
+    }
+    onUpdated(res.updated);
+    toast.undo("Niezainteresowany — zarchiwizowano", async () => {
       const restored = await revertProspect(supabase, p.id, res.snapshot);
       if (restored) onUpdated(restored);
     });
@@ -212,17 +232,20 @@ export default function ProspectDetailDrawer({
               background: "#FCFCFD",
             }}
           >
-            {/* Status + szybkie akcje */}
-            <Group title="Status">
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {/* Aktualny status (tylko wyświetlanie) — oddzielony od akcji */}
+            <section style={{ marginBottom: 14 }}>
+              <h3 style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, margin: "0 0 8px" }}>
+                Aktualny status
+              </h3>
+              <div style={{ ...menuPanel, boxShadow: "none", padding: "10px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 6,
-                    padding: "3px 10px",
+                    padding: "4px 11px",
                     borderRadius: 6,
-                    fontSize: 12.5,
+                    fontSize: 13,
                     fontWeight: 600,
                     background: `${STATUS_COLOR[display]}14`,
                     color: STATUS_COLOR[display],
@@ -232,18 +255,22 @@ export default function ProspectDetailDrawer({
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: STATUS_COLOR[display] }} />
                   {STATUS_LABEL[display]}
                 </span>
-                {p.archived_at && (
-                  <span style={{ fontSize: 11.5, color: tokens.muted }}>w Archiwum</span>
+                {p.archived_at && <span style={{ fontSize: 11.5, color: tokens.muted }}>w Archiwum</span>}
+                {closed && (
+                  <span style={{ fontSize: 12, color: tokens.danger, fontWeight: 600, marginLeft: "auto" }}>
+                    Firma zamknięta — nie kontaktuj
+                  </span>
                 )}
               </div>
-              {closed && (
-                <div style={{ marginTop: 8, fontSize: 12.5, color: tokens.danger, fontWeight: 600 }}>
-                  Firma zamknięta — nie kontaktuj
-                </div>
-              )}
+            </section>
 
-              {canAct && (
-                <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+            {/* Akcje zmiany statusu — osobna sekcja pod statusem */}
+            {canAct && (
+              <section style={{ marginBottom: 14 }}>
+                <h3 style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, margin: "0 0 8px" }}>
+                  Zmień status
+                </h3>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button
                     onClick={handleNoAnswer}
                     disabled={busy}
@@ -252,19 +279,28 @@ export default function ProspectDetailDrawer({
                     <MIcon name="phone_missed" size={15} /> Nie odbiera
                   </button>
                   <button
+                    onClick={handleNotInterested}
+                    disabled={busy}
+                    style={{ ...ghostButton, borderColor: `${tokens.danger}45`, color: tokens.danger, fontWeight: 600 }}
+                  >
+                    <MIcon name="thumb_down" size={15} /> Niezainteresowany
+                  </button>
+                  <button
                     onClick={handleNotOurTarget}
                     disabled={busy}
-                    style={{ ...ghostButton, borderColor: `${tokens.danger}45`, color: tokens.danger }}
+                    style={{ ...ghostButton }}
                   >
                     <MIcon name="block" size={15} /> Nie nasz target
                   </button>
                 </div>
-              )}
+              </section>
+            )}
 
+            {/* Metryki */}
+            <Group title="Kontakt">
               <PropRow label="Próby kontaktu">
                 <span style={{ fontWeight: 600, color: attempts > 0 ? tokens.warning : tokens.text }}>{attempts}</span>
               </PropRow>
-
               {deal && (
                 <PropRow label="Deal">
                   <a href={`/admin/leads/${deal.id}`} style={{ color: tokens.accent, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -274,27 +310,46 @@ export default function ProspectDetailDrawer({
               )}
             </Group>
 
-            {/* Klasyfikacja */}
-            <Group title="Klasyfikacja">
-              <PropRow label="Kategoria">
-                <select value={p.category ?? ""} onChange={(e) => onSetCategory(p, e.target.value)} style={{ ...inputStyle, padding: "4px 8px" }}>
-                  <option value="">— brak —</option>
-                  {categories.map((c) => (
-                    <option key={c.key} value={c.key}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </PropRow>
-              <PropRow label="Cel kontaktu">
-                <div style={{ display: "grid", gap: 5 }}>
+            {/* Klasyfikacja — kategoria (jednokrotny wybór) + cele kontaktu
+                (wielokrotne, z możliwością usuwania pojedynczych chipów). */}
+            <section style={{ marginBottom: 14 }}>
+              <h3 style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, margin: "0 0 8px" }}>
+                Klasyfikacja
+              </h3>
+              <div style={{ ...menuPanel, boxShadow: "none", padding: 12, display: "grid", gap: 12 }}>
+                <label style={{ display: "grid", gap: 5 }}>
+                  <span style={{ fontSize: 12, color: tokens.muted, fontWeight: 500 }}>Kategoria</span>
+                  <select value={p.category ?? ""} onChange={(e) => onSetCategory(p, e.target.value)} style={inputStyle}>
+                    <option value="">— brak —</option>
+                    {categories.map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: tokens.muted, fontWeight: 500 }}>Cel kontaktu</span>
                   {(p.purposes ?? []).length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                       {(p.purposes ?? []).map((k) => {
                         const meta = purposes.find((x) => x.key === k);
+                        const color = meta?.color ?? tokens.muted;
                         return (
-                          <span key={k} style={{ fontSize: 11.5, fontWeight: 500, padding: "1px 8px", borderRadius: 6, background: `${meta?.color ?? tokens.muted}14`, color: meta?.color ?? tokens.muted, border: `1px solid ${meta?.color ?? tokens.muted}2E` }}>
+                          <span
+                            key={k}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 500, padding: "3px 6px 3px 9px", borderRadius: 6, background: `${color}14`, color, border: `1px solid ${color}2E` }}
+                          >
                             {meta?.label ?? k}
+                            <button
+                              onClick={() => onRemovePurpose(p, k)}
+                              aria-label={`Usuń cel ${meta?.label ?? k}`}
+                              title="Usuń"
+                              style={{ border: "none", background: "none", cursor: "pointer", color, display: "grid", placeItems: "center", padding: 0, lineHeight: 0 }}
+                            >
+                              <MIcon name="close" size={13} />
+                            </button>
                           </span>
                         );
                       })}
@@ -307,18 +362,20 @@ export default function ProspectDetailDrawer({
                       e.currentTarget.value = "";
                       if (v) onAddPurpose(p, v);
                     }}
-                    style={{ ...inputStyle, padding: "4px 8px" }}
+                    style={inputStyle}
                   >
-                    <option value="">Dodaj cel…</option>
-                    {purposes.map((pp) => (
-                      <option key={pp.key} value={pp.key}>
-                        {pp.label}
-                      </option>
-                    ))}
+                    <option value="">Dodaj cel kontaktu…</option>
+                    {purposes
+                      .filter((pp) => !(p.purposes ?? []).includes(pp.key))
+                      .map((pp) => (
+                        <option key={pp.key} value={pp.key}>
+                          {pp.label}
+                        </option>
+                      ))}
                   </select>
                 </div>
-              </PropRow>
-            </Group>
+              </div>
+            </section>
 
             {/* Dane firmy (Google Maps) */}
             <Group title="Dane firmy">

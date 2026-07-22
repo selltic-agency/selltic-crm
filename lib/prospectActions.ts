@@ -47,10 +47,26 @@ export async function logNoAnswer(supabase: Supa, p: Prospect): Promise<ActionRe
   return updated ? { updated, snapshot } : null;
 }
 
-/** „Nie nasz target": odrębny status + archiwizacja + wpis historii. */
+/** „Nie nasz target": archiwizacja + wpis historii + znacznik disposition.
+    Kolumna prospecting_status = 'not_interested', ale props.disposition =
+    'not_target' odróżnia to od zwykłego „Niezainteresowany" (bez migracji). */
 export async function markNotOurTarget(supabase: Supa, p: Prospect): Promise<ActionResult> {
   const snapshot = snapshotOf(p);
-  const props = propsWithEvent(p.props, makeEvent("not_our_target"));
+  const props = propsWithEvent(p.props, makeEvent("not_our_target"), { disposition: "not_target" });
+  const updated = await applyUpdate(supabase, p.id, {
+    prospecting_status: "not_interested",
+    archived_at: new Date().toISOString(),
+    props,
+  });
+  return updated ? { updated, snapshot } : null;
+}
+
+/** „Niezainteresowany": archiwizacja + wpis historii (bez znacznika not_target). */
+export async function markNotInterested(supabase: Supa, p: Prospect): Promise<ActionResult> {
+  const snapshot = snapshotOf(p);
+  const props = propsWithEvent(p.props, makeEvent("not_interested"));
+  // Upewnij się, że nie zostaje po poprzednim „Nie nasz target".
+  delete (props as Record<string, unknown>).disposition;
   const updated = await applyUpdate(supabase, p.id, {
     prospecting_status: "not_interested",
     archived_at: new Date().toISOString(),

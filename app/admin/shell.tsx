@@ -23,11 +23,11 @@ const MAIN_NAV = [
   { href: "/admin/calendar", label: "Kalendarz", icon: "calendar_month" },
   { href: "/admin/analytics", label: "Raporty", icon: "monitoring" },
   { href: "/admin/forms", label: "Formularze", icon: "description" },
+  { href: "/admin/scraper", label: "Scraper", icon: "travel_explore" },
 ];
 
 const SALES_NAV = [
   { href: "/admin/pipeline", label: "Leady", icon: "view_kanban" },
-  { href: "/admin/scraper", label: "Scraper", icon: "travel_explore" },
   { href: "/admin/prospecting", label: "Prospecting", icon: "call" },
 ];
 
@@ -43,7 +43,24 @@ export default function Shell({
   const supabase = useMemo(() => createClient(), []);
   const isMobile = useIsMobile(900);
   const [navOpen, setNavOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [companyName, setCompanyName] = useState("Selltic");
+
+  // Zwinięcie sidebara (do wąskiej szyny z ikonami) — trwałe per przeglądarka.
+  useEffect(() => {
+    if (localStorage.getItem("selltic_sidebar_collapsed") === "1") setCollapsed(true);
+  }, []);
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      localStorage.setItem("selltic_sidebar_collapsed", next ? "1" : "0");
+      return next;
+    });
+  };
+
+  // Na desktopie sidebar może być zwinięty; na mobile zawsze pełny (panel).
+  const railed = collapsed && !isMobile;
+  const width = railed ? 64 : SIDEBAR_W;
 
   // Nazwa firmy z Ustawień (app_settings.company_name; przed migracją kolumny
   // zapytanie zwraca błąd → zostaje domyślna nazwa).
@@ -83,14 +100,14 @@ export default function Shell({
   const sidebar = (
     <aside
       style={{
-        width: SIDEBAR_W,
+        width: isMobile ? SIDEBAR_W : width,
         flexShrink: 0,
         background: tokens.card,
         borderRight: `1px solid ${tokens.border}`,
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
-        padding: "10px 10px 12px",
+        padding: railed ? "10px 8px 12px" : "10px 10px 12px",
         ...(isMobile
           ? {
               position: "fixed",
@@ -108,47 +125,88 @@ export default function Shell({
               left: 0,
               height: "100vh",
               zIndex: 20,
+              transition: `width .2s ${tokens.ease}, padding .2s ${tokens.ease}`,
             }),
       }}
     >
       {/* Nagłówek: logo + nazwa firmy (dropdown) + dzwonek */}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 8px" }}>
-        <CompanyMenu companyName={companyName} email={email} onLogout={logout} />
-        <div style={{ flex: 1 }} />
-        <NotificationBell onOpenContact={openContact} />
-        {isMobile && (
-          <button
-            onClick={() => setNavOpen(false)}
-            aria-label="Zamknij menu"
-            style={{ border: "none", background: "none", cursor: "pointer", color: tokens.muted, display: "grid", placeItems: "center", padding: 4 }}
-          >
-            <MIcon name="close" size={18} />
-          </button>
+      <div style={{ display: "flex", flexDirection: railed ? "column" : "row", alignItems: "center", gap: railed ? 6 : 4, padding: railed ? "2px 0 8px" : "2px 2px 8px", justifyContent: railed ? "center" : undefined }}>
+        {railed ? (
+          <>
+            <Logo />
+            <button
+              onClick={toggleCollapsed}
+              aria-label="Rozwiń menu"
+              title="Rozwiń menu"
+              style={{ border: "none", background: "transparent", cursor: "pointer", color: tokens.muted, padding: 4, display: "grid", placeItems: "center" }}
+            >
+              <MIcon name="left_panel_open" size={18} />
+            </button>
+          </>
+        ) : (
+          <>
+            <CompanyMenu companyName={companyName} email={email} onLogout={logout} />
+            <div style={{ flex: 1 }} />
+            <NotificationBell onOpenContact={openContact} />
+            {!isMobile && (
+              <button
+                onClick={toggleCollapsed}
+                aria-label="Zwiń menu"
+                title="Zwiń menu"
+                style={{ border: "none", background: "transparent", cursor: "pointer", color: tokens.muted, display: "grid", placeItems: "center", padding: 4 }}
+              >
+                <MIcon name="left_panel_close" size={18} />
+              </button>
+            )}
+            {isMobile && (
+              <button
+                onClick={() => setNavOpen(false)}
+                aria-label="Zamknij menu"
+                style={{ border: "none", background: "none", cursor: "pointer", color: tokens.muted, display: "grid", placeItems: "center", padding: 4 }}
+              >
+                <MIcon name="close" size={18} />
+              </button>
+            )}
+          </>
         )}
       </div>
 
-      {/* Kompaktowa wyszukiwarka (zastępuje dawną dużą w topbarze) */}
-      <div style={{ padding: "0 2px 10px" }}>
-        <GlobalSearch onOpenContact={openContact} onOpenProspect={openProspect} variant="sidebar" />
-      </div>
+      {/* Kompaktowa wyszukiwarka (ukryta w wąskiej szynie) */}
+      {railed ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: "0 0 8px" }}>
+          <NotificationBell onOpenContact={openContact} />
+        </div>
+      ) : (
+        <div style={{ padding: "0 2px 10px" }}>
+          <GlobalSearch onOpenContact={openContact} onOpenProspect={openProspect} variant="sidebar" />
+        </div>
+      )}
 
       <nav style={{ display: "flex", flexDirection: "column", gap: 1, flex: 1, minHeight: 0, overflowY: "auto" }}>
         {MAIN_NAV.map((item) => (
-          <NavItem key={item.href} {...item} active={isActive(item.href, item.exact)} />
+          <NavItem key={item.href} {...item} active={isActive(item.href, item.exact)} railed={railed} />
         ))}
 
-        <div style={{ padding: "14px 10px 4px", fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted }}>
-          Sprzedaż
-        </div>
+        {railed ? (
+          <div style={{ height: 1, background: tokens.borderSoft, margin: "10px 6px" }} />
+        ) : (
+          <div style={{ padding: "14px 10px 4px", fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted }}>
+            Sprzedaż
+          </div>
+        )}
         {SALES_NAV.map((item) => (
-          <NavItem key={item.href} {...item} active={isActive(item.href)} />
+          <NavItem key={item.href} {...item} active={isActive(item.href)} railed={railed} />
         ))}
       </nav>
 
-      {/* Stopka: skrót do ustawień */}
-      <div style={{ borderTop: `1px solid ${tokens.borderSoft}`, paddingTop: 8 }}>
-        <NavItem href="/admin/settings" label="Ustawienia" icon="settings" active={isActive("/admin/settings")} />
-      </div>
+      {/* W wąskiej szynie dropdown z nagłówka jest ukryty — daj bezpośredni
+          dostęp do Ustawień gestem gwiazdki na dole (w pełnym menu Ustawienia
+          są w rozwijanym menu firmy). */}
+      {railed && (
+        <div style={{ borderTop: `1px solid ${tokens.borderSoft}`, paddingTop: 8 }}>
+          <NavItem href="/admin/settings" label="Ustawienia" icon="settings" active={isActive("/admin/settings")} railed />
+        </div>
+      )}
     </aside>
   );
 
@@ -179,7 +237,8 @@ export default function Shell({
           minWidth: 0,
           display: "flex",
           flexDirection: "column",
-          marginLeft: isMobile ? 0 : SIDEBAR_W,
+          marginLeft: isMobile ? 0 : width,
+          transition: isMobile ? undefined : `margin-left .2s ${tokens.ease}`,
         }}
       >
         {/* Wąski topbar tylko na mobile (hamburger) */}
@@ -352,24 +411,28 @@ function NavItem({
   label,
   icon,
   active,
+  railed = false,
 }: {
   href: string;
   label: string;
   icon: string;
   active: boolean;
+  railed?: boolean;
 }) {
   const [hover, setHover] = useState(false);
 
   return (
     <Link
       href={href}
+      title={railed ? label : undefined}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 9,
-        padding: "6px 10px",
+        justifyContent: railed ? "center" : "flex-start",
+        gap: railed ? 0 : 9,
+        padding: railed ? "8px 0" : "6px 10px",
         borderRadius: tokens.radiusSm,
         textDecoration: "none",
         fontSize: 13,
@@ -381,7 +444,7 @@ function NavItem({
       }}
     >
       <MIcon name={icon} size={18} fill={active} color={active ? tokens.accent : tokens.muted} />
-      <span style={{ whiteSpace: "nowrap", overflow: "hidden" }}>{label}</span>
+      {!railed && <span style={{ whiteSpace: "nowrap", overflow: "hidden" }}>{label}</span>}
     </Link>
   );
 }

@@ -56,11 +56,8 @@ import { SendEmailModal } from "@/components/email/SendEmailModal";
 import { SendSmsModal } from "@/components/sms/SendSmsModal";
 import StageSelector from "@/components/StageSelector";
 import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
-// Wysokość szkieletu panelu: topbar (64) + pionowy padding .selltic-main
-// (28+28) trzeba odjąć od 100vh, żeby dwa panele zmieściły się bez
-// przewijania całej strony. Wartości pochodzą z shell.tsx i globals.css.
-const DESKTOP_PAGE_H = "calc(100vh - 120px)";
 // Poniżej tej szerokości panele układają się pionowo (kolumny są za ciasne).
 const STACK_BREAKPOINT = 1024;
 
@@ -143,8 +140,6 @@ export default function DealPage() {
   // obiekcie deal) — dzięki temu niezapisany szkic nie ginie przy innych
   // akcjach na stronie (np. zmianie etapu, która też robi setDeal(...)).
   const [contactDraft, setContactDraft] = useState({ name: "", company: "", email: "", phone: "" });
-  const [contactSaving, setContactSaving] = useState(false);
-  const [contactSavedAt, setContactSavedAt] = useState<number | null>(null);
 
   const [propsDraft, setPropsDraft] = useState<{ value: string; assignee: Assignee | ""; category: string; purposes: string[]; custom: Record<string, unknown> }>({
     value: "",
@@ -153,8 +148,9 @@ export default function DealPage() {
     purposes: [],
     custom: {},
   });
-  const [propsSaving, setPropsSaving] = useState(false);
-  const [propsSavedAt, setPropsSavedAt] = useState<number | null>(null);
+  // Jeden globalny zapis dla całego panelu (dane kontaktowe + właściwości).
+  const [savingAll, setSavingAll] = useState(false);
+  const [savedAllAt, setSavedAllAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!deal) return;
@@ -266,51 +262,40 @@ export default function DealPage() {
     return !!(s?.is_won || s?.is_lost);
   }
 
-  // Zapis całej sekcji „Dane kontaktowe” jednym zapytaniem, jednym kliknięciem.
-  async function saveContact() {
-    if (!deal || !contactDirty || contactSaving) return;
-    setContactSaving(true);
-    const patch = {
-      name: contactDraft.name.trim() || null,
-      company: contactDraft.company.trim() || null,
-      email: contactDraft.email.trim() || null,
-      phone: contactDraft.phone.trim() || null,
-    };
+  // Jeden globalny zapis: dane kontaktowe + właściwości jednym zapytaniem.
+  async function saveAll() {
+    if (!deal || savingAll || (!contactDirty && !propsDirty)) return;
+    setSavingAll(true);
+    const patch: Record<string, unknown> = {};
+    if (contactDirty) {
+      patch.name = contactDraft.name.trim() || null;
+      patch.company = contactDraft.company.trim() || null;
+      patch.email = contactDraft.email.trim() || null;
+      patch.phone = contactDraft.phone.trim() || null;
+    }
+    if (propsDirty) {
+      patch.value = propsDraft.value ? Number(propsDraft.value) : 0;
+      patch.assignee = propsDraft.assignee || null;
+      patch.category = propsDraft.category || null;
+      patch.purposes = propsDraft.purposes;
+      const props = { ...(deal.props ?? {}) };
+      for (const def of propertyDefs) {
+        const raw = propsDraft.custom[def.key];
+        const empty = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
+        if (empty) delete props[def.key];
+        else props[def.key] = typeof raw === "string" ? raw.trim() : raw;
+      }
+      patch.props = props;
+    }
     const { error } = await supabase.from("deals").update(patch).eq("id", deal.id);
-    setContactSaving(false);
+    setSavingAll(false);
     if (error) {
-      toast.error("Nie udało się zapisać danych kontaktowych.");
+      toast.error("Nie udało się zapisać zmian.");
       return;
     }
-    setDeal({ ...deal, ...patch });
-    setContactSavedAt(Date.now());
-    setTimeout(() => setContactSavedAt(null), 2000);
-  }
-
-  // Zapis całej sekcji „Właściwości” (wbudowane + konfigurowalne) jednym zapytaniem.
-  async function saveProps() {
-    if (!deal || !propsDirty || propsSaving) return;
-    setPropsSaving(true);
-    const value = propsDraft.value ? Number(propsDraft.value) : 0;
-    const assignee = propsDraft.assignee || null;
-    const category = propsDraft.category || null;
-    const purposes = propsDraft.purposes;
-    const props = { ...(deal.props ?? {}) };
-    for (const def of propertyDefs) {
-      const raw = propsDraft.custom[def.key];
-      const empty = raw == null || raw === "" || (Array.isArray(raw) && raw.length === 0);
-      if (empty) delete props[def.key];
-      else props[def.key] = typeof raw === "string" ? raw.trim() : raw;
-    }
-    const { error } = await supabase.from("deals").update({ value, assignee, category, purposes, props }).eq("id", deal.id);
-    setPropsSaving(false);
-    if (error) {
-      toast.error("Nie udało się zapisać właściwości.");
-      return;
-    }
-    setDeal({ ...deal, value, assignee, category, purposes, props });
-    setPropsSavedAt(Date.now());
-    setTimeout(() => setPropsSavedAt(null), 2000);
+    setDeal({ ...deal, ...(patch as Partial<Deal>) });
+    setSavedAllAt(Date.now());
+    setTimeout(() => setSavedAllAt(null), 2000);
   }
 
   // Nowa kolejność właściwości → zapis position do property_defs (globalnie,
@@ -454,21 +439,20 @@ export default function DealPage() {
 
   const dealName = deal.name || "Bez nazwy";
   // ── Kontener strony ────────────────────────────────────────────────────
-  // Desktop: 100vh, dwie kolumny, każdy panel przewija się w środku.
+  // Desktop: pełnoekranowo (100vh), dwie kolumny bez zaokrągleń i marginesów;
+  // każdy panel przewija się w środku, rozdzielone cienką linią.
   // Wąski ekran: panele jeden pod drugim, przewija się cała strona.
   const containerStyle: CSSProperties = isNarrow
     ? { display: "flex", flexDirection: "column", gap: 16 }
     : {
-        height: DESKTOP_PAGE_H,
         display: "grid",
-        gridTemplateColumns: "minmax(300px, 380px) minmax(0, 1fr)",
-        gap: 16,
+        gridTemplateColumns: "minmax(320px, 400px) minmax(0, 1fr)",
       };
 
   return (
-    <div style={containerStyle}>
+    <div className={isNarrow ? undefined : "selltic-fullbleed"} style={containerStyle}>
       {/* ── LEWY PANEL: tożsamość + akcje + właściwości ───────────────── */}
-      <Panel fill={!isNarrow}>
+      <Panel fill={!isNarrow} flat divider={!isNarrow}>
         {/* Nagłówek panelu (nie przewija się) */}
         <div
           style={{
@@ -610,13 +594,7 @@ export default function DealPage() {
               />
             </FieldLabel>
           </div>
-          <SectionSaveBar
-            dirty={contactDirty}
-            saving={contactSaving}
-            savedAt={contactSavedAt}
-            onSave={saveContact}
-            style={{ marginBottom: 22 }}
-          />
+          <div style={{ marginBottom: 22 }} />
 
           {/* Etap przeniesiony do przypiętego nagłówka (§8) — brak duplikatu tutaj. */}
 
@@ -709,21 +687,47 @@ export default function DealPage() {
             </p>
           )}
 
-          <SectionSaveBar
-            dirty={propsDirty}
-            saving={propsSaving}
-            savedAt={propsSavedAt}
-            onSave={saveProps}
-            style={{ marginTop: 14 }}
-          />
-
           {/* Dane z Google Maps (tylko dla deali ze scrapera) */}
-          <ProspectingDataCard deal={deal} />
+          <div style={{ marginTop: 14 }}>
+            <ProspectingDataCard deal={deal} />
+          </div>
+        </div>
+
+        {/* Jeden globalny przycisk zapisu — przypięty na dole panelu, zapisuje
+            dane kontaktowe i właściwości naraz. */}
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: `1px solid ${tokens.border}`,
+            padding: "10px 18px",
+            background: tokens.card,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <button
+            onClick={saveAll}
+            disabled={savingAll || (!contactDirty && !propsDirty)}
+            style={{
+              ...primaryButton,
+              padding: "8px 18px",
+              opacity: (contactDirty || propsDirty) && !savingAll ? 1 : 0.5,
+              cursor: (contactDirty || propsDirty) && !savingAll ? "pointer" : "not-allowed",
+            }}
+          >
+            {savingAll ? "Zapisywanie…" : "Zapisz zmiany"}
+          </button>
+          {contactDirty || propsDirty ? (
+            <span style={{ fontSize: 12.5, color: tokens.warning, fontWeight: 600 }}>Niezapisane zmiany</span>
+          ) : savedAllAt ? (
+            <span style={{ fontSize: 12.5, color: tokens.success, fontWeight: 600 }}>Zapisano ✓</span>
+          ) : null}
         </div>
       </Panel>
 
       {/* ── PRAWY PANEL: oś czasu aktywności ──────────────────────────── */}
-      <Panel fill={!isNarrow}>
+      <Panel fill={!isNarrow} flat>
         <div
           style={{
             flexShrink: 0,
@@ -790,22 +794,36 @@ export default function DealPage() {
   );
 }
 
-/* ── Panel (karta z wewnętrznym przewijaniem) ───────────────────────────── */
-function Panel({ fill, children }: { fill: boolean; children: React.ReactNode }) {
+/* ── Panel (kolumna z wewnętrznym przewijaniem) ─────────────────────────── */
+// `flat` = pełnoekranowy wariant bez zaokrągleń/cienia (karta deala wypełnia
+// cały obszar). `divider` = cienka linia po prawej (rozdziela dwie kolumny).
+function Panel({
+  fill,
+  flat = false,
+  divider = false,
+  children,
+}: {
+  fill: boolean;
+  flat?: boolean;
+  divider?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <section
       style={{
         background: tokens.card,
-        border: `1px solid ${tokens.border}`,
-        borderRadius: tokens.radius,
-        boxShadow: "0 1px 2px rgba(15,18,28,0.04)",
+        border: flat ? "none" : `1px solid ${tokens.border}`,
+        borderRight: divider ? `1px solid ${tokens.border}` : flat ? "none" : `1px solid ${tokens.border}`,
+        borderRadius: flat ? 0 : tokens.radius,
+        boxShadow: flat ? "none" : "0 1px 2px rgba(15,18,28,0.04)",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
+        height: fill ? "100%" : undefined,
         overflow: "hidden",
         // Na wąskim ekranie panel rośnie z treścią (przewija się cała strona),
         // ograniczamy tylko wysokość osi czasu, by nie była nieskończona.
-        ...(fill ? {} : { maxHeight: "calc(100vh - 96px)" }),
+        ...(fill ? {} : { maxHeight: "calc(100vh - 96px)", borderRadius: tokens.radius, border: `1px solid ${tokens.border}`, borderRight: `1px solid ${tokens.border}` }),
       }}
     >
       {children}
@@ -1222,6 +1240,7 @@ function ComposerModal({
     updateTask: (id: string, patch: { title: string; due_at: string | null; done: boolean }) => Promise<void>;
   };
 }) {
+  useScrollLock();
   const isTask = composer.editor === "task";
   const [saving, setSaving] = useState(false);
   const [body, setBody] = useState(
@@ -1515,46 +1534,6 @@ function FieldLabel({ label, children }: { label: string; children: React.ReactN
       <span style={{ fontSize: 12, fontWeight: 600, color: tokens.muted }}>{label}</span>
       {children}
     </label>
-  );
-}
-
-// Pasek zapisu dla sekcji z wsadową edycją: jeden przycisk „Zapisz zmiany”
-// dla dowolnej liczby pól naraz + jawny stan (niezapisane / zapisano ✓),
-// żeby zawsze było wiadomo, czy zmiana faktycznie poszła do bazy.
-function SectionSaveBar({
-  dirty,
-  saving,
-  savedAt,
-  onSave,
-  style,
-}: {
-  dirty: boolean;
-  saving: boolean;
-  savedAt: number | null;
-  onSave: () => void;
-  style?: CSSProperties;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, ...style }}>
-      <button
-        onClick={onSave}
-        disabled={!dirty || saving}
-        style={{
-          ...primaryButton,
-          padding: "8px 16px",
-          fontSize: 13,
-          opacity: dirty && !saving ? 1 : 0.5,
-          cursor: dirty && !saving ? "pointer" : "not-allowed",
-        }}
-      >
-        {saving ? "Zapisywanie…" : "Zapisz zmiany"}
-      </button>
-      {dirty ? (
-        <span style={{ fontSize: 12.5, color: tokens.warning, fontWeight: 600 }}>Niezapisane zmiany</span>
-      ) : savedAt ? (
-        <span style={{ fontSize: 12.5, color: tokens.success, fontWeight: 600 }}>Zapisano ✓</span>
-      ) : null}
-    </div>
   );
 }
 

@@ -9,7 +9,7 @@ import { tokens, formatDateTime, thStyle, tdStyle, ghostButton } from "@/lib/ui"
 import type { Prospect } from "@/lib/types";
 import { ScoreBadge } from "@/components/ScoreBreakdown";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
-import { STATUS_LABEL, STATUS_COLOR, toDisplayStatus } from "@/lib/prospectStatus";
+import { STATUS_LABEL, STATUS_COLOR, displayStatusOf } from "@/lib/prospectStatus";
 import { attemptsFromProps } from "@/lib/prospectHistory";
 import { asArray, readPropValue, type PropertyView } from "@/lib/properties";
 import { PropertyValueDisplay } from "@/components/PropertyFields";
@@ -309,7 +309,7 @@ function getVal(p: Prospect, key: string, viewByKey: Map<string, PropertyView>):
   if (key === "lead_score") return p.lead_score ?? null;
   if (key === "rating") return p.rating ?? -1;
   if (key === "created_at") return new Date(p.created_at).getTime();
-  if (key === "prospecting_status") return STATUS_LABEL[toDisplayStatus(p.prospecting_status)];
+  if (key === "prospecting_status") return STATUS_LABEL[displayStatusOf(p)];
   if (key === "website_status") return p.website_status ?? "";
   if (key === "category") return p.category ?? "";
   if (key === "purposes") return (p.purposes ?? []).join(",");
@@ -350,7 +350,7 @@ function renderCell(p: Prospect, key: string, viewByKey: Map<string, PropertyVie
     return WEBSITE_STATUS_LABEL[p.website_status] ?? p.website_status;
   }
   if (key === "prospecting_status") {
-    const s = toDisplayStatus(p.prospecting_status);
+    const s = displayStatusOf(p);
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
         <span style={{ width: 7, height: 7, borderRadius: "50%", background: STATUS_COLOR[s], flexShrink: 0 }} />

@@ -138,6 +138,28 @@ select {
   }
 }
 
+/* Pełnoekranowa strona (np. karta deala) — anuluje padding .selltic-main i
+   wypełnia cały dostępny obszar treści (100vh na desktopie, bez topbara). */
+.selltic-fullbleed {
+  margin: -20px -24px;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  .selltic-fullbleed {
+    /* Na wąskim ekranie strona i tak układa się pionowo i przewija normalnie. */
+    margin: -18px -16px;
+    height: auto;
+    overflow: visible;
+  }
+}
+@media (max-width: 480px) {
+  .selltic-fullbleed {
+    margin: -14px -12px;
+  }
+}
+
 /* Nieokreślony pasek postępu (scraper „w trakcie”) — nie znamy z góry ile
    będzie wyników, więc zamiast fałszywego procentu pokazujemy przesuwający
    się fragment paska. */

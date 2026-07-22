@@ -15,6 +15,7 @@ import { renderSmsTemplate, SMS_VARIABLES } from "@/lib/sms/templates";
 import { stripDiacritics } from "@/lib/sms/encoding";
 import { SmsCounter } from "@/components/sms/SmsCounter";
 import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 export function SendSmsModal({
   deal,
@@ -26,6 +27,7 @@ export function SendSmsModal({
   onSent: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
+  useScrollLock();
   const toast = useToast();
   const values = useMemo(() => dealSmsValues(deal), [deal]);
 

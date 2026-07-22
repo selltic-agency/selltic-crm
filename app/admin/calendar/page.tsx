@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { tokens, formatDateTime } from "@/lib/ui";
 import type { Assignee, Task } from "@/lib/types";
 import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const WEEKDAYS = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Nd"];
 const MONTH_NAMES = [
@@ -382,6 +383,10 @@ function WeekView({
     return map;
   }, [days, tasksByDay]);
 
+  // Nagłówek i oś godzin dzielą JEDEN kontener przewijania i identyczny
+  // szablon kolumn — dzięki temu pionowe linie dni są idealnie wyrównane
+  // (wcześniej pasek przewijania zwężał tylko wiersze godzin, nie nagłówek).
+  const GRID_COLS = "56px repeat(7, 1fr)";
   return (
     <div
       style={{
@@ -391,34 +396,44 @@ function WeekView({
         overflow: "hidden",
       }}
     >
-      {/* Nagłówek dni */}
-      <div style={{ display: "grid", gridTemplateColumns: "56px repeat(7, 1fr)", borderBottom: `1px solid ${tokens.border}` }}>
-        <div />
-        {days.map((d, i) => {
-          const isToday = isSameDay(d, today);
-          return (
-            <div
-              key={i}
-              style={{
-                padding: "10px 6px",
-                textAlign: "center",
-                borderLeft: `1px solid ${tokens.border}`,
-                background: isToday ? tokens.accentSoft : "transparent",
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 700, color: tokens.muted, textTransform: "uppercase" }}>{WEEKDAYS[i]}</div>
-              <div style={{ fontSize: 15, fontWeight: isToday ? 800 : 600, color: isToday ? tokens.accent : tokens.text }}>
-                {d.getDate()}
+      <div className="selltic-scroll-y" style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
+        {/* Nagłówek dni — przyklejony do góry wewnątrz kontenera przewijania */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: GRID_COLS,
+            borderBottom: `1px solid ${tokens.border}`,
+            position: "sticky",
+            top: 0,
+            zIndex: 1,
+            background: tokens.card,
+          }}
+        >
+          <div />
+          {days.map((d, i) => {
+            const isToday = isSameDay(d, today);
+            return (
+              <div
+                key={i}
+                style={{
+                  padding: "10px 6px",
+                  textAlign: "center",
+                  borderLeft: `1px solid ${tokens.border}`,
+                  background: isToday ? tokens.accentSoft : tokens.card,
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 700, color: tokens.muted, textTransform: "uppercase" }}>{WEEKDAYS[i]}</div>
+                <div style={{ fontSize: 15, fontWeight: isToday ? 800 : 600, color: isToday ? tokens.accent : tokens.text }}>
+                  {d.getDate()}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
 
-      {/* Oś godzin */}
-      <div style={{ maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
+        {/* Oś godzin */}
         {HOURS.map((h) => (
-          <div key={h} style={{ display: "grid", gridTemplateColumns: "56px repeat(7, 1fr)", borderBottom: `1px solid ${tokens.border}`, minHeight: 52 }}>
+          <div key={h} style={{ display: "grid", gridTemplateColumns: GRID_COLS, borderBottom: `1px solid ${tokens.border}`, minHeight: 52 }}>
             <div style={{ padding: "6px 8px", fontSize: 11, fontWeight: 600, color: tokens.muted, textAlign: "right" }}>
               {String(h).padStart(2, "0")}:00
             </div>
@@ -601,6 +616,7 @@ function DayPanel({
   onClose: () => void;
   onOpenContact: (id: string) => void;
 }) {
+  useScrollLock();
   const sorted = [...tasks].sort((a, b) => (a.due_at ?? "").localeCompare(b.due_at ?? ""));
   return (
     <>

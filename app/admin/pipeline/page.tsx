@@ -25,6 +25,7 @@ import { useSavedViews, type ColumnPref, type ViewConfig, type ViewMode } from "
 import { loadViewPrefs, saveViewPrefs, planHydration, type ViewMode as PrefViewMode } from "@/lib/viewPrefs";
 import { useEntityProperties, makeColumnResolver, toFieldDef, applyBulkProperty, appendPurposeHistory, type PropertyView } from "@/lib/properties";
 import { useToast } from "@/components/Toast";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const DEAL_BUILT_IN_FIELDS: FieldDef[] = [
   { key: "stage", label: "Etap", type: "stage" },
@@ -605,6 +606,7 @@ function formatRelativeDate(iso: string): string {
 
 // Ręczne dodanie deala: jeden samodzielny rekord (tożsamość + szansa sprzedaży).
 function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  useScrollLock();
   const supabase = useMemo(() => createClient(), []);
   const { stages } = useStages();
   const [name, setName] = useState("");

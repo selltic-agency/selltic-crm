@@ -17,7 +17,8 @@ import MIcon from "@/components/MaterialIcon";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { googleMapsUrl } from "@/lib/prospectStatus";
 import { attemptsFromProps, type ProspectSnapshot } from "@/lib/prospectHistory";
-import { logNoAnswer, markNotOurTarget, addProspectNote, revertProspect } from "@/lib/prospectActions";
+import { useScrollLock } from "@/lib/useScrollLock";
+import { logNoAnswer, markNotOurTarget, markNotInterested, addProspectNote, revertProspect } from "@/lib/prospectActions";
 import ProspectTimeline from "@/components/prospecting/ProspectTimeline";
 import ConvertModal, { type ConvertOptions } from "@/components/prospecting/ConvertModal";
 
@@ -54,6 +55,7 @@ export default function CallingMode({
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
   const isMobile = useIsMobile(900);
+  useScrollLock();
 
   // Kolejka jest migawką z momentu otwarcia, ale rekordy w niej podmieniamy
   // po każdej akcji (żeby historia/licznik prób były aktualne przy cofnięciu).
@@ -156,6 +158,22 @@ export default function CallingMode({
     toast.undo(`Nie nasz target (zarchiwizowano): ${current.name}`, () => undoFromToast(entry));
   }
 
+  async function handleNotInterested() {
+    if (!current || busy) return;
+    setBusy(true);
+    const res = await markNotInterested(supabase, current);
+    setBusy(false);
+    if (!res) {
+      toast.error("Nie udało się zaktualizować prospektu.");
+      return;
+    }
+    const entry: UndoEntry = { index, prospectId: current.id, label: "Niezainteresowany", snapshot: res.snapshot };
+    pushUndo(entry);
+    patchQueue(res.updated);
+    setIndex((i) => i + 1);
+    toast.undo(`Niezainteresowany (zarchiwizowano): ${current.name}`, () => undoFromToast(entry));
+  }
+
   async function handleConvert(opts: ConvertOptions) {
     if (!current) return null;
     setBusy(true);
@@ -196,6 +214,9 @@ export default function CallingMode({
       if (k === "n") {
         e.preventDefault();
         handleNoAnswer();
+      } else if (k === "i") {
+        e.preventDefault();
+        handleNotInterested();
       } else if (k === "t") {
         e.preventDefault();
         handleNotOurTarget();
@@ -430,12 +451,20 @@ export default function CallingMode({
             style={{ flex: isMobile ? "1 1 46%" : 1, background: tokens.warning, color: "#fff", border: "1px solid transparent" }}
           />
           <ActionButton
+            icon="thumb_down"
+            label="Niezainteresowany"
+            hint="I"
+            onClick={handleNotInterested}
+            disabled={busy}
+            style={{ flex: isMobile ? "1 1 46%" : 1, background: tokens.danger, color: "#fff", border: "1px solid transparent" }}
+          />
+          <ActionButton
             icon="block"
             label="Nie nasz target"
             hint="T"
             onClick={handleNotOurTarget}
             disabled={busy}
-            style={{ flex: isMobile ? "1 1 46%" : 1, background: tokens.danger, color: "#fff", border: "1px solid transparent" }}
+            style={{ flex: isMobile ? "1 1 46%" : 1, background: "#fff", color: tokens.text, border: `1px solid ${tokens.border}` }}
           />
           <ActionButton
             icon="check_circle"
@@ -443,7 +472,7 @@ export default function CallingMode({
             hint="K"
             onClick={() => setConvertOpen(true)}
             disabled={busy}
-            style={{ flex: isMobile ? "1 1 100%" : 1.5, background: tokens.success, color: "#fff", border: "1px solid transparent", fontWeight: 600 }}
+            style={{ flex: isMobile ? "1 1 100%" : 1.4, background: tokens.success, color: "#fff", border: "1px solid transparent", fontWeight: 600 }}
           />
         </div>
       )}

@@ -8,37 +8,54 @@
 import { tokens } from "@/lib/ui";
 import type { Prospect } from "@/lib/types";
 
-export type DisplayStatus = "new" | "no_answer" | "not_interested" | "converted";
+// Statusy widoczne w UI. „Niezainteresowany" i „Nie nasz target" to DWA różne
+// statusy — oba archiwizują prospekt i wyjmują go z kolejki, ale znaczą co
+// innego (klient odmówił vs zła grupa docelowa). Rozróżnienie żyje w
+// props.disposition (bez zmiany schematu bazy — kolumna prospecting_status dla
+// obu to 'not_interested').
+export type DisplayStatus = "new" | "no_answer" | "not_interested" | "not_target" | "converted";
 
 // Statusy zapisywalne ręcznie z UI (converted ma osobny, dedykowany endpoint).
-export type WritableDisplayStatus = "no_answer" | "not_interested";
+export type WritableDisplayStatus = "no_answer" | "not_interested" | "not_target";
 
-// Wartość zapisywana w kolumnie `prospecting_status` dla każdego zapisywalnego statusu UI.
+// Wartość props.disposition oznaczająca „Nie nasz target". Brak = zwykły
+// „Niezainteresowany" (albo status inny niż not_interested).
+export const DISPOSITION_NOT_TARGET = "not_target";
+
+// Mapowanie statusu UI na kolumnę `prospecting_status`. „Nie nasz target" i
+// „Niezainteresowany" dzielą wartość kolumny (rozróżnia je props.disposition).
 const DB_STATUS_FOR_WRITE: Record<WritableDisplayStatus, "contact_attempted" | "not_interested"> = {
   no_answer: "contact_attempted",
   not_interested: "not_interested",
+  not_target: "not_interested",
 };
 
 export function dbStatusForWrite(status: WritableDisplayStatus): "contact_attempted" | "not_interested" {
   return DB_STATUS_FOR_WRITE[status];
 }
 
+// Status wyłącznie z kolumny (bez rozróżnienia not_target — patrz displayStatusOf).
 export function toDisplayStatus(dbStatus: string): DisplayStatus {
   if (dbStatus === "new" || dbStatus === "not_interested" || dbStatus === "converted") return dbStatus;
   // "contact_attempted" i wszelkie inne, nierozpoznane wartości.
   return "no_answer";
 }
 
-export const DISPLAY_STATUSES: DisplayStatus[] = ["new", "no_answer", "not_interested", "converted"];
+// Pełny status UI prospektu — uwzględnia props.disposition, więc rozróżnia
+// „Nie nasz target" od „Niezainteresowany". Używaj tego wszędzie w UI.
+export function displayStatusOf(p: Prospect): DisplayStatus {
+  const base = toDisplayStatus(p.prospecting_status);
+  if (base === "not_interested" && p.props?.disposition === DISPOSITION_NOT_TARGET) return "not_target";
+  return base;
+}
 
-// „Nie nasz target" zastąpił dawnego „Niezainteresowanego" — w bazie to wciąż
-// wartość 'not_interested' (zero-loss: stare dane mapują się 1:1 na nowy
-// status), ale semantyka jest szersza: prospekt jest archiwizowany i znika
-// z kolejki dzwonienia.
+export const DISPLAY_STATUSES: DisplayStatus[] = ["new", "no_answer", "not_interested", "not_target", "converted"];
+
 export const STATUS_LABEL: Record<DisplayStatus, string> = {
   new: "Nowy",
   no_answer: "Nie odbiera",
-  not_interested: "Nie nasz target",
+  not_interested: "Niezainteresowany",
+  not_target: "Nie nasz target",
   converted: "Skonwertowany",
 };
 
@@ -46,6 +63,7 @@ export const STATUS_COLOR: Record<DisplayStatus, string> = {
   new: tokens.accent,
   no_answer: tokens.warning,
   not_interested: tokens.danger,
+  not_target: tokens.muted,
   converted: tokens.success,
 };
 

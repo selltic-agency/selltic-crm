@@ -417,6 +417,22 @@ export default function ProspectingPage() {
     [toast, handleUpdated]
   );
 
+  // Usunięcie pojedynczego celu kontaktu z bieżącego zbioru (kolumna purposes).
+  // Historia w prospect_purposes jest append-only i pozostaje nietknięta.
+  const removePurpose = useCallback(
+    async (p: Prospect, purposeKey: string) => {
+      const next = (p.purposes ?? []).filter((k) => k !== purposeKey);
+      const { error } = await supabase.from("prospects").update({ purposes: next }).eq("id", p.id);
+      if (error) {
+        toast.error("Nie udało się usunąć celu kontaktu.");
+        return;
+      }
+      handleUpdated({ ...p, purposes: next });
+      toast.success("Usunięto cel kontaktu.");
+    },
+    [supabase, toast, handleUpdated]
+  );
+
   const archiveProspects = useCallback(
     async (ids: string[]) => {
       if (ids.length === 0) return;
@@ -564,6 +580,7 @@ export default function ProspectingPage() {
           onUpdated={handleUpdated}
           onSetCategory={setCategory}
           onAddPurpose={addPurpose}
+          onRemovePurpose={removePurpose}
           onSaveProps={async (pr, props) => {
             const { error } = await supabase.from("prospects").update({ props }).eq("id", pr.id);
             if (error) {

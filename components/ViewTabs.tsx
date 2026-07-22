@@ -11,7 +11,8 @@
 //     stan zapisać jako nowy widok.
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { tokens, inputStyle, primaryButton, menuPanel } from "@/lib/ui";
 import type { SavedView, SavedViewStorage } from "@/lib/savedViews";
 import MIcon from "@/components/MaterialIcon";
@@ -115,19 +116,26 @@ export default function ViewTabs({
                 active={isActive}
                 onClick={() => onSelectView(v.id)}
                 label={v.name}
+                // Menu widoku (zmiana nazwy / duplikacja / kolejność / usuń)
+                // tylko na AKTYWNEJ zakładce — mniej wizualnego szumu, a samo
+                // menu renderujemy przez portal (niżej), by nie przycinał go
+                // poziomy pasek przewijania zakładek.
                 trailing={
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Menu widoku"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMenuFor(menuFor === v.id ? null : v.id);
-                    }}
-                    style={{ display: "flex", padding: 1, borderRadius: 4, marginLeft: 2, color: tokens.muted, opacity: isActive ? 1 : 0.7 }}
-                  >
-                    <MIcon name="more_horiz" size={14} />
-                  </span>
+                  isActive ? (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Menu widoku"
+                      data-viewmenu-open={menuFor === v.id ? "1" : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuFor(menuFor === v.id ? null : v.id);
+                      }}
+                      style={{ display: "flex", padding: 1, borderRadius: 4, marginLeft: 2, color: tokens.muted }}
+                    >
+                      <MIcon name="expand_more" size={15} />
+                    </span>
+                  ) : null
                 }
               />
               {menuFor === v.id && (
@@ -153,7 +161,9 @@ export default function ViewTabs({
                     setMenuFor(null);
                   }}
                   onDelete={() => {
-                    onDelete(v.id);
+                    if (window.confirm(`Usunąć widok „${v.name}"? Tej operacji nie można cofnąć.`)) {
+                      onDelete(v.id);
+                    }
                     setMenuFor(null);
                   }}
                 />
@@ -301,6 +311,9 @@ function Tab({
   );
 }
 
+// Menu widoku renderowane PRZEZ PORTAL do <body> i pozycjonowane „fixed" —
+// dzięki temu nie przycina go poziomy pasek przewijania zakładek (wcześniej
+// menu było niewidoczne i nie dało się usuwać widoków).
 function ViewMenu({
   canMoveLeft,
   canMoveRight,
@@ -321,26 +334,56 @@ function ViewMenu({
   onDelete: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [onClose]);
 
-  return (
+  // Kotwica: aktywny trigger „⋯" oznaczony atrybutem data-viewmenu-open.
+  useLayoutEffect(() => {
+    const trigger = document.querySelector('[data-viewmenu-open="1"]') as HTMLElement | null;
+    const r = trigger?.getBoundingClientRect();
+    if (r) {
+      const width = 176;
+      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+      setPos({ top: r.bottom + 6, left });
+    }
+  }, []);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
       ref={ref}
-      style={{ ...menuPanel, position: "absolute", top: "100%", right: 0, marginTop: 4, zIndex: 40, minWidth: 168 }}
+      style={{
+        ...menuPanel,
+        position: "fixed",
+        top: pos?.top ?? -9999,
+        left: pos?.left ?? -9999,
+        zIndex: 120,
+        minWidth: 176,
+        visibility: pos ? "visible" : "hidden",
+      }}
     >
       <MenuItem icon="edit" label="Zmień nazwę" onClick={onRename} />
       <MenuItem icon="content_copy" label="Duplikuj" onClick={onDuplicate} />
       {canMoveLeft && <MenuItem icon="arrow_back" label="Przesuń w lewo" onClick={onMoveLeft} />}
       {canMoveRight && <MenuItem icon="arrow_forward" label="Przesuń w prawo" onClick={onMoveRight} />}
-      <MenuItem icon="delete" label="Usuń" danger onClick={onDelete} />
-    </div>
+      <MenuItem icon="delete" label="Usuń widok" danger onClick={onDelete} />
+    </div>,
+    document.body
   );
 }
 

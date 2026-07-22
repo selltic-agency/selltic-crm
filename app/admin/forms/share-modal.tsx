@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { tokens } from "@/lib/ui";
 import { publicFormUrl } from "@/lib/publicUrl";
 import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 type Props = {
   slug: string;
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export default function ShareModal({ slug, title, onClose }: Props) {
+  useScrollLock();
   // origin znamy dopiero w przeglądarce.
   const [origin, setOrigin] = useState("");
   const [copied, setCopied] = useState<"link" | "embed" | null>(null);

@@ -193,26 +193,28 @@ export default function DashboardPage() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {l.name || "Bez nazwy"}
                       </div>
-                      <div style={{ fontSize: 12, color: tokens.muted }}>
+                      <div style={{ fontSize: 12, color: tokens.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {l.company || "—"}
                       </div>
                     </div>
                     <span
                       style={{
-                        fontSize: 12,
+                        fontSize: 11.5,
                         fontWeight: 600,
-                        padding: "3px 10px",
+                        padding: "2px 9px",
                         borderRadius: 999,
                         background: `${sm.color}1A`,
                         color: sm.color,
+                        flexShrink: 0,
+                        whiteSpace: "nowrap",
                       }}
                     >
                       {sm.label}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, minWidth: 70, textAlign: "right" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 62, textAlign: "right", flexShrink: 0 }}>
                       {formatPLN(l.value)}
                     </span>
                   </button>
@@ -288,14 +290,21 @@ export default function DashboardPage() {
                     >
                       <MIcon name={iconName} size={15} />
                     </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: 13.5,
+                          lineHeight: 1.4,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
                         {a.body || "—"}
-                        {a.deals?.name ? (
-                          <span style={{ color: tokens.muted }}> · {a.deals.name}</span>
-                        ) : null}
+                        {a.deals?.name ? <span style={{ color: tokens.muted }}> · {a.deals.name}</span> : null}
                       </div>
-                      <div style={{ fontSize: 12, color: tokens.muted }}>
+                      <div style={{ fontSize: 12, color: tokens.muted, marginTop: 2 }}>
                         {formatDateTime(a.created_at)}
                       </div>
                     </div>

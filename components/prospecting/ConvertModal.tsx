@@ -11,6 +11,7 @@ import type { Prospect } from "@/lib/types";
 import { useStages } from "@/lib/stages";
 import { useEntityProperties } from "@/lib/properties";
 import { CONTACT_SOURCE_KEY, CONTACT_SOURCE_SEED } from "@/lib/contactSource";
+import { useScrollLock } from "@/lib/useScrollLock";
 import MIcon from "@/components/MaterialIcon";
 
 export type ConvertOptions = {
@@ -32,6 +33,7 @@ export default function ConvertModal({
 }) {
   // Supabase client trzymany na wypadek przyszłych rozszerzeń walidacji.
   useMemo(() => createClient(), []);
+  useScrollLock();
   const { stages } = useStages();
   const { views } = useEntityProperties("deals");
 

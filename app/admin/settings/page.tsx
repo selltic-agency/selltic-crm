@@ -24,6 +24,7 @@ import { ensureContactSourceDef } from "@/lib/contactSource";
 import { EmailTemplatesTab } from "@/components/email/EmailTemplatesTab";
 import { SmsTemplatesTab } from "@/components/sms/SmsTemplatesTab";
 import MIcon from "@/components/MaterialIcon";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 type Tab =
   | "general"
@@ -531,6 +532,7 @@ function DeleteStageDialog({
   onCancel: () => void;
   onConfirm: (replacementKey: string) => void;
 }) {
+  useScrollLock();
   const [count, setCount] = useState<number | null>(null);
   const [replacement, setReplacement] = useState<string>(others[0]?.key ?? "");
   const [busy, setBusy] = useState(false);
@@ -1902,10 +1904,6 @@ function IntegrationsTab() {
 
   return (
     <Section>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <MIcon name="mail" size={16} color={tokens.accent} />
-        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Wysyłka e-mail (Resend)</h3>
-      </div>
       <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px", lineHeight: 1.6 }}>
         Wszystkie maile z systemu — automatyczne „dziękujemy”, powiadomienia o leadach oraz wiadomości
         wysyłane ręcznie z karty leada (szablony) — wychodzą przez{" "}
@@ -2173,10 +2171,6 @@ function SmsGatewayTab() {
 
   return (
     <Section>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <MIcon name="smartphone" size={16} color={tokens.accent} />
-        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Bramka SMS (SMSAPI)</h3>
-      </div>
       <p style={{ fontSize: 13, color: tokens.muted, margin: "0 0 16px", lineHeight: 1.6 }}>
         Wszystkie SMS-y — potwierdzenia z formularzy, przypomnienia o spotkaniach i wiadomości ręczne z karty
         leada — wychodzą przez{" "}
