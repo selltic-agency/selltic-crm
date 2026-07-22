@@ -21,6 +21,7 @@ import { useClassification } from "@/lib/classification";
 import { useToast } from "@/components/Toast";
 import { PROPERTY_TYPES, TYPE_LABEL, hasOptions, normalizeOptions, propLabel, slugify } from "@/lib/properties";
 import { ensureContactSourceDef } from "@/lib/contactSource";
+import PageHeader from "@/components/PageHeader";
 import { EmailTemplatesTab } from "@/components/email/EmailTemplatesTab";
 import { SmsTemplatesTab } from "@/components/sms/SmsTemplatesTab";
 import MIcon from "@/components/MaterialIcon";
@@ -118,10 +119,10 @@ export default function SettingsPage() {
 
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: "0 0 4px" }}>Ustawienia</h1>
-      <p style={{ fontSize: 13.5, color: tokens.muted, margin: "0 0 20px" }}>
-        Konfiguracja CRM, integracji i automatyzacji. Zmiany zapisują się per sekcja.
-      </p>
+      <PageHeader
+        title="Ustawienia"
+        description="Konfiguracja CRM, integracji i automatyzacji. Zmiany zapisują się per sekcja."
+      />
 
       {isMobile ? (
         // ── Mobile: przewijalny poziomo rząd pigułek (nie rozpycha strony) ──
@@ -202,11 +203,11 @@ export default function SettingsPage() {
 
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 11, display: "grid", placeItems: "center", background: tokens.accentSoft, color: tokens.accent, flexShrink: 0 }}>
+              <div style={{ width: 38, height: 38, borderRadius: tokens.radius, display: "grid", placeItems: "center", background: tokens.accentSoft, color: tokens.accent, flexShrink: 0 }}>
                 <MIcon name={active.icon} size={19} />
               </div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 16.5, fontWeight: 700, lineHeight: 1.2 }}>{active.label}</div>
+                <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2 }}>{active.label}</div>
                 {active.hint && <div style={{ fontSize: 12.5, color: tokens.muted }}>{active.hint}</div>}
               </div>
             </div>
@@ -323,7 +324,7 @@ function StagesTab() {
       owner: user.id,
       key,
       label: "Nowy etap",
-      color: "#6C5CE7",
+      color: tokens.accent,
       position,
       is_won: false,
       is_lost: false,
@@ -571,7 +572,7 @@ function DeleteStageDialog({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Usuń etap „{stage.label}”</h2>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Usuń etap „{stage.label}”</h2>
           <button onClick={onCancel} aria-label="Zamknij" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}>
             <MIcon name="close" size={15} color={tokens.muted} />
           </button>
@@ -1230,7 +1231,7 @@ function PropertiesTab() {
       {showBuiltin && (
         <div style={{ display: "grid", gap: 4, marginBottom: 16 }}>
           {BUILTIN_PROPS.map((b) => (
-            <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", border: `1px solid ${tokens.borderSoft}`, borderRadius: 8, background: "#FCFCFD" }}>
+            <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", border: `1px solid ${tokens.borderSoft}`, borderRadius: 8, background: tokens.surface }}>
               <MIcon name="lock" size={13} color={tokens.muted} />
               <span style={{ flex: 1, fontSize: 13, fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.label}</span>
               <span style={{ fontSize: 11.5, color: tokens.muted, flexShrink: 0 }}>{b.typeLabel}</span>
@@ -1476,7 +1477,7 @@ function OptionsEditor({
   onReorderKeys?: (keys: string[]) => void;
 }) {
   const [newLabel, setNewLabel] = useState("");
-  const [newColor, setNewColor] = useState("#6C5CE7");
+  const [newColor, setNewColor] = useState<string>(tokens.accent);
 
   function add() {
     const label = newLabel.trim();
@@ -1545,7 +1546,7 @@ function OptionRow({ option, onEdit, onRemove }: { option: PropertyOption; onEdi
       <button onPointerDown={(e) => controls.start(e)} aria-label="Przeciągnij" style={{ border: "none", background: "none", cursor: "grab", padding: 0, color: tokens.muted, touchAction: "none", flexShrink: 0 }}>
         <MIcon name="drag_indicator" size={14} />
       </button>
-      <input type="color" value={option.color ?? "#6C5CE7"} onChange={(e) => onEdit(option.key, { color: e.target.value })} style={{ width: 30, height: 30, padding: 0, border: `1px solid ${tokens.border}`, borderRadius: 7, cursor: "pointer", flexShrink: 0 }} />
+      <input type="color" value={option.color ?? tokens.accent} onChange={(e) => onEdit(option.key, { color: e.target.value })} style={{ width: 30, height: 30, padding: 0, border: `1px solid ${tokens.border}`, borderRadius: 7, cursor: "pointer", flexShrink: 0 }} />
       <input
         value={label}
         onChange={(e) => setLabel(e.target.value)}
@@ -1748,7 +1749,7 @@ function ToggleRow({
           border: "none",
           cursor: "pointer",
           padding: 3,
-          background: checked ? tokens.accent : "#D5D9E2",
+          background: checked ? tokens.accent : tokens.border,
           transition: `background .2s ${tokens.ease}`,
           flexShrink: 0,
         }}

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { tokens, formatDateTime } from "@/lib/ui";
+import { tokens, formatDateTime, pageTitle } from "@/lib/ui";
 import type { Assignee, Task } from "@/lib/types";
 import MIcon from "@/components/MaterialIcon";
 import { useScrollLock } from "@/lib/useScrollLock";
@@ -18,8 +18,8 @@ const MONTH_NAMES = [
 ];
 
 const ASSIGNEE_COLOR: Record<Assignee, string> = {
-  dominik: "#6C5CE7",
-  kuba: "#1A73E7",
+  dominik: tokens.accent,
+  kuba: tokens.info,
 };
 const ASSIGNEE_LABEL: Record<Assignee, string> = {
   dominik: "Dominik",
@@ -184,7 +184,7 @@ export default function CalendarPage() {
           gap: 12,
         }}
       >
-        <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", margin: 0 }}>Kalendarz</h1>
+        <h1 style={pageTitle}>Kalendarz</h1>
 
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <ViewSwitcher value={view} onChange={setView} />

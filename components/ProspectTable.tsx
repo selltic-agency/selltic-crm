@@ -199,7 +199,7 @@ export default function ProspectTable({
         <div style={{ overflowX: "auto" }} className="selltic-scroll-x">
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100 }}>
             <thead>
-              <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: "#FAFAFB" }}>
+              <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.surface }}>
                 <th style={{ ...thStyle, width: 40 }} />
                 {effectiveColumns.map((col) => (
                   <th
@@ -231,7 +231,7 @@ export default function ProspectTable({
                       transition: "background 0.12s ease",
                       background: isSelected ? tokens.accentSoft : "transparent",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : "#FAFAFB")}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : tokens.surface)}
                     onMouseLeave={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : "transparent")}
                   >
                     <td style={{ ...tdStyle, width: 40, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>

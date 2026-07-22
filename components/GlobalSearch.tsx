@@ -232,9 +232,9 @@ function KindBadge({ kind }: { kind: Kind }) {
         textTransform: "uppercase",
         letterSpacing: 0.3,
         padding: "2px 6px",
-        borderRadius: 5,
-        background: isDeal ? tokens.accentSoft : "rgba(26,115,231,0.10)",
-        color: isDeal ? tokens.accent : "#1A73E7",
+        borderRadius: tokens.radiusSm,
+        background: isDeal ? tokens.accentSoft : tokens.infoSoft,
+        color: isDeal ? tokens.accent : tokens.info,
       }}
     >
       {isDeal ? "Deal" : "Prospekt"}

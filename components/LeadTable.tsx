@@ -136,7 +136,7 @@ export default function LeadTable({ leads, onRowClick, sort: sortProp, onSortCha
         <div style={{ overflowX: "auto" }} className="selltic-scroll-x">
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
             <thead>
-              <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: "#FAFAFB" }}>
+              <tr style={{ borderBottom: `1px solid ${tokens.border}`, background: tokens.surface }}>
                 {showSelection && <th style={{ ...thStyle, width: 40 }} />}
                 {effectiveColumns.map((col) => (
                   <th key={col.key} onClick={() => handleSort(col.key)} style={{ ...thStyle, cursor: "pointer", width: col.width }}>
@@ -158,7 +158,7 @@ export default function LeadTable({ leads, onRowClick, sort: sortProp, onSortCha
                     key={l.id}
                     onClick={() => onRowClick(l.id)}
                     style={{ borderBottom: `1px solid ${tokens.borderSoft}`, cursor: "pointer", transition: "background 0.12s ease", background: isSelected ? tokens.accentSoft : "transparent" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : "#FAFAFB")}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : tokens.surface)}
                     onMouseLeave={(e) => (e.currentTarget.style.background = isSelected ? tokens.accentSoft : "transparent")}
                   >
                     {showSelection && (
@@ -263,7 +263,7 @@ function renderCell(
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
         <span style={{ fontWeight: 600 }}>{d.name || "—"}</span>
         {d.incomplete && (
-          <span title="Niekompletny lead (porzucony formularz)" style={{ fontSize: 10, fontWeight: 600, padding: "0 6px", borderRadius: 5, background: "#FDF1E3", color: tokens.warning, lineHeight: "16px" }}>
+          <span title="Niekompletny lead (porzucony formularz)" style={{ fontSize: 10, fontWeight: 600, padding: "0 6px", borderRadius: tokens.radiusSm, background: tokens.warningSoft, color: tokens.warning, lineHeight: "16px" }}>
             NIEKOMPLETNY
           </span>
         )}

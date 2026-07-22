@@ -251,7 +251,7 @@ export default function FormsPage() {
         // a kontener zyskiwał pionowy pasek i puste białe pudełko. Widok kart
         // (compact) obsługuje węższe obszary, więc na desktopie tabela zawsze się
         // mieści i poziome przewijanie nie jest już potrzebne.
-        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: 16, overflow: "visible" }}>
+        <div style={{ background: tokens.card, border: `1px solid ${tokens.border}`, borderRadius: tokens.radius, overflow: "visible" }}>
           <div style={{ overflow: "visible" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
               <thead>
@@ -304,7 +304,7 @@ function StatusBadge({ r }: { r: MetricsRow }) {
   const archived = !!r.archived_at;
   const published = r.status === "published";
   const label = archived ? "Archiwum" : published ? "Opublikowany" : "Szkic";
-  const bg = archived ? tokens.bg : published ? "#E7F7EE" : tokens.bg;
+  const bg = archived ? tokens.bg : published ? tokens.successSoft : tokens.bg;
   const color = archived ? tokens.muted : published ? tokens.success : tokens.muted;
   return (
     <span style={{ fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 999, background: bg, color }}>
@@ -380,7 +380,7 @@ function MobileCard({
       style={{
         background: tokens.card,
         border: `1px solid ${tokens.border}`,
-        borderRadius: 14,
+        borderRadius: tokens.radius,
         padding: 14,
         ...(archived ? { opacity: 0.7 } : {}),
       }}

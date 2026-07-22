@@ -120,7 +120,7 @@ export function SendEmailModal({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <MIcon name="mail" size={17} color={tokens.accent} />
-            <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Wyślij e-mail</h2>
+            <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Wyślij e-mail</h2>
           </div>
           <button
             onClick={onClose}

@@ -81,7 +81,7 @@ function Illustration({ small }: { small?: boolean }) {
         height: h,
         borderRadius: 10,
         border: `1.5px solid ${tokens.border}`,
-        background: "#FCFCFD",
+        background: tokens.surface,
         boxShadow: "0 1px 2px rgba(15,18,28,0.04)",
         display: "flex",
         flexDirection: "column",

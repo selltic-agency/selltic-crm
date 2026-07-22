@@ -317,7 +317,7 @@ export default function CallingMode({
               >
                 {/* Nazwa + kategoria/branża */}
                 <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 19, fontWeight: 600, letterSpacing: "-0.01em" }}>{current.name}</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em" }}>{current.name}</div>
                   <div style={{ fontSize: 12.5, color: tokens.muted, marginTop: 3 }}>
                     {[current.industry, current.city].filter(Boolean).join(" · ") || "—"}
                   </div>
@@ -337,7 +337,7 @@ export default function CallingMode({
                       {current.phone}
                     </a>
                   ) : (
-                    <div style={{ fontSize: 20, fontWeight: 600, color: tokens.muted, margin: "18px 0 4px" }}>Brak numeru</div>
+                    <div style={{ fontSize: 18, fontWeight: 600, color: tokens.muted, margin: "18px 0 4px" }}>Brak numeru</div>
                   )}
                   {attempts > 0 && (
                     <div style={{ fontSize: 12, fontWeight: 500, color: tokens.warning }}>
@@ -522,7 +522,7 @@ function ActionButton({
       <kbd
         style={{
           fontFamily: "inherit",
-          fontSize: 10.5,
+          fontSize: 11,
           fontWeight: 600,
           padding: "1px 5px",
           borderRadius: 4,

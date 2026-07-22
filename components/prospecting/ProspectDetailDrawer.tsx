@@ -200,7 +200,7 @@ export default function ProspectDetailDrawer({
           }}
         >
           <div style={{ minWidth: 0, flex: 1 }}>
-            <h2 style={{ fontSize: 15.5, fontWeight: 600, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {p.name}
             </h2>
             <div style={{ fontSize: 12, color: tokens.muted, marginTop: 1 }}>
@@ -229,7 +229,7 @@ export default function ProspectDetailDrawer({
               borderBottom: isMobile ? `1px solid ${tokens.borderSoft}` : "none",
               overflowY: "auto",
               padding: 16,
-              background: "#FCFCFD",
+              background: tokens.surface,
             }}
           >
             {/* Aktualny status (tylko wyświetlanie) — oddzielony od akcji */}

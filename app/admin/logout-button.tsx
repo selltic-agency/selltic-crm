@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ghostButton } from "@/lib/ui";
 
 export default function LogoutButton() {
   const router = useRouter();
@@ -21,15 +22,7 @@ export default function LogoutButton() {
     <button
       onClick={logout}
       disabled={loading}
-      style={{
-        padding: "8px 14px",
-        background: "#fff",
-        border: "1px solid #d1d5db",
-        borderRadius: 8,
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: loading ? "default" : "pointer",
-      }}
+      style={{ ...ghostButton, cursor: loading ? "default" : "pointer", opacity: loading ? 0.6 : 1 }}
     >
       {loading ? "Wylogowywanie…" : "Wyloguj"}
     </button>

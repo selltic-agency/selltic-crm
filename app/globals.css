@@ -189,6 +189,19 @@ select {
   }
 }
 
+/* Kanoniczny wzorzec ładowania (skeleton) — JEDEN w całym panelu. Delikatne
+   pulsowanie przezroczystości na powierzchni tokens.bg. Używany przez
+   StatTile, skeletony tabel/wykresów i inne placeholdery. */
+@keyframes selltic-skeleton {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* Delikatny „puls” — sygnalizuje przybycie nowego leada na żywo. */
 @keyframes selltic-pulse {
   0% {
@@ -226,5 +239,9 @@ select {
   }
   .selltic-spin {
     animation: none;
+  }
+  *[style*="selltic-skeleton"] {
+    animation: none !important;
+    opacity: 0.6 !important;
   }
 }

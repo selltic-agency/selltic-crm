@@ -438,7 +438,7 @@ function NavItem({
         fontSize: 13,
         fontWeight: active ? 600 : 500,
         color: active ? tokens.text : tokens.muted,
-        background: active ? tokens.bg : hover ? "#FAFAFB" : "transparent",
+        background: active ? tokens.bg : hover ? tokens.surface : "transparent",
         transition: `background .15s ${tokens.ease}`,
         outline: "none",
       }}

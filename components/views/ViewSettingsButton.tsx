@@ -165,7 +165,7 @@ export default function ViewSettingsButton({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, padding: "2px 4px 6px" }}>
+    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: tokens.muted, padding: "2px 4px 6px" }}>
       {children}
     </div>
   );
