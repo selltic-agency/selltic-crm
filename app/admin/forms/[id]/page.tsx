@@ -618,7 +618,7 @@ export default function FormEditorPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 12 }}>
           {(
             [
-              ["steps", "Kroki"],
+              ["steps", "Strony"],
               ["editor", "Edytor"],
               ["preview", "Podgląd"],
             ] as ["steps" | "editor" | "preview", string][]
@@ -682,8 +682,8 @@ export default function FormEditorPage() {
             </div>
           )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={paneTitle}>Kroki i pytania</span>
-            <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj krok">
+            <span style={paneTitle}>Strony i pytania</span>
+            <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj stronę">
               <MIcon name="add" size={16} color={tokens.accent} />
             </button>
           </div>
@@ -1339,7 +1339,7 @@ function StepEditor({
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <span style={paneTitle}>
-        {step.type === "welcome" ? "Powitanie" : step.type === "statement" ? "Komunikat" : step.type === "end" ? "Zakończenie" : "Krok z polami"}
+        {step.type === "welcome" ? "Powitanie" : step.type === "statement" ? "Komunikat" : step.type === "end" ? "Zakończenie" : "Strona (może mieć wiele pytań)"}
       </span>
 
       {showHeading && (
@@ -1368,7 +1368,7 @@ function StepEditor({
       {input && <FieldsEditor step={step} steps={steps} onPatch={onPatch} />}
 
       {step.type !== "end" && (
-        <Field label="Domyślny następny krok">
+        <Field label="Domyślnie następna strona">
           <NextSelect value={step.next} steps={steps} selfId={step.id} onChange={(v) => onPatch({ next: v })} />
         </Field>
       )}
@@ -2146,7 +2146,7 @@ function ValidationEditor({ field, onPatch }: { field: FormField; onPatch: (patc
 function NextSelect({ value, steps, selfId, onChange }: { value: string; steps: Step[]; selfId: string; onChange: (v: string) => void }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-      <option value={NEXT}>→ Następny krok</option>
+      <option value={NEXT}>→ Następna strona</option>
       {steps
         .filter((s) => s.id !== selfId)
         .map((s) => (
