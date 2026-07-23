@@ -25,18 +25,16 @@ import {
   NEXT,
   SUBMIT,
   FONTS,
-  VALIDATION_PRESETS,
+  PAGE_TYPES,
   blankStep,
   blankField,
   newStepId,
-  isChoice,
   isTextInput,
   isInputStep,
   isContainerStep,
   stepFields,
   stepIssues,
   stepTypeLabel,
-  detectPreset,
   hasValidationRules,
   defaultThankYouEmail,
   randomSlug,
@@ -67,7 +65,7 @@ const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif
 
 const TYPE_ICON: Record<string, string> = {
   welcome: "waving_hand",
-  question: "layers",
+  question: "description",
   short_text: "text_fields",
   long_text: "notes",
   email: "alternate_email",
@@ -82,7 +80,7 @@ const TYPE_ICON: Record<string, string> = {
 function stepIcon(step: Step): string {
   if (step.type === "question") {
     const f = stepFields(step)[0];
-    return (f && TYPE_ICON[f.type]) || "layers";
+    return (f && TYPE_ICON[f.type]) || "description";
   }
   return TYPE_ICON[step.type] || "text_fields";
 }
@@ -335,10 +333,20 @@ export default function FormEditorPage() {
     step.id = newStepId();
     setSchema((s) => {
       if (!s) return s;
-      const endIdx = s.steps.findIndex((st) => st.type === "end");
       const steps = [...s.steps];
-      if (endIdx === -1) steps.push(step);
-      else steps.splice(endIdx, 0, step);
+      if (type === "welcome") {
+        // Powitanie zawsze na początku (za ewentualnym istniejącym powitaniem).
+        const after = steps.filter((st) => st.type === "welcome").length;
+        steps.splice(after, 0, step);
+      } else if (type === "end") {
+        // Kolejne zakończenie doklejamy na sam koniec.
+        steps.push(step);
+      } else {
+        // Zwykłą stronę wstawiamy przed pierwszym ekranem końcowym.
+        const endIdx = steps.findIndex((st) => st.type === "end");
+        if (endIdx === -1) steps.push(step);
+        else steps.splice(endIdx, 0, step);
+      }
       return { ...s, steps };
     });
     setActiveId(step.id);
@@ -678,15 +686,10 @@ export default function FormEditorPage() {
               <span style={{ width: 3, background: tokens.border, borderRadius: 2 }} />
             </div>
           )}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={paneTitle}>Strony</span>
-            <button onClick={() => addStep("question")} style={iconBtn} aria-label="Dodaj stronę" title="Dodaj stronę">
-              <MIcon name="add" size={16} color={tokens.accent} />
-            </button>
+            <AddPageMenu onAdd={addStep} />
           </div>
-          <p style={{ fontSize: 11.5, color: tokens.muted, margin: "0 0 10px" }}>
-            Strona = jeden ekran formularza. Pola (pytania) dodajesz w środkowej kolumnie.
-          </p>
 
           {/* Lista kroków — drag & drop (item 2). Uchwyt „⠿” po lewej inicjuje
               przeciąganie; kliknięcie treści zaznacza krok. Strzałki / duplikuj
@@ -727,7 +730,7 @@ export default function FormEditorPage() {
             ...(isMobile ? { display: mobilePane === "editor" ? "block" : "none", flex: 1, minHeight: 0 } : {}),
           }}
         >
-          <StepEditor step={active} steps={schema.steps} onPatch={(patch) => patchStep(active.id, patch)} formId={id} />
+          <StepEditor step={active} steps={schema.steps} onPatch={(patch) => patchStep(active.id, patch)} />
         </div>
 
         {/* Prawy: podgląd */}
@@ -1034,7 +1037,7 @@ function UstawieniaView({
     >
       <div style={{ ...pane, display: "flex", flexDirection: "column", maxHeight: isMobile ? undefined : "calc(100vh - 200px)" }}>
         <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-          <TabButton active={tab === "brand"} onClick={() => setTab("brand")} icon="image" label="Marka" />
+          <TabButton active={tab === "brand"} onClick={() => setTab("brand")} icon="image" label="Branding" />
           <TabButton active={tab === "design"} onClick={() => setTab("design")} icon="palette" label="Wygląd i zachowanie" />
         </div>
 
@@ -1063,6 +1066,87 @@ function UstawieniaView({
           <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
             <FormRenderer form={draftSchema} preview />
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Menu „Dodaj stronę" (item 1.3): powitanie · strona · zakończenie ─────── */
+function AddPageMenu({ onAdd }: { onAdd: (type: StepType) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen((o) => !o)} style={iconBtn} aria-label="Dodaj stronę" title="Dodaj stronę">
+        <MIcon name="add" size={16} color={tokens.accent} />
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: 42,
+            right: 0,
+            zIndex: 20,
+            background: "#fff",
+            border: `1px solid ${tokens.border}`,
+            borderRadius: 12,
+            boxShadow: tokens.shadowMenu,
+            padding: 6,
+            width: 232,
+          }}
+        >
+          <div style={{ ...paneTitle, padding: "6px 8px 4px" }}>Dodaj stronę</div>
+          {PAGE_TYPES.map((p) => (
+            <button
+              key={p.type}
+              onClick={() => {
+                onAdd(p.type);
+                setOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                width: "100%",
+                padding: "9px 10px",
+                border: "none",
+                background: "none",
+                borderRadius: 9,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = tokens.bg)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+            >
+              <span
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  background: tokens.accentSoft,
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <MIcon name={p.icon} size={16} color={tokens.accent} />
+              </span>
+              <span style={{ display: "grid", gap: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: tokens.text }}>{p.label}</span>
+                <span style={{ fontSize: 12, color: tokens.muted, lineHeight: 1.3 }}>{p.hint}</span>
+              </span>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -1272,61 +1356,114 @@ function ViewTab({
   );
 }
 
-/* ── Edytor pojedynczego kroku ──────────────────────────────── */
+/* ── Edytor pojedynczej strony ──────────────────────────────────────────────
+   Uproszczony (item 2): oddzielone sekcje — treść strony (nagłówek + opis),
+   pola (pytania) oraz przycisk. Bez walidacji regex i bez „domyślnej następnej
+   strony" (kolejność wynika z listy stron). */
 function StepEditor({
   step,
   steps,
   onPatch,
-  formId,
 }: {
   step: Step;
   steps: Step[];
   onPatch: (patch: Partial<Step>) => void;
-  formId: string;
 }) {
   const input = isInputStep(step);
   const container = isContainerStep(step);
-  // Nagłówek ekranu pokazujemy dla ekranów nie-wejściowych (powitanie/komunikat/
-  // zakończenie) oraz dla kontenerów wielopolowych. Dla starego, jedno-polowego
-  // kroku nagłówkiem jest etykieta jego jedynego pola (edytowana niżej) —
-  // osobne pole nagłówka byłoby zdublowane.
+  // Nagłówek strony pokazujemy dla ekranów nie-wejściowych (powitanie/komunikat/
+  // zakończenie) oraz dla stron wielopolowych. Dla starego, jedno-polowego kroku
+  // nagłówkiem jest etykieta jego jedynego pola — osobne pole byłoby zdublowane.
   const showHeading = !input || container;
+  const pageLabel = stepTypeLabel(step.type);
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <span style={paneTitle}>
-        {step.type === "welcome" ? "Powitanie" : step.type === "statement" ? "Komunikat" : step.type === "end" ? "Zakończenie" : "Strona (może mieć wiele pytań)"}
-      </span>
+    <div style={{ display: "grid", gap: 16 }}>
+      {/* Nagłówek edytora: typ strony (spójny z listą stron). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 30, height: 30, borderRadius: 8, background: tokens.accentSoft, display: "grid", placeItems: "center" }}>
+          <MIcon name={stepIcon(step)} size={16} color={tokens.accent} />
+        </span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: tokens.text }}>{pageLabel}</span>
+      </div>
 
-      {showHeading && (
-        <Field label={input ? "Nagłówek ekranu (opcjonalnie)" : "Pytanie / nagłówek"}>
-          <input value={step.question} onChange={(e) => onPatch({ question: e.target.value })} style={inputStyle} />
+      {/* Sekcja: treść strony (globalny nagłówek + opis). */}
+      <EditorSection title="Treść strony">
+        {showHeading && (
+          <Field label={input ? "Nagłówek strony (opcjonalnie)" : "Nagłówek"}>
+            <input
+              value={step.question}
+              onChange={(e) => onPatch({ question: e.target.value })}
+              placeholder={input ? "np. Zostaw kontakt" : "np. Witaj 👋"}
+              style={inputStyle}
+            />
+          </Field>
+        )}
+        <Field label="Opis (opcjonalnie)">
+          <textarea
+            value={step.description ?? ""}
+            onChange={(e) => onPatch({ description: e.target.value })}
+            rows={2}
+            placeholder="Krótki tekst pod nagłówkiem…"
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
         </Field>
-      )}
+      </EditorSection>
 
-      <Field label="Opis (opcjonalnie)">
-        <textarea
-          value={step.description ?? ""}
-          onChange={(e) => onPatch({ description: e.target.value })}
-          rows={2}
-          style={{ ...inputStyle, resize: "vertical" }}
-        />
-      </Field>
-
-      {step.type === "welcome" && (
-        <Field label="Etykieta przycisku (CTA)">
-          <input value={step.cta ?? ""} onChange={(e) => onPatch({ cta: e.target.value })} style={inputStyle} />
-        </Field>
-      )}
-
+      {/* Sekcja: pola (pytania). */}
       {input && <FieldsEditor step={step} steps={steps} onPatch={onPatch} />}
 
-      {step.type !== "end" && (
-        <Field label="Domyślnie następna strona">
-          <NextSelect value={step.next} steps={steps} selfId={step.id} onChange={(v) => onPatch({ next: v })} />
+      {/* Sekcja: przycisk (CTA) — konfigurowalny na każdej stronie poza
+          zakończeniem (item 3.7). */}
+      {step.type !== "end" && <CtaEditor step={step} onPatch={onPatch} />}
+    </div>
+  );
+}
+
+/* ── Sekcja edytora — wizualnie oddziela grupy pól (item 2.1) ─────────────── */
+function EditorSection({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "grid", gap: 12, padding: 14, borderRadius: 12, border: `1px solid ${tokens.border}`, background: tokens.bg }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 24 }}>
+        <span style={paneTitle}>{title}</span>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/* ── Edytor przycisku strony (etykieta + ukrycie) ────────────────────────── */
+function CtaEditor({ step, onPatch }: { step: Step; onPatch: (patch: Partial<Step>) => void }) {
+  const hidden = !!step.hideCta;
+  return (
+    <EditorSection title="Przycisk">
+      {!hidden && (
+        <Field label="Etykieta przycisku">
+          <input
+            value={step.cta ?? ""}
+            onChange={(e) => onPatch({ cta: e.target.value })}
+            placeholder={step.type === "welcome" ? "Zaczynamy" : "Dalej"}
+            style={inputStyle}
+          />
         </Field>
       )}
-    </div>
+      {/* Ukrycie przycisku ma sens dla stron, po których użytkownik przechodzi
+          dalej klawiszem Enter lub wyborem opcji — nie dla powitania (byłby to
+          ślepy zaułek bez sposobu na start). */}
+      {step.type !== "welcome" && (
+        <ToggleRow
+          label="Ukryj przycisk na tej stronie"
+          checked={hidden}
+          onChange={(v) => onPatch({ hideCta: v || undefined })}
+        />
+      )}
+      {hidden && (
+        <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
+          Bez przycisku użytkownik przejdzie dalej klawiszem Enter lub po wyborze opcji.
+        </p>
+      )}
+    </EditorSection>
   );
 }
 
@@ -1371,9 +1508,7 @@ function FieldsEditor({
   }
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <span style={{ fontSize: 13, fontWeight: 700 }}>Pola ({fields.length})</span>
-
+    <EditorSection title={`Pola (${fields.length})`} action={<AddFieldButton onAdd={addField} />}>
       <Reorder.Group
         as="div"
         axis="y"
@@ -1393,35 +1528,48 @@ function FieldsEditor({
           />
         ))}
       </Reorder.Group>
-
-      <AddFieldButton onAdd={addField} />
-    </div>
+    </EditorSection>
   );
 }
 
+// Plus „Dodaj pole" — rozwija listę dostępnych typów pól (item 2.3). Renderowany
+// w nagłówku sekcji „Pola" jako mała ikona (menu wyrównane do prawej).
 function AddFieldButton({ onAdd }: { onAdd: (type: FieldType) => void }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={ref} style={{ position: "relative" }}>
       <button
         onClick={() => setOpen((o) => !o)}
-        style={{ ...ghostButton, justifySelf: "start", display: "flex", alignItems: "center", gap: 6, padding: "8px 12px" }}
+        style={{ ...iconBtn, width: 30, height: 30 }}
+        aria-label="Dodaj pole"
+        title="Dodaj pole"
       >
-        <MIcon name="add" size={15} /> Dodaj pole
+        <MIcon name="add" size={16} color={tokens.accent} />
       </button>
       {open && (
         <div
           style={{
             position: "absolute",
-            top: 42,
-            left: 0,
+            top: 38,
+            right: 0,
             zIndex: 10,
             background: "#fff",
             border: `1px solid ${tokens.border}`,
             borderRadius: 12,
-            boxShadow: "0 12px 30px rgba(15,18,28,0.12)",
+            boxShadow: tokens.shadowMenu,
             padding: 6,
             width: 210,
+            maxHeight: 340,
+            overflowY: "auto",
           }}
         >
           {FIELD_TYPE_MENU.map((t) => {
@@ -1534,7 +1682,12 @@ function FieldEditor({
             <input value={field.placeholder ?? ""} onChange={(e) => onPatch({ placeholder: e.target.value })} style={inputStyle} />
           </Field>
           <RequiredToggle checked={!!field.required} onChange={(v) => onPatch({ required: v })} />
-          <ValidationEditor field={field} onPatch={onPatch} />
+          {/* item 2.4 — jedyna „walidacja" pól tekstowych: limit znaków. Pola
+              wymagające formatu (e-mail, telefon, link, liczba) mają dedykowane
+              typy z wbudowaną kontrolą, więc nie potrzebują reguł regex. */}
+          {(field.type === "short_text" || field.type === "long_text") && (
+            <MinMaxChars field={field} onPatch={onPatch} />
+          )}
         </>
       )}
 
@@ -1802,11 +1955,17 @@ function ImageField({
   onChange,
   formId,
   label = "Obraz (opcjonalnie)",
+  uploadOnly = false,
+  disabled = false,
 }: {
   value: string;
   onChange: (url: string) => void;
   formId: string;
   label?: string;
+  // uploadOnly: ukryj pole URL i podpowiedź o formatach (item 3.3.4 / 3.5) —
+  // tylko przycisk „Wgraj plik".
+  uploadOnly?: boolean;
+  disabled?: boolean;
 }) {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1846,40 +2005,42 @@ function ImageField({
   }
 
   return (
-    <div style={{ display: "grid", gap: 8 }}>
+    <div style={{ display: "grid", gap: 8, opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? "none" : "auto" }}>
       <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            flex: 1,
-            minWidth: 0,
-            border: `1px solid ${tokens.border}`,
-            borderRadius: 10,
-            padding: "0 10px",
-            background: "#fff",
-          }}
-        >
-          <MIcon name="link" size={14} color={tokens.muted} style={{ flexShrink: 0 }} />
-          <input
-            value={value}
-            onChange={(e) => {
-              setBroken(false);
-              onChange(e.target.value);
+        {!uploadOnly && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              flex: 1,
+              minWidth: 0,
+              border: `1px solid ${tokens.border}`,
+              borderRadius: 10,
+              padding: "0 10px",
+              background: "#fff",
             }}
-            placeholder="Wklej URL lub wgraj plik…"
-            style={{ border: "none", outline: "none", fontSize: 14, width: "100%", padding: "10px 0", color: tokens.text, background: "transparent" }}
-          />
-        </div>
+          >
+            <MIcon name="link" size={14} color={tokens.muted} style={{ flexShrink: 0 }} />
+            <input
+              value={value}
+              onChange={(e) => {
+                setBroken(false);
+                onChange(e.target.value);
+              }}
+              placeholder="Wklej URL lub wgraj plik…"
+              style={{ border: "none", outline: "none", fontSize: 14, width: "100%", padding: "10px 0", color: tokens.text, background: "transparent" }}
+            />
+          </div>
+        )}
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0 }}
+          disabled={uploading || disabled}
+          style={{ ...ghostButton, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", flexShrink: 0, ...(uploadOnly ? { justifySelf: "start" } : {}) }}
         >
-          <MIcon name="upload" size={14} /> {uploading ? "Wgrywanie…" : "Wgraj"}
+          <MIcon name="upload" size={14} /> {uploading ? "Wgrywanie…" : "Wgraj plik"}
         </button>
         <input
           ref={inputRef}
@@ -1929,7 +2090,7 @@ function ImageField({
         <p style={{ fontSize: 12, color: tokens.danger, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
           <MIcon name="image" size={13} /> Nie można wczytać obrazka z tego adresu.
         </p>
-      ) : (
+      ) : uploadOnly ? null : (
         <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>JPEG, PNG, WEBP lub GIF, maks. 5 MB. Możesz też wkleić gotowy adres URL.</p>
       )}
     </div>
@@ -2023,10 +2184,10 @@ function OptionsEditor({
   );
 }
 
-/* ── Edytor walidacji (pola tekstowe) ───────────────────────── */
-function ValidationEditor({ field, onPatch }: { field: FormField; onPatch: (patch: Partial<FormField>) => void }) {
+/* ── Limit znaków (pola tekstowe) — jedyna „walidacja" w uproszczonym edytorze
+   (item 2.4). Ustawia minLength/maxLength; puste = brak limitu. ─────────────── */
+function MinMaxChars({ field, onPatch }: { field: FormField; onPatch: (patch: Partial<FormField>) => void }) {
   const v = field.validation;
-  const preset = detectPreset(v);
 
   function setV(patch: Partial<FieldValidation>) {
     const next: FieldValidation = { ...(v ?? {}), ...patch };
@@ -2036,61 +2197,24 @@ function ValidationEditor({ field, onPatch }: { field: FormField; onPatch: (patc
     onPatch({ validation: hasValidationRules(next) || next.customMessage ? next : undefined });
   }
 
-  function choosePreset(key: string) {
-    if (key === "none") {
-      setV({ pattern: undefined, customMessage: undefined });
-      return;
-    }
-    if (key === "custom") {
-      setV({ pattern: v?.pattern ?? "" });
-      return;
-    }
-    const p = VALIDATION_PRESETS.find((x) => x.key === key);
-    if (p) setV({ pattern: p.pattern, customMessage: p.message });
-  }
-
-  const numInput = (val: number | undefined, onChange: (n: number | undefined) => void, placeholder: string) => (
+  const numInput = (val: number | undefined, onChange: (n: number | undefined) => void) => (
     <input
       type="number"
+      min={0}
       value={val ?? ""}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+      placeholder="—"
+      onChange={(e) => onChange(e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)))}
       style={inputStyle}
     />
   );
 
   return (
-    <div style={{ display: "grid", gap: 12, padding: 12, borderRadius: 12, border: `1px solid ${tokens.border}`, background: "#fff" }}>
-      <span style={{ fontSize: 13, fontWeight: 700 }}>Walidacja</span>
-
-      <Field label="Reguła">
-        <select value={preset} onChange={(e) => choosePreset(e.target.value)} style={inputStyle}>
-          {VALIDATION_PRESETS.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {preset === "custom" && (
-        <>
-          <Field label="Wyrażenie regularne">
-            <input value={v?.pattern ?? ""} onChange={(e) => setV({ pattern: e.target.value })} placeholder="np. ^\\d{2}-\\d{3}$" style={{ ...inputStyle, fontFamily: "monospace" }} />
-          </Field>
-          <Field label="Komunikat błędu">
-            <input value={v?.customMessage ?? ""} onChange={(e) => setV({ customMessage: e.target.value || undefined })} placeholder="Nieprawidłowy format." style={inputStyle} />
-          </Field>
-        </>
-      )}
-
-      <div style={{ display: "flex", gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <Field label="Min. długość">{numInput(v?.minLength, (n) => setV({ minLength: n }), "—")}</Field>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Field label="Maks. długość">{numInput(v?.maxLength, (n) => setV({ maxLength: n }), "—")}</Field>
-        </div>
+    <div style={{ display: "flex", gap: 12 }}>
+      <div style={{ flex: 1 }}>
+        <Field label="Min. znaków">{numInput(v?.minLength, (n) => setV({ minLength: n }))}</Field>
+      </div>
+      <div style={{ flex: 1 }}>
+        <Field label="Maks. znaków">{numInput(v?.maxLength, (n) => setV({ maxLength: n }))}</Field>
       </div>
     </div>
   );
@@ -2125,51 +2249,71 @@ function BrandPanel({
 }) {
   const b: FormBranding = schema.branding ?? {};
   const setB = (patch: Partial<FormBranding>) => onPatch({ branding: { ...b, ...patch } });
-  const headerOn = b.showHeader !== false && (!!b.logo || !!b.name || !!b.tagline || b.showHeader === true);
+  const on = b.showHeader !== false; // branding włączony?
+  // Pola brandingu są wyszarzone i nieaktywne, gdy branding jest wyłączony
+  // (item 3.3.3) — zamiast znikać, dają czytelny sygnał „można to włączyć".
+  const dim: React.CSSProperties = on ? {} : { opacity: 0.5, pointerEvents: "none" };
+  const countOn = !!b.showSubmissionCount;
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <span style={paneTitle}>Marka</span>
-      <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>
-        Nagłówek marki (logo, nazwa, podtytuł) pojawia się na górze formularza — nadaje mu wiarygodny, „ludzki” charakter.
-      </p>
+      {/* item 3.3.3 — jeden przełącznik „Włącz branding". */}
+      <ToggleRow label="Włącz branding" checked={on} onChange={(v) => setB({ showHeader: v })} />
 
-      <ToggleRow
-        label="Pokaż nagłówek marki"
-        checked={b.showHeader !== false}
-        onChange={(v) => setB({ showHeader: v })}
-      />
+      <div style={{ display: "grid", gap: 14, ...dim }}>
+        {/* item 3.3.4 — logo: tylko wgranie pliku, bez URL i bez podpowiedzi. */}
+        <ImageField
+          value={b.logo ?? ""}
+          onChange={(url) => setB({ logo: url })}
+          formId={formId}
+          label="Logo"
+          uploadOnly
+          disabled={!on}
+        />
 
-      {b.showHeader !== false && (
-        <>
-          <ImageField value={b.logo ?? ""} onChange={(url) => setB({ logo: url })} formId={formId} label="Logo / awatar" />
+        {/* item 3.3.5 / 3.3.6 — „Nagłówek" (dawniej „Nazwa marki"). */}
+        <Field label="Nagłówek">
+          <input
+            value={b.name ?? ""}
+            onChange={(e) => setB({ name: e.target.value })}
+            placeholder="np. Selltic Agency"
+            disabled={!on}
+            style={inputStyle}
+          />
+        </Field>
 
-          <Field label="Nazwa marki">
+        {/* item 3.3.7 / 3.3.8 — podtytuł wyróżniony wizualnie (druga linia). */}
+        <Field label="Podtytuł (opcjonalnie)">
+          <input
+            value={b.tagline ?? ""}
+            onChange={(e) => setB({ tagline: e.target.value })}
+            placeholder="np. Strony internetowe dla branży medycznej"
+            disabled={!on}
+            style={{ ...inputStyle, fontStyle: "italic", color: tokens.muted }}
+          />
+        </Field>
+      </div>
+
+      {/* item 3.8 — dowód społeczny: licznik osób, które wypełniły formularz. */}
+      <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 14, display: "grid", gap: 12 }}>
+        <ToggleRow
+          label="Pokaż licznik wypełnień (na powitaniu)"
+          checked={countOn}
+          onChange={(v) => setB({ showSubmissionCount: v || undefined })}
+        />
+        {countOn && (
+          <Field label="Liczba osób">
             <input
-              value={b.name ?? ""}
-              onChange={(e) => setB({ name: e.target.value })}
-              placeholder="np. Liam · uczyangielskiego.pl"
-              style={inputStyle}
+              type="number"
+              min={0}
+              value={b.submissionCount ?? ""}
+              onChange={(e) => setB({ submissionCount: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)) })}
+              placeholder="np. 128"
+              style={{ ...inputStyle, maxWidth: 160 }}
             />
           </Field>
-
-          <Field label="Podtytuł (opcjonalnie)">
-            <input
-              value={b.tagline ?? ""}
-              onChange={(e) => setB({ tagline: e.target.value })}
-              placeholder="np. Wyluzowany kumpel od rozmów i podróży"
-              style={inputStyle}
-            />
-          </Field>
-        </>
-      )}
-      {!headerOn && b.showHeader !== false && (
-        <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>Dodaj logo lub nazwę, aby nagłówek marki był widoczny.</p>
-      )}
-      <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
-        Logo pojawia się wyłącznie jako marka w lewym górnym rogu formularza. Osobne logo nad pytaniem oraz stopka
-        w prawym dolnym rogu zostały usunięte.
-      </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -2182,8 +2326,6 @@ function ThemePanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: 
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <span style={paneTitle}>Wygląd</span>
-
       <Field label="Czcionka">
         <select value={t.font} onChange={(e) => setTheme({ font: e.target.value })} style={{ ...inputStyle, fontFamily: `"${t.font}", system-ui, sans-serif` }}>
           {FONTS.map((f) => (
@@ -2203,16 +2345,14 @@ function ThemePanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: 
         )}
       </div>
 
-      {/* Własne tło formularza — URL lub wgrany plik (JPEG/PNG/WEBP/GIF). */}
+      {/* Własne tło formularza — tylko wgranie pliku (item 3.5). */}
       <ImageField
         value={t.bgImage ?? ""}
         onChange={(url) => setTheme({ bgImage: url || undefined })}
         formId={formId}
         label="Tło formularza (obraz — opcjonalnie)"
+        uploadOnly
       />
-      <p style={{ fontSize: 12, color: tokens.muted, margin: "-6px 0 0" }}>
-        Wklej adres URL lub wgraj własny plik. W trybie „karta" tło prześwituje wokół formularza; w trybie „pełne tło" dokładamy delikatną przesłonę dla czytelności.
-      </p>
 
       <Field label="Powierzchnia formularza">
         <select value={surface} onChange={(e) => setTheme({ surface: e.target.value as FormSchema["theme"]["surface"] })} style={inputStyle}>
@@ -2257,6 +2397,13 @@ function ThemePanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: 
         label="Numer kroku („KROK 3”) nad pytaniem"
         checked={!!t.showStepNumber}
         onChange={(v) => setTheme({ showStepNumber: v })}
+      />
+
+      {/* item 3.6 — licznik „Krok X z Y" jest teraz opcjonalny (domyślnie off). */}
+      <ToggleRow
+        label="Licznik postępu („Krok 2 z 4”)"
+        checked={!!t.showCounter}
+        onChange={(v) => setTheme({ showCounter: v })}
       />
 
       <ToggleRow

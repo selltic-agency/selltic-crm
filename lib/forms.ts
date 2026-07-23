@@ -137,7 +137,8 @@ export type Step = {
   required?: boolean;
   validation?: FieldValidation;
   phonePrefix?: string; // domyślny prefiks kraju dla kroku „phone” (np. "+48")
-  cta?: string; // etykieta przycisku (welcome)
+  cta?: string; // etykieta przycisku dalej/CTA (dla każdej strony, nie tylko powitania)
+  hideCta?: boolean; // ukryj przycisk „dalej" na tej stronie (np. ostatnia strona bez CTA)
   map?: "name" | "email" | "phone"; // mapowanie odpowiedzi → kontakt (Faza 5)
 };
 
@@ -168,6 +169,9 @@ export type FormTheme = {
   progress?: ProgressStyle; // "bar" (domyślnie) | "dots" | "none"
   radius?: number; // promień zaokrągleń kart/przycisków (px)
   showStepNumber?: boolean; // etykieta „KROK X” nad pytaniem
+  // Licznik postępu „Krok X z Y” / „X / Y”. Domyślnie WYŁĄCZONY (opcjonalny) —
+  // dawniej był wbudowany na stałe, teraz włącza się świadomie w Ustawieniach.
+  showCounter?: boolean;
   // Podpowiedź przy pytaniach wyboru (np. „Wybierz jedną opcję”). Opcjonalna —
   // stare formularze bez tej flagi jej nie pokazują (fallback w rendererze).
   showChoiceHint?: boolean;
@@ -192,6 +196,10 @@ export type FormBranding = {
   showFooter?: boolean; // pokaż dyskretną stopkę marki (domyślnie tak)
   footerText?: string; // tekst/podtytuł w stopce (np. „Bezpieczny formularz")
   footerLink?: string; // opcjonalny odnośnik pod stopką (https://…)
+  // ── Dowód społeczny: licznik osób, które wypełniły formularz (item 3.8).
+  //    Wyświetlany na ekranie powitania. Opcjonalny.
+  showSubmissionCount?: boolean; // pokaż licznik „X osób wypełniło ten formularz"
+  submissionCount?: number; // własna, ręcznie wpisana wartość licznika
 };
 
 // Treść automatycznego maila „dziękujemy” (Faza: e-mail po zgłoszeniu).
@@ -262,8 +270,18 @@ export const STEP_TYPES: { type: StepType; label: string }[] = [
 ];
 
 export function stepTypeLabel(type: StepType): string {
+  if (type === "question") return "Strona";
   return STEP_TYPES.find((s) => s.type === type)?.label ?? type;
 }
+
+// ── Typy STRON do menu „Dodaj stronę" (item 1.3) ──────────────────────────
+// Kreator operuje na trzech typach stron: powitanie, strona (kontener pól) i
+// zakończenie. Pola (pytania) dodaje się wewnątrz strony w środkowej kolumnie.
+export const PAGE_TYPES: { type: StepType; label: string; icon: string; hint: string }[] = [
+  { type: "welcome", label: "Powitanie", icon: "waving_hand", hint: "Ekran startowy z przyciskiem" },
+  { type: "question", label: "Strona", icon: "description", hint: "Jeden lub więcej pól do wypełnienia" },
+  { type: "end", label: "Zakończenie", icon: "flag", hint: "Ekran „dziękujemy” po wysłaniu" },
+];
 
 export function isChoice(type: string): boolean {
   return type === "single_choice" || type === "multi_choice";
@@ -718,6 +736,11 @@ export function themeCardBg(t: FormTheme): string {
 // starymi formularzami, które jej nie miały). Nowe formularze włączają ją w blankForm.
 export function themeChoiceHint(t: FormTheme): boolean {
   return t.showChoiceHint ?? false;
+}
+// Licznik postępu „Krok X z Y" — domyślnie WYŁĄCZONY (item 3.6). Dawniej był
+// wbudowany na stałe; teraz włącza się świadomie w Ustawieniach → Wygląd.
+export function themeCounter(t: FormTheme): boolean {
+  return t.showCounter ?? false;
 }
 
 // Tekst podpowiedzi zależny od typu pola wyboru.

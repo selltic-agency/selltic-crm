@@ -12,7 +12,7 @@ import {
   useAnimationControls,
   useReducedMotion,
 } from "framer-motion";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Users } from "lucide-react";
 import {
   type FormSchema,
   type FormField,
@@ -33,6 +33,7 @@ import {
   themeRadius,
   themeCardBg,
   themeChoiceHint,
+  themeCounter,
   choiceHintText,
 } from "@/lib/forms";
 import {
@@ -396,7 +397,8 @@ export default function FormRenderer({
   const heading = current.question || (container ? "" : "—");
 
   const canBack = history.length > 0 && current.type !== "end" && theme.allowBack !== false;
-  const showCounter = current.type !== "end" && current.type !== "welcome" && steps.length > 2;
+  // item 3.6 — licznik „Krok X z Y" jest teraz opcjonalny (włączany w Ustawieniach).
+  const showCounter = themeCounter(theme) && current.type !== "end" && current.type !== "welcome" && steps.length > 1;
   const showKrok = !!theme.showStepNumber && current.type !== "end" && current.type !== "welcome" && current.type !== "statement";
 
   // ── Logo marki przypięte w lewym górnym rogu ──────────────────────────
@@ -546,6 +548,29 @@ export default function FormRenderer({
           <p style={{ fontSize: 16, opacity: 0.68, margin: "0 0 24px", lineHeight: 1.45 }}>{current.description}</p>
         )}
 
+        {/* Dowód społeczny na powitaniu: licznik wypełnień (item 3.8). */}
+        {current.type === "welcome" &&
+          branding?.showSubmissionCount &&
+          branding.submissionCount != null && (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                margin: "0 0 24px",
+                padding: "7px 14px",
+                borderRadius: 999,
+                background: `${accent}12`,
+                color: accent,
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              <Users size={16} />
+              {branding.submissionCount.toLocaleString("pl-PL")} osób już wypełniło ten formularz
+            </div>
+          )}
+
         {/* Pola wejściowe (jedno lub wiele — item 6). */}
         {isInputStep(current) && (
           <motion.div animate={shake} style={{ display: "grid", gap: 22 }}>
@@ -595,11 +620,13 @@ export default function FormRenderer({
           </motion.div>
         )}
 
-        {/* Przyciski akcji (nie dla auto-przejścia ani end). */}
-        {!autoAdvanceChoice && current.type !== "end" && (
+        {/* Przyciski akcji (nie dla auto-przejścia, ekranu końcowego ani stron
+            z ukrytym przyciskiem — item 3.7). Etykieta jest konfigurowalna na
+            każdej stronie (current.cta). */}
+        {!autoAdvanceChoice && current.type !== "end" && !current.hideCta && (
           <div style={{ marginTop: 26, display: "flex", justifyContent: align === "center" ? "center" : "flex-start" }}>
             <button onClick={advance} style={btn}>
-              {current.type === "welcome" ? current.cta || "Dalej" : "Dalej"}
+              {current.cta?.trim() || "Dalej"}
               <ArrowRight size={18} />
             </button>
           </div>
