@@ -163,6 +163,7 @@ export type FormTheme = {
   //    Wszystkie opcjonalne: istniejące, opublikowane formularze renderują się
   //    bez zmian (fallbacki w rendererze).
   cardBg?: string; // tło karty formularza (gdy surface = "card")
+  glow?: string; // kolor poświaty (obwódka aktywnego pola / halo fokusa); domyślnie = akcent
   bgImage?: string; // własne tło formularza (URL lub wgrany plik) — pod kartą / na całą stronę
   surface?: FormSurface; // "card" (domyślnie dla nowych) | "full"
   optionStyle?: OptionStyle; // "list" (domyślnie) | "cards"
@@ -731,6 +732,11 @@ export function themeRadius(t: FormTheme): number {
 }
 export function themeCardBg(t: FormTheme): string {
   return t.cardBg || t.bg || "#FFFFFF";
+}
+// Kolor poświaty (halo aktywnego pola). Domyślnie = kolor akcentu, więc stare
+// formularze bez tego pola dostają spójną poświatę zamiast dawnej fioletowej.
+export function themeGlow(t: FormTheme): string {
+  return t.glow || t.primary || "#6C5CE7";
 }
 // Podpowiedź przy pytaniach wyboru — domyślnie ukryta (zgodność wsteczna ze
 // starymi formularzami, które jej nie miały). Nowe formularze włączają ją w blankForm.

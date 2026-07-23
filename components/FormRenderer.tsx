@@ -34,6 +34,7 @@ import {
   themeCardBg,
   themeChoiceHint,
   themeCounter,
+  themeGlow,
   choiceHintText,
 } from "@/lib/forms";
 import {
@@ -365,6 +366,15 @@ export default function FormRenderer({
   const showChoiceHint = themeChoiceHint(theme);
   const lettering = theme.choiceLettering ?? "letters";
 
+  // Poświata (halo) aktywnego pola — kolor sterowany z kreatora (theme.glow,
+  // domyślnie = akcent). Przekazywana do CSS jako zmienne (patrz globals.css:
+  // reguła .selltic-form …:focus). Alfy dobrane pod delikatny, brandowy blask.
+  const glow = themeGlow(theme);
+  const glowVars = {
+    "--form-glow": `${glow}33`,
+    "--form-glow-border": `${glow}99`,
+  } as React.CSSProperties;
+
   // Własne tło formularza (URL lub wgrany plik). W trybie „karta” prześwituje
   // wokół karty; w trybie „pełne tło” pod treścią dokładamy delikatną przesłonę
   // dla czytelności tekstu.
@@ -643,12 +653,14 @@ export default function FormRenderer({
   if (isCard) {
     return (
       <div
+        className="selltic-form"
         style={{
           position: "relative",
           height: "100%",
           minHeight: 460,
           backgroundColor: bg,
           ...bgImageStyle,
+          ...glowVars,
           color: text,
           fontFamily,
           overflowY: "auto",
@@ -689,12 +701,14 @@ export default function FormRenderer({
   // ── Tryb PEŁNY: treść na całym tle (klasyczny, „na całą stronę”) ───────
   return (
     <div
+      className="selltic-form"
       style={{
         position: "relative",
         height: "100%",
         minHeight: 420,
         backgroundColor: bg,
         ...bgImageStyle,
+        ...glowVars,
         color: text,
         fontFamily,
         display: "flex",

@@ -2338,6 +2338,7 @@ function ThemePanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: 
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <ColorField label="Akcent" value={t.primary} onChange={(v) => setTheme({ primary: v })} />
+        <ColorField label="Poświata pól" value={t.glow ?? t.primary} onChange={(v) => setTheme({ glow: v })} />
         <ColorField label="Tło strony" value={t.bg} onChange={(v) => setTheme({ bg: v })} />
         <ColorField label="Tekst" value={t.text} onChange={(v) => setTheme({ text: v })} />
         {surface === "card" && (

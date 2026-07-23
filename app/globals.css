@@ -74,6 +74,16 @@ select {
   color: #9aa0b0;
 }
 
+/* ── Poświata (glow) formularza — kolor sterowany z kreatora przez zmienne
+   --form-glow / --form-glow-border ustawiane inline na korzeniu renderera.
+   Reguła używa :focus (nie :focus-visible), by wygrać z podświetleniem panelu
+   admina w podglądzie oraz działać po kliknięciu myszą na publicznej stronie. */
+.selltic-form :is(input, select, textarea):focus {
+  border-color: var(--form-glow-border) !important;
+  box-shadow: 0 0 0 3px var(--form-glow) !important;
+  outline: none !important;
+}
+
 /* Obszar główny panelu — mniejszy padding na małych ekranach. */
 .selltic-main {
   padding: 20px 24px;
