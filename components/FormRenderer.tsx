@@ -154,9 +154,13 @@ export default function FormRenderer({
 
   const fields = useMemo(() => (current ? stepFields(current) : []), [current]);
   const container = current ? isContainerStep(current) : false;
-  // Auto-przejście (styl Typeform) tylko, gdy krok ma DOKŁADNIE jedno pole
-  // wyboru jednokrotnego — inaczej użytkownik musi wypełnić pozostałe pola.
-  const autoAdvanceChoice = fields.length === 1 && fields[0].type === "single_choice";
+  // Auto-przejście (styl Typeform): krok z DOKŁADNIE jednym polem wyboru
+  // jednokrotnego, w którym przycisk został UKRYTY („Ukryj przycisk” w kreatorze).
+  // Domyślnie (przycisk widoczny) wybór opcji tylko ją zaznacza, a użytkownik
+  // przechodzi dalej przyciskiem „Dalej” — inaczej sekcja „Przycisk” w kreatorze
+  // obiecywałaby przycisk, którego formularz nigdy by nie pokazał.
+  const autoAdvanceChoice =
+    fields.length === 1 && fields[0].type === "single_choice" && !!current?.hideCta;
 
   // Inicjalizuj prefiksy telefonu przy wejściu na krok (z zapisanych odpowiedzi
   // lub domyślnego prefiksu pola).

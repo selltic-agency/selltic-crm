@@ -1793,10 +1793,16 @@ function PropertyMappingEditor({ field, onPatch }: { field: FormField; onPatch: 
     const options = (type === "select" || type === "multi_select")
       ? (field.options ?? []).map((o) => ({ key: slugKey(o.label), label: o.label }))
       : null;
-    const { data, error } = await supabase
+    const base = { owner: user.id, key, label: label.trim(), type, options, position: 999 };
+    let { data, error } = await supabase
       .from("property_defs")
-      .insert({ owner: user.id, key, label: label.trim(), type, options, scopes: ["deals"], position: 999 })
+      .insert({ ...base, scopes: ["deals"] })
       .select("*").single();
+    // Przed migration_attio_redesign.sql kolumny `scopes` może nie być —
+    // ponów bez niej (spójnie z dodawaniem właściwości w Ustawieniach).
+    if (error && /scopes/.test(error.message)) {
+      ({ data, error } = await supabase.from("property_defs").insert(base).select("*").single());
+    }
     if (error || !data) {
       toast.error(error?.code === "23505" ? "Właściwość o tym kluczu już istnieje." : "Nie udało się utworzyć właściwości.");
       return;
