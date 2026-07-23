@@ -8,8 +8,13 @@ export type FieldType =
   | "long_text"
   | "email"
   | "phone"
+  | "number"
+  | "link"
   | "single_choice"
-  | "multi_choice";
+  | "multi_choice"
+  | "dropdown"
+  | "checkbox"
+  | "yes_no";
 
 export type StepType =
   | "welcome"
@@ -28,8 +33,13 @@ const FIELD_TYPE_SET = new Set<string>([
   "long_text",
   "email",
   "phone",
+  "number",
+  "link",
   "single_choice",
   "multi_choice",
+  "dropdown",
+  "checkbox",
+  "yes_no",
 ]);
 
 // Czy dany typ (string) jest typem pola wejściowego.
@@ -74,6 +84,9 @@ export type FormField = {
   required?: boolean;
   validation?: FieldValidation;
   phonePrefix?: string; // domyślny prefiks kraju dla pola „phone”
+  // Dla pola „dropdown": czy pozwala wybrać wiele opcji (multi-select).
+  // Dla „checkbox": tekst zgody wyświetlany obok pola (np. treść klauzuli RODO).
+  multiple?: boolean;
   options?: StepOption[];
   map?: "name" | "email" | "phone"; // LEGACY: proste mapowanie odpowiedzi → kontakt (Faza 5)
   // §7b: jawne, konfigurowalne mapowanie pola → właściwość CRM (wbudowana lub
@@ -158,6 +171,11 @@ export type FormTheme = {
   // Podpowiedź przy pytaniach wyboru (np. „Wybierz jedną opcję”). Opcjonalna —
   // stare formularze bez tej flagi jej nie pokazują (fallback w rendererze).
   showChoiceHint?: boolean;
+  // Czy pokazywać przycisk „wstecz" (cofanie po krokach). Domyślnie tak.
+  allowBack?: boolean;
+  // Znaczniki przy opcjach wyboru: litery (A/B/C), cyfry (1/2/3) lub brak.
+  // Domyślnie „letters" (zgodnie z dotychczasowym wyglądem kart opcji).
+  choiceLettering?: "letters" | "numbers" | "none";
 };
 
 // Marka formularza — nagłówek z awatarem/logo, nazwą i podtytułem (jak w
@@ -247,12 +265,49 @@ export function stepTypeLabel(type: StepType): string {
   return STEP_TYPES.find((s) => s.type === type)?.label ?? type;
 }
 
-export function isChoice(type: StepType): boolean {
+export function isChoice(type: string): boolean {
   return type === "single_choice" || type === "multi_choice";
 }
 
+// Pola trzymające listę opcji do edycji (single/multi + dropdown). yes_no ma
+// stałe opcje (Tak/Nie) i nie potrzebuje edytora opcji.
+export function hasOptions(type: string): boolean {
+  return type === "single_choice" || type === "multi_choice" || type === "dropdown";
+}
+
+// Pola z prostym polem tekstowym (placeholder edytowalny). Obejmuje link i numer.
 export function isTextInput(type: string): boolean {
-  return type === "short_text" || type === "long_text" || type === "email";
+  return (
+    type === "short_text" ||
+    type === "long_text" ||
+    type === "email" ||
+    type === "link" ||
+    type === "number"
+  );
+}
+
+// Metadane typów pól do popupu „Dodaj pole" w kreatorze (etykieta + ikona +
+// grupa). Kolejność = kolejność w menu.
+export const FIELD_TYPES: { type: FieldType; label: string; icon: string; group: string }[] = [
+  { type: "short_text", label: "Krótki tekst", icon: "text_fields", group: "Tekst" },
+  { type: "long_text", label: "Długi tekst", icon: "notes", group: "Tekst" },
+  { type: "email", label: "Adres e-mail", icon: "alternate_email", group: "Kontakt" },
+  { type: "phone", label: "Numer telefonu", icon: "call", group: "Kontakt" },
+  { type: "link", label: "Link (URL)", icon: "link", group: "Kontakt" },
+  { type: "number", label: "Liczba", icon: "tag", group: "Tekst" },
+  { type: "single_choice", label: "Wybór jednokrotny", icon: "radio_button_checked", group: "Wybór" },
+  { type: "multi_choice", label: "Wybór wielokrotny", icon: "checklist", group: "Wybór" },
+  { type: "dropdown", label: "Lista rozwijana", icon: "arrow_drop_down_circle", group: "Wybór" },
+  { type: "yes_no", label: "Tak / Nie", icon: "toggle_on", group: "Wybór" },
+  { type: "checkbox", label: "Zgoda (checkbox)", icon: "check_box", group: "Zgody" },
+];
+
+export function fieldTypeLabel(type: FieldType): string {
+  return FIELD_TYPES.find((f) => f.type === type)?.label ?? type;
+}
+
+export function fieldTypeIcon(type: FieldType): string {
+  return FIELD_TYPES.find((f) => f.type === type)?.icon ?? "text_fields";
 }
 
 // ── Normalizacja kroków → pola (item 6) ───────────────────────────────────
@@ -308,7 +363,7 @@ export function stepIssues(step: Step): string[] {
     }
     for (const f of fields) {
       if (!f.question.trim()) issues.push("Pole bez treści pytania.");
-      if (isChoice(f.type)) {
+      if (hasOptions(f.type)) {
         const opts = f.options ?? [];
         if (opts.length < 1) issues.push("Pole wyboru bez żadnej opcji.");
         else if (opts.some((o) => !o.label.trim())) issues.push("Pusta etykieta opcji.");
@@ -412,6 +467,21 @@ export function validateFieldValue(field: FormField, raw: string): string | null
   // Wbudowany format e-mail dla typu „email”.
   if (field.type === "email" && !EMAIL_RE.test(value)) {
     return field.validation?.customMessage || "Podaj poprawny adres e-mail.";
+  }
+
+  // Link (URL): akceptujemy adresy z i bez schematu (dopisujemy https://).
+  if (field.type === "link") {
+    try {
+      new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    } catch {
+      return field.validation?.customMessage || "Podaj poprawny adres URL.";
+    }
+    return null;
+  }
+
+  // Liczba: tylko cyfry (opcjonalny znak i separator dziesiętny).
+  if (field.type === "number" && !/^-?\d+([.,]\d+)?$/.test(value)) {
+    return field.validation?.customMessage || "Podaj poprawną liczbę.";
   }
 
   // Walidacja telefonu. Dla Polski (+48) egzekwuje 9 cyfr i poprawny prefiks
@@ -531,6 +601,10 @@ export function blankField(type: FieldType): FormField {
         map: "phone",
         phonePrefix: DEFAULT_PHONE_PREFIX,
       };
+    case "number":
+      return { ...base, question: "Podaj liczbę", placeholder: "0", required: false };
+    case "link":
+      return { ...base, question: "Podaj link", placeholder: "https://…", required: false };
     case "single_choice":
       return {
         ...base,
@@ -548,6 +622,25 @@ export function blankField(type: FieldType): FormField {
           { id: uid(), label: "Opcja A", icon: "✨", next: NEXT },
           { id: uid(), label: "Opcja B", icon: "🚀", next: NEXT },
         ],
+      };
+    case "dropdown":
+      return {
+        ...base,
+        question: "Wybierz z listy",
+        multiple: false,
+        options: [
+          { id: uid(), label: "Opcja A", next: NEXT },
+          { id: uid(), label: "Opcja B", next: NEXT },
+        ],
+      };
+    case "yes_no":
+      return { ...base, question: "Tak czy nie?", required: true };
+    case "checkbox":
+      return {
+        ...base,
+        question: "Wyrażam zgodę",
+        description: "Zaznacz, aby wyrazić zgodę.",
+        required: true,
       };
   }
 }

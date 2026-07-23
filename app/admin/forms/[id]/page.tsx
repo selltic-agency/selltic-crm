@@ -24,7 +24,6 @@ import {
   type ThankYouEmail,
   NEXT,
   SUBMIT,
-  STEP_TYPES,
   FONTS,
   VALIDATION_PRESETS,
   blankStep,
@@ -42,9 +41,12 @@ import {
   defaultThankYouEmail,
   randomSlug,
   BUILTIN_LEAD_PROPERTIES,
+  FIELD_TYPES,
+  hasOptions,
   type FieldMapping,
   type TeamProperty,
 } from "@/lib/forms";
+import { publicFormUrl } from "@/lib/publicUrl";
 import { compatibleTargetTypes, isCompatible, BUILTIN_TARGET_TYPE, type MapTargetType } from "@/lib/leadMapping";
 import { leadTitleTokens } from "@/lib/leadTitle";
 import { normalizeOptions, propLabel } from "@/lib/properties";
@@ -93,25 +95,23 @@ function stepDisplayName(step: Step): string {
   return stepTypeLabel(step.type);
 }
 
-// Typy pól do menu „Dodaj pole”.
-const FIELD_TYPE_MENU: { type: FieldType; label: string }[] = [
-  { type: "short_text", label: "Krótki tekst" },
-  { type: "long_text", label: "Długi tekst" },
-  { type: "email", label: "E-mail" },
-  { type: "phone", label: "Telefon" },
-  { type: "single_choice", label: "Wybór jednokrotny" },
-  { type: "multi_choice", label: "Wybór wielokrotny" },
-];
+// Typy pól do menu „Dodaj pole” — pełny zestaw z metadanymi (lib/forms).
+const FIELD_TYPE_MENU: { type: FieldType; label: string; icon: string; group: string }[] = FIELD_TYPES;
 
 type SaveState = "idle" | "saving" | "saved";
 // Zakres edycji: „form” = ustawienia całego formularza (marka / wygląd / opcje),
 // „step” = ustawienia zaznaczonego kroku / pytania. Rozdzielenie tych dwóch
 // światów to główny cel redesignu — ogólne właściwości formularza są wyraźnie
 // oddzielone od ustawień pojedynczego pytania.
-type FormTab = "brand" | "design" | "settings" | "sms";
+type FormTab = "brand" | "design";
+
+// Zakładki najwyższego poziomu kreatora (Typeform-style).
+type BuilderView = "edytor" | "workflow" | "integracje" | "udostepnij" | "wyniki" | "ustawienia";
 
 // §7b — definicje właściwości (custom fields) dostępne do mapowania pól.
-const PropDefsCtx = createContext<PropertyDef[]>([]);
+// `add` pozwala od razu utworzyć nową właściwość z poziomu mapowania pola.
+type PropDefsCtxValue = { defs: PropertyDef[]; add: (def: PropertyDef) => void };
+const PropDefsCtx = createContext<PropDefsCtxValue>({ defs: [], add: () => {} });
 
 export default function FormEditorPage() {
   const params = useParams<{ id: string }>();
@@ -122,14 +122,35 @@ export default function FormEditorPage() {
   const isMobile = useIsMobile(900);
   const [mobilePane, setMobilePane] = useState<"steps" | "editor" | "preview">("editor");
 
-  // Widok najwyższego poziomu: Kreator / Ustawienia / Statystyki / Zgłoszenia.
-  // „Ustawienia" (marka · wygląd · ustawienia · SMS) to ustawienia globalne
-  // całego formularza — wydzielone z listy kroków do osobnej zakładki.
+  // Widok najwyższego poziomu (Typeform-style): Edytor · Workflow · Integracje ·
+  // Udostępnij · Wyniki · Ustawienia.
   const searchParams = useSearchParams();
-  const [view, setView] = useState<"build" | "settings" | "stats" | "submissions">(() => {
+  const [view, setView] = useState<BuilderView>(() => {
     const t = searchParams.get("tab");
-    return t === "settings" || t === "stats" || t === "submissions" ? t : "build";
+    if (t === "stats" || t === "submissions" || t === "wyniki") return "wyniki";
+    if (t === "settings" || t === "ustawienia") return "ustawienia";
+    if (t === "workflow") return "workflow";
+    if (t === "integracje") return "integracje";
+    if (t === "udostepnij") return "udostepnij";
+    return "edytor";
   });
+  // Niezapisane zmiany w zakładce Ustawienia (single-save + dirty guard).
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const guardedSetView = useCallback((next: BuilderView) => {
+    setView((cur) => {
+      if (cur === "ustawienia" && next !== "ustawienia" && settingsDirty) {
+        if (!window.confirm("Masz niezapisane zmiany w Ustawieniach. Opuścić bez zapisywania?")) return cur;
+        setSettingsDirty(false);
+      }
+      return next;
+    });
+  }, [settingsDirty]);
+  useEffect(() => {
+    if (!settingsDirty) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [settingsDirty]);
 
   const [schema, setSchema] = useState<FormSchema | null>(null);
   const [published, setPublished] = useState<FormSchema | null>(null);
@@ -138,11 +159,8 @@ export default function FormEditorPage() {
   const [activeId, setActiveId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [addOpen, setAddOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  // Aktywna zakładka ustawień globalnych formularza (widok „Ustawienia").
-  const [formTab, setFormTab] = useState<FormTab>("brand");
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
   // Szerokość kolumny „Kroki i pytania” — regulowana przez użytkownika (item —
@@ -313,7 +331,6 @@ export default function FormEditorPage() {
   }, []);
 
   function addStep(type: StepType) {
-    setAddOpen(false);
     const step = blankStep(type);
     step.id = newStepId();
     setSchema((s) => {
@@ -454,18 +471,25 @@ export default function FormEditorPage() {
     : `${stepsColW}px minmax(340px, 1.5fr) minmax(300px, 1fr)`;
 
   return (
-    <PropDefsCtx.Provider value={propDefs}>
+    <PropDefsCtx.Provider value={{ defs: propDefs, add: (def) => setPropDefs((p) => [...p, def]) }}>
     <div
+      className={isMobile ? undefined : "selltic-page-fill"}
       style={{
         display: "flex",
         flexDirection: "column",
-        height: isMobile ? "auto" : "calc(100vh - 120px)",
-        minHeight: isMobile ? "calc(100vh - 130px)" : undefined,
+        ...(isMobile ? { minHeight: "calc(100vh - 130px)" } : {}),
       }}
     >
       {/* ── Pasek górny ─────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <button onClick={() => router.push("/admin/forms")} style={iconBtn} aria-label="Wróć">
+        <button
+          onClick={() => {
+            if (view === "ustawienia" && settingsDirty && !window.confirm("Masz niezapisane zmiany w Ustawieniach. Opuścić bez zapisywania?")) return;
+            router.push("/admin/forms");
+          }}
+          style={iconBtn}
+          aria-label="Wróć"
+        >
           <MIcon name="arrow_back" size={18} color={tokens.muted} />
         </button>
         <input
@@ -535,28 +559,32 @@ export default function FormEditorPage() {
         </button>
       </div>
 
-      {/* ── Przełącznik widoku: Kreator / Ustawienia / Statystyki / Zgłoszenia ── */}
+      {/* ── Zakładki (Typeform-style) ─────────────────────────── */}
       <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: `1px solid ${tokens.border}`, paddingBottom: 2, flexWrap: "wrap" }}>
-        <ViewTab active={view === "build"} onClick={() => setView("build")} icon="design_services" label="Kreator" />
-        <ViewTab active={view === "settings"} onClick={() => setView("settings")} icon="tune" label="Ustawienia" />
-        <ViewTab active={view === "stats"} onClick={() => setView("stats")} icon="monitoring" label="Statystyki" />
-        <ViewTab active={view === "submissions"} onClick={() => setView("submissions")} icon="inbox" label="Zgłoszenia" />
+        <ViewTab active={view === "edytor"} onClick={() => guardedSetView("edytor")} icon="design_services" label="Edytor" />
+        <ViewTab active={view === "workflow"} onClick={() => guardedSetView("workflow")} icon="rule" label="Workflow" />
+        <ViewTab active={view === "integracje"} onClick={() => guardedSetView("integracje")} icon="hub" label="Integracje" />
+        <ViewTab active={view === "udostepnij"} onClick={() => guardedSetView("udostepnij")} icon="share" label="Udostępnij" />
+        <ViewTab active={view === "wyniki"} onClick={() => guardedSetView("wyniki")} icon="monitoring" label="Wyniki" />
+        <ViewTab active={view === "ustawienia"} onClick={() => guardedSetView("ustawienia")} icon="tune" label="Ustawienia" />
       </div>
 
-      {view === "settings" && (
-        <FormSettingsView
-          schema={schema}
-          formTab={formTab}
-          setFormTab={setFormTab}
-          onPatch={patchSchema}
-          formId={id}
-          isMobile={isMobile}
-        />
+      {view === "workflow" && <WorkflowView schema={schema} onPatch={patchSchema} formId={id} />}
+      {view === "integracje" && <IntegrationsView formId={id} />}
+      {view === "udostepnij" && (
+        <ShareView formId={id} slug={slug} title={schema.title} status={status} onSlugSaved={setSlug} />
       )}
-      {view === "stats" && <FormStats formId={id} />}
-      {view === "submissions" && <FormSubmissions formId={id} />}
+      {view === "wyniki" && (
+        <div style={{ display: "grid", gap: 18 }}>
+          <FormStats formId={id} />
+          <FormSubmissions formId={id} />
+        </div>
+      )}
+      {view === "ustawienia" && (
+        <UstawieniaView schema={schema} onPatch={patchSchema} formId={id} isMobile={isMobile} onDirtyChange={setSettingsDirty} />
+      )}
 
-      {view === "build" && (
+      {view === "edytor" && (
       <>
       {/* ── Ostrzeżenie walidacji (item 7) ──────────────────── */}
       {stepsWithIssues.length > 0 && (
@@ -587,7 +615,7 @@ export default function FormEditorPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 12 }}>
           {(
             [
-              ["steps", "Kroki"],
+              ["steps", "Strony"],
               ["editor", "Edytor"],
               ["preview", "Podgląd"],
             ] as ["steps" | "editor" | "preview", string][]
@@ -650,56 +678,15 @@ export default function FormEditorPage() {
               <span style={{ width: 3, background: tokens.border, borderRadius: 2 }} />
             </div>
           )}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={paneTitle}>Kroki i pytania</span>
-            <button onClick={() => setAddOpen((o) => !o)} style={iconBtn} aria-label="Dodaj krok">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={paneTitle}>Strony</span>
+            <button onClick={() => addStep("question")} style={iconBtn} aria-label="Dodaj stronę" title="Dodaj stronę">
               <MIcon name="add" size={16} color={tokens.accent} />
             </button>
           </div>
-
-          {addOpen && (
-            <div
-              style={{
-                position: "absolute",
-                top: 44,
-                right: 12,
-                zIndex: 10,
-                background: "#fff",
-                border: `1px solid ${tokens.border}`,
-                borderRadius: 12,
-                boxShadow: "0 12px 30px rgba(15,18,28,0.12)",
-                padding: 6,
-                width: 200,
-              }}
-            >
-              {STEP_TYPES.filter((t) => t.type !== "end").map((t) => {
-                const iconName = TYPE_ICON[t.type] ?? "text_fields";
-                return (
-                  <button
-                    key={t.type}
-                    onClick={() => addStep(t.type)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 9,
-                      width: "100%",
-                      padding: "8px 10px",
-                      border: "none",
-                      background: "none",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      fontSize: 13.5,
-                      color: tokens.text,
-                      textAlign: "left",
-                    }}
-                  >
-                    <MIcon name={iconName} size={15} color={tokens.muted} />
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <p style={{ fontSize: 11.5, color: tokens.muted, margin: "0 0 10px" }}>
+            Strona = jeden ekran formularza. Pola (pytania) dodajesz w środkowej kolumnie.
+          </p>
 
           {/* Lista kroków — drag & drop (item 2). Uchwyt „⠿” po lewej inicjuje
               przeciąganie; kliknięcie treści zaznacza krok. Strzałki / duplikuj
@@ -866,21 +853,177 @@ export default function FormEditorPage() {
 /* ── Widok „Ustawienia" — ustawienia globalne całego formularza ─────────────
    Wydzielone z listy kroków do osobnej zakładki najwyższego poziomu (item 2):
    marka · wygląd · ustawienia · SMS, z podglądem na żywo obok. */
-function FormSettingsView({
-  schema,
-  formTab,
-  setFormTab,
-  onPatch,
-  formId,
-  isMobile,
+// ── Zakładka „Workflow": maile i SMS-y do klientów (treść, opóźnienie,
+//    przekierowanie) + potwierdzenia do zespołu (per formularz). ────────────
+function WorkflowView({ schema, onPatch, formId }: { schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void; formId: string }) {
+  return (
+    <div style={{ display: "grid", gap: 16, maxWidth: 780 }}>
+      <div style={pane}>
+        <span style={{ ...paneTitle, display: "block", marginBottom: 4 }}>SMS do klientów i zespołu</span>
+        <p style={{ fontSize: 12.5, color: tokens.muted, margin: "0 0 12px" }}>
+          Treść, opóźnienie i potwierdzenia dla zespołu. Placeholdery (np. imię) możesz wstawiać w treści.
+        </p>
+        <SmsSettings schema={schema} formId={formId} formTitle={schema.title} />
+      </div>
+      <div style={pane}>
+        <SettingsPanel schema={schema} onPatch={onPatch} formId={formId} showMeta={false} />
+      </div>
+    </div>
+  );
+}
+
+// ── Zakładka „Integracje": Meta (Pixel + CAPI) i webhook, pogrupowane. ──────
+function IntegrationsView({ formId }: { formId: string }) {
+  return (
+    <div style={{ display: "grid", gap: 16, maxWidth: 780 }}>
+      <div style={pane}>
+        <span style={{ ...paneTitle, display: "block", marginBottom: 4 }}>Meta i webhook</span>
+        <p style={{ fontSize: 12.5, color: tokens.muted, margin: "0 0 12px" }}>
+          Integracje z dostawcami zewnętrznymi. Meta Conversions (Pixel + CAPI) oraz webhook (Make / Zapier / GA4).
+        </p>
+        <MetaSettings formId={formId} />
+      </div>
+    </div>
+  );
+}
+
+// ── Zakładka „Udostępnij": edycja linku (slug), kopiowanie, embed. ──────────
+function ShareView({
+  formId, slug, title, status, onSlugSaved,
 }: {
-  schema: FormSchema;
-  formTab: FormTab;
-  setFormTab: (t: FormTab) => void;
-  onPatch: (patch: Partial<FormSchema>) => void;
-  formId: string;
-  isMobile: boolean;
+  formId: string; slug: string | null; title: string; status: FormStatus; onSlugSaved: (slug: string) => void;
 }) {
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+  const [value, setValue] = useState(slug ?? "");
+  const [saving, setSaving] = useState(false);
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+
+  const normalized = value.trim().toLowerCase();
+  const valid = /^[a-z0-9-]+$/.test(normalized);
+  const publicUrl = normalized ? publicFormUrl(normalized, origin) : "";
+  const embed = publicUrl ? `<iframe src="${publicUrl}?embed=1" width="100%" height="700" style="border:0" title="${title}"></iframe>` : "";
+
+  async function saveSlug() {
+    if (!valid || saving) return;
+    setSaving(true);
+    const { error } = await supabase.from("forms").update({ slug: normalized }).eq("id", formId);
+    setSaving(false);
+    if (error) {
+      // 23505 = naruszenie unikalności (slug zajęty).
+      if (error.code === "23505" || /duplicate|unique/i.test(error.message)) toast.error("Ten link jest już zajęty — wybierz inny.");
+      else toast.error("Nie udało się zapisać linku.");
+      return;
+    }
+    onSlugSaved(normalized);
+    toast.success("Link zapisany.");
+  }
+
+  function copy(text: string, msg: string) {
+    navigator.clipboard?.writeText(text).then(() => toast.success(msg));
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 16, maxWidth: 720 }}>
+      <div style={pane}>
+        <span style={{ ...paneTitle, display: "block", marginBottom: 4 }}>Własny link</span>
+        <p style={{ fontSize: 12.5, color: tokens.muted, margin: "0 0 12px" }}>
+          Ustaw końcówkę adresu po ukośniku, np. <code>{publicFormUrl("kampania-wizytowka", origin)}</code>.
+        </p>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: tokens.muted, whiteSpace: "nowrap" }}>
+            {(publicFormUrl("", origin) || "/f/").replace(/\/+$/, "")}/
+          </span>
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="kampania-wizytowka"
+            style={{ ...inputStyle, flex: "1 1 220px", minWidth: 0, ...(value.trim() && !valid ? { borderColor: tokens.danger } : {}) }}
+          />
+          <button onClick={saveSlug} disabled={!valid || saving} style={primaryButton}>
+            {saving ? "Zapisywanie…" : "Zapisz link"}
+          </button>
+        </div>
+        {value.trim() && !valid && (
+          <p style={{ fontSize: 12, color: tokens.danger, margin: "8px 0 0" }}>
+            Dozwolone są tylko małe litery, cyfry i myślniki (np. <code>kampania-wizytowka</code>).
+          </p>
+        )}
+        {status !== "published" && (
+          <p style={{ fontSize: 12, color: tokens.muted, margin: "8px 0 0" }}>
+            Link zacznie działać publicznie po opublikowaniu formularza.
+          </p>
+        )}
+      </div>
+
+      {normalized && valid && (
+        <div style={pane}>
+          <span style={{ ...paneTitle, display: "block", marginBottom: 10 }}>Publiczny link</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input readOnly value={publicUrl} style={{ ...inputStyle, flex: "1 1 260px", minWidth: 0 }} />
+            <button onClick={() => copy(publicUrl, "Skopiowano link")} style={ghostButton}>
+              <MIcon name="content_copy" size={15} /> Kopiuj
+            </button>
+            <button onClick={() => window.open(publicUrl, "_blank")} style={ghostButton}>
+              <MIcon name="open_in_new" size={15} /> Podgląd
+            </button>
+          </div>
+
+          <span style={{ ...paneTitle, display: "block", margin: "18px 0 10px" }}>Osadzenie na stronie (embed)</span>
+          <textarea
+            readOnly
+            value={embed}
+            rows={3}
+            style={{ ...inputStyle, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5 }}
+          />
+          <button onClick={() => copy(embed, "Skopiowano kod embed")} style={{ ...ghostButton, marginTop: 8 }}>
+            <MIcon name="content_copy" size={15} /> Kopiuj kod
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Zakładka „Ustawienia": branding + wygląd + zachowania. JEDEN globalny
+//    przycisk „Zapisz"; edycje trafiają do lokalnego szkicu, a zakładki nie da
+//    się opuścić przy niezapisanych zmianach (dirty-guard w rodzicu). ─────────
+function UstawieniaView({
+  schema, onPatch, formId, isMobile, onDirtyChange,
+}: {
+  schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void; formId: string; isMobile: boolean; onDirtyChange: (dirty: boolean) => void;
+}) {
+  const toast = useToast();
+  const [tab, setTab] = useState<FormTab>("brand");
+  const [draft, setDraft] = useState<{ theme: FormSchema["theme"]; branding: FormBranding }>({
+    theme: schema.theme,
+    branding: schema.branding ?? {},
+  });
+
+  const dirty = useMemo(
+    () =>
+      JSON.stringify(draft.theme) !== JSON.stringify(schema.theme) ||
+      JSON.stringify(draft.branding ?? {}) !== JSON.stringify(schema.branding ?? {}),
+    [draft, schema]
+  );
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+
+  // Syntetyczny schemat dla paneli + podglądu — odzwierciedla lokalny szkic.
+  const draftSchema: FormSchema = { ...schema, theme: draft.theme, branding: draft.branding };
+  const localPatch = (patch: Partial<FormSchema>) =>
+    setDraft((d) => ({
+      theme: patch.theme ? (patch.theme as FormSchema["theme"]) : d.theme,
+      branding: patch.branding ? (patch.branding as FormBranding) : d.branding,
+    }));
+
+  function save() {
+    onPatch({ theme: draft.theme, branding: draft.branding });
+    onDirtyChange(false);
+    toast.success("Ustawienia zapisane.");
+  }
+
   return (
     <div
       style={
@@ -889,67 +1032,36 @@ function FormSettingsView({
           : { display: "grid", gridTemplateColumns: "minmax(340px, 1.5fr) minmax(320px, 1fr)", gap: 14, alignItems: "start" }
       }
     >
-      <div style={{ ...pane, overflowY: "auto", maxHeight: isMobile ? undefined : "calc(100vh - 220px)" }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-          <TabButton active={formTab === "brand"} onClick={() => setFormTab("brand")} icon="image" label="Marka" />
-          <TabButton active={formTab === "design"} onClick={() => setFormTab("design")} icon="palette" label="Wygląd" />
-          <TabButton active={formTab === "settings"} onClick={() => setFormTab("settings")} icon="tune" label="Ustawienia" />
-          <TabButton active={formTab === "sms"} onClick={() => setFormTab("sms")} icon="chat" label="SMS" />
+      <div style={{ ...pane, display: "flex", flexDirection: "column", maxHeight: isMobile ? undefined : "calc(100vh - 200px)" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          <TabButton active={tab === "brand"} onClick={() => setTab("brand")} icon="image" label="Marka" />
+          <TabButton active={tab === "design"} onClick={() => setTab("design")} icon="palette" label="Wygląd i zachowanie" />
         </div>
 
-        {/* Doprecyzowanie zapisu (item 6): które zakładki zapisują się same,
-            a które mają własny przycisk „Zapisz". */}
-        <div
-          style={{
-            display: "flex", alignItems: "center", gap: 8, marginBottom: 14,
-            padding: "8px 12px", borderRadius: 10, fontSize: 12.5, fontWeight: 600,
-            background: formTab === "sms" ? "#FDF1E3" : "#E7F7EE",
-            color: formTab === "sms" ? "#8a5a1a" : tokens.success,
-          }}
-        >
-          {formTab === "sms" ? (
-            <>
-              <MIcon name="warning" size={14} />
-              Ta zakładka ma własny przycisk „Zapisz konfigurację" — zmiany zapisują się dopiero po jego kliknięciu.
-            </>
-          ) : formTab === "settings" ? (
-            <>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: tokens.success, flexShrink: 0 }} />
-              Ustawienia formularza zapisują się automatycznie. Sekcja „Meta Conversions & webhook" ma osobny przycisk „Zapisz".
-            </>
-          ) : (
-            <>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: tokens.success, flexShrink: 0 }} />
-              Zmiany na tej zakładce zapisują się automatycznie jako wersja robocza.
-            </>
-          )}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
+          {tab === "brand" && <BrandPanel schema={draftSchema} onPatch={localPatch} formId={formId} />}
+          {tab === "design" && <ThemePanel schema={draftSchema} onPatch={localPatch} formId={formId} />}
         </div>
 
-        {formTab === "brand" && <BrandPanel schema={schema} onPatch={onPatch} formId={formId} />}
-        {formTab === "design" && <ThemePanel schema={schema} onPatch={onPatch} formId={formId} />}
-        {formTab === "settings" && <SettingsPanel schema={schema} onPatch={onPatch} formId={formId} />}
-        {formTab === "sms" && <SmsSettings schema={schema} formId={formId} formTitle={schema.title} />}
+        {/* Jeden globalny przycisk zapisu — sticky na dole panelu. */}
+        <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 12, marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: dirty ? tokens.warning : tokens.muted }}>
+            {dirty ? "Niezapisane zmiany" : "Wszystko zapisane"}
+          </span>
+          <button onClick={save} disabled={!dirty} style={{ ...primaryButton, opacity: dirty ? 1 : 0.5, cursor: dirty ? "pointer" : "not-allowed" }}>
+            <MIcon name="save" size={15} /> Zapisz
+          </button>
+        </div>
       </div>
 
-      {/* Podgląd na żywo — pomaga przy marce i wyglądzie. */}
+      {/* Podgląd na żywo — odzwierciedla szkic (przed zapisem). */}
       {!isMobile && (
-        <div
-          style={{
-            ...pane,
-            padding: 0,
-            overflow: "hidden",
-            position: "sticky",
-            top: 0,
-            height: "calc(100vh - 220px)",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
+        <div style={{ ...pane, padding: 0, overflow: "hidden", position: "sticky", top: 0, height: "calc(100vh - 200px)", display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "8px 12px", borderBottom: `1px solid ${tokens.border}` }}>
             <span style={paneTitle}>Podgląd na żywo</span>
           </div>
           <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-            <FormRenderer form={schema} preview />
+            <FormRenderer form={draftSchema} preview />
           </div>
         </div>
       )}
@@ -1183,7 +1295,7 @@ function StepEditor({
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <span style={paneTitle}>
-        {step.type === "welcome" ? "Powitanie" : step.type === "statement" ? "Komunikat" : step.type === "end" ? "Zakończenie" : "Krok z polami"}
+        {step.type === "welcome" ? "Powitanie" : step.type === "statement" ? "Komunikat" : step.type === "end" ? "Zakończenie" : "Strona (może mieć wiele pytań)"}
       </span>
 
       {showHeading && (
@@ -1201,8 +1313,6 @@ function StepEditor({
         />
       </Field>
 
-      {step.type !== "end" && <ImageField value={step.image ?? ""} onChange={(url) => onPatch({ image: url })} formId={formId} />}
-
       {step.type === "welcome" && (
         <Field label="Etykieta przycisku (CTA)">
           <input value={step.cta ?? ""} onChange={(e) => onPatch({ cta: e.target.value })} style={inputStyle} />
@@ -1212,7 +1322,7 @@ function StepEditor({
       {input && <FieldsEditor step={step} steps={steps} onPatch={onPatch} />}
 
       {step.type !== "end" && (
-        <Field label="Domyślny następny krok">
+        <Field label="Domyślnie następna strona">
           <NextSelect value={step.next} steps={steps} selfId={step.id} onChange={(v) => onPatch({ next: v })} />
         </Field>
       )}
@@ -1315,7 +1425,7 @@ function AddFieldButton({ onAdd }: { onAdd: (type: FieldType) => void }) {
           }}
         >
           {FIELD_TYPE_MENU.map((t) => {
-            const iconName = TYPE_ICON[t.type] ?? "text_fields";
+            const iconName = t.icon ?? TYPE_ICON[t.type] ?? "text_fields";
             return (
               <button
                 key={t.type}
@@ -1449,7 +1559,42 @@ function FieldEditor({
         </>
       )}
 
-      {isChoice(field.type) && <OptionsEditor field={field} steps={steps} selfStepId={selfStepId} onPatch={onPatch} />}
+      {hasOptions(field.type) && (
+        <>
+          {field.type === "dropdown" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={!!field.multiple}
+                onChange={(e) => onPatch({ multiple: e.target.checked })}
+                style={{ width: 16, height: 16, accentColor: tokens.accent }}
+              />
+              Pozwól wybrać wiele opcji
+            </label>
+          )}
+          <OptionsEditor field={field} steps={steps} selfStepId={selfStepId} onPatch={onPatch} />
+          <RequiredToggle checked={!!field.required} onChange={(v) => onPatch({ required: v })} />
+        </>
+      )}
+
+      {field.type === "yes_no" && (
+        <RequiredToggle checked={!!field.required} onChange={(v) => onPatch({ required: v })} />
+      )}
+
+      {field.type === "checkbox" && (
+        <>
+          <Field label="Treść zgody (obok pola wyboru)">
+            <textarea
+              value={field.description ?? ""}
+              onChange={(e) => onPatch({ description: e.target.value })}
+              rows={2}
+              placeholder="np. Wyrażam zgodę na przetwarzanie danych osobowych w celu…"
+              style={{ ...inputStyle, resize: "vertical" }}
+            />
+          </Field>
+          <RequiredToggle checked={!!field.required} onChange={(v) => onPatch({ required: v })} />
+        </>
+      )}
 
       <PropertyMappingEditor field={field} onPatch={onPatch} />
     </Reorder.Item>
@@ -1459,8 +1604,54 @@ function FieldEditor({
 // §7b — mapowanie pola na właściwość CRM (wbudowaną lub własną). Oferuje tylko
 // właściwości ZGODNE typem (multi_select nie zmapuje się na number). Pola wyboru
 // mapowane na listy dostają mapowanie opcja-po-opcji z walidacją.
+function newPropTypeFor(field: FormField): PropertyDef["type"] {
+  switch (field.type) {
+    case "number": return "number";
+    case "email": return "email";
+    case "phone": return "text";
+    case "single_choice":
+    case "dropdown": return field.multiple ? "multi_select" : "select";
+    case "multi_choice": return "multi_select";
+    case "checkbox":
+    case "yes_no": return "boolean";
+    default: return "text";
+  }
+}
+
+function slugKey(s: string): string {
+  const base = s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "pole";
+  return `${base}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
 function PropertyMappingEditor({ field, onPatch }: { field: FormField; onPatch: (patch: Partial<FormField>) => void }) {
-  const propDefs = useContext(PropDefsCtx);
+  const { defs: propDefs, add: addPropDef } = useContext(PropDefsCtx);
+  const supabase = useMemo(() => createClient(), []);
+  const toast = useToast();
+
+  // §7 — utworzenie nowej właściwości CRM wprost z mapowania pola i zmapowanie.
+  async function createProperty() {
+    const label = window.prompt("Nazwa nowej właściwości CRM:", field.question || "");
+    if (!label || !label.trim()) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { toast.error("Sesja wygasła — zaloguj się ponownie."); return; }
+    const type = newPropTypeFor(field);
+    const key = slugKey(label);
+    const options = (type === "select" || type === "multi_select")
+      ? (field.options ?? []).map((o) => ({ key: slugKey(o.label), label: o.label }))
+      : null;
+    const { data, error } = await supabase
+      .from("property_defs")
+      .insert({ owner: user.id, key, label: label.trim(), type, options, scopes: ["deals"], position: 999 })
+      .select("*").single();
+    if (error || !data) {
+      toast.error(error?.code === "23505" ? "Właściwość o tym kluczu już istnieje." : "Nie udało się utworzyć właściwości.");
+      return;
+    }
+    addPropDef(data as PropertyDef);
+    onPatch({ mapping: { target: "custom", property: key }, map: undefined });
+    toast.success("Utworzono właściwość i zmapowano pole.");
+  }
 
   // Zbuduj listę zgodnych celów (wbudowane + własne aktywne).
   const targets = useMemo(() => {
@@ -1486,6 +1677,7 @@ function PropertyMappingEditor({ field, onPatch }: { field: FormField; onPatch: 
     field.mapping?.target === "custom" && !propDefs.some((d) => d.key === field.mapping!.property && !d.archived_at);
 
   function onSelect(value: string) {
+    if (value === "__new__") { createProperty(); return; }
     if (!value) {
       onPatch({ mapping: undefined, map: undefined });
       return;
@@ -1505,7 +1697,7 @@ function PropertyMappingEditor({ field, onPatch }: { field: FormField; onPatch: 
       : (propDefs.find((d) => d.key === field.mapping!.property)?.type as MapTargetType) ?? null
     : null;
 
-  const needsOptionMap = isChoice(field.type) && (selectedType === "select" || selectedType === "multi_select");
+  const needsOptionMap = hasOptions(field.type) && (selectedType === "select" || selectedType === "multi_select");
   const targetProp = field.mapping?.target === "custom"
     ? propDefs.find((d) => d.key === field.mapping!.property)
     : null;
@@ -1527,6 +1719,7 @@ function PropertyMappingEditor({ field, onPatch }: { field: FormField; onPatch: 
             ))}
           </optgroup>
         )}
+        <option value="__new__">＋ Utwórz nową właściwość…</option>
       </select>
 
       {deletedCustom && (
@@ -1578,7 +1771,7 @@ function PropertyMappingEditor({ field, onPatch }: { field: FormField; onPatch: 
 function changeFieldType(field: FormField, type: FieldType): Partial<FormField> {
   if (type === field.type) return {};
   const patch: Partial<FormField> = { type };
-  if (isChoice(type)) {
+  if (hasOptions(type)) {
     if (!field.options || field.options.length === 0) {
       patch.options = [
         { id: newStepId(), label: "Opcja A", next: NEXT },
@@ -1588,6 +1781,7 @@ function changeFieldType(field: FormField, type: FieldType): Partial<FormField> 
     patch.validation = undefined;
   } else {
     patch.options = undefined;
+    patch.multiple = undefined;
   }
   if (type === "phone" && !field.phonePrefix) patch.phonePrefix = DEFAULT_PHONE_PREFIX;
   return patch;
@@ -1906,7 +2100,7 @@ function ValidationEditor({ field, onPatch }: { field: FormField; onPatch: (patc
 function NextSelect({ value, steps, selfId, onChange }: { value: string; steps: Step[]; selfId: string; onChange: (v: string) => void }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-      <option value={NEXT}>→ Następny krok</option>
+      <option value={NEXT}>→ Następna strona</option>
       {steps
         .filter((s) => s.id !== selfId)
         .map((s) => (
@@ -1967,56 +2161,15 @@ function BrandPanel({
               style={inputStyle}
             />
           </Field>
-
-          <ToggleRow
-            label="Pokaż awatar przy każdym pytaniu"
-            checked={!!b.showAvatarOnSteps}
-            onChange={(v) => setB({ showAvatarOnSteps: v })}
-          />
         </>
       )}
       {!headerOn && b.showHeader !== false && (
         <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>Dodaj logo lub nazwę, aby nagłówek marki był widoczny.</p>
       )}
-
-      {/* ── Stopka marki (prawy dolny róg publicznej strony) — item 4 ───── */}
-      <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 14, marginTop: 4, display: "grid", gap: 12 }}>
-        <span style={{ ...paneTitle, display: "block" }}>Dyskretna stopka</span>
-        <p style={{ fontSize: 12.5, color: tokens.muted, margin: 0 }}>
-          Mały, subtelny podpis w prawym dolnym rogu formularza. Zastępuje domyślny znak Selltic — pokazuje
-          Twoje logo i własny tekst. Nie odciąga uwagi od formularza.
-        </p>
-
-        <ToggleRow
-          label="Pokaż stopkę marki"
-          checked={b.showFooter !== false}
-          onChange={(v) => setB({ showFooter: v })}
-        />
-
-        {b.showFooter !== false && (
-          <>
-            <Field label="Tekst stopki">
-              <input
-                value={b.footerText ?? ""}
-                onChange={(e) => setB({ footerText: e.target.value })}
-                placeholder="np. Bezpieczny formularz · Twoja Firma"
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Odnośnik stopki (opcjonalnie)">
-              <input
-                value={b.footerLink ?? ""}
-                onChange={(e) => setB({ footerLink: e.target.value })}
-                placeholder="https://twoja-strona.pl"
-                style={inputStyle}
-              />
-            </Field>
-            <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
-              Stopka używa logo powyżej. Puste pola = pokazujemy samą nazwę marki lub neutralną kropkę.
-            </p>
-          </>
-        )}
-      </div>
+      <p style={{ fontSize: 12, color: tokens.muted, margin: 0 }}>
+        Logo pojawia się wyłącznie jako marka w lewym górnym rogu formularza. Osobne logo nad pytaniem oraz stopka
+        w prawym dolnym rogu zostały usunięte.
+      </p>
     </div>
   );
 }
@@ -2111,6 +2264,24 @@ function ThemePanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: 
         checked={!!t.showChoiceHint}
         onChange={(v) => setTheme({ showChoiceHint: v })}
       />
+
+      <ToggleRow
+        label="Pozwól cofać się do poprzednich kroków"
+        checked={t.allowBack !== false}
+        onChange={(v) => setTheme({ allowBack: v })}
+      />
+
+      <Field label="Znaczniki przy opcjach wyboru">
+        <select
+          value={t.choiceLettering ?? "letters"}
+          onChange={(e) => setTheme({ choiceLettering: e.target.value as FormSchema["theme"]["choiceLettering"] })}
+          style={inputStyle}
+        >
+          <option value="letters">Litery (A, B, C)</option>
+          <option value="numbers">Cyfry (1, 2, 3)</option>
+          <option value="none">Bez znaczników</option>
+        </select>
+      </Field>
     </div>
   );
 }
@@ -2145,7 +2316,7 @@ const TEAM_BUILTINS: { key: string; label: string; type: "text" | "number" }[] =
 ];
 
 function TeamPropsEditor({ value, onChange }: { value: TeamProperty[]; onChange: (v: TeamProperty[]) => void }) {
-  const propDefs = useContext(PropDefsCtx);
+  const { defs: propDefs } = useContext(PropDefsCtx);
   const activeDefs = useMemo(() => propDefs.filter((d) => !d.archived_at), [propDefs]);
 
   const setRow = (id: string, patch: Partial<TeamProperty>) =>
@@ -2240,7 +2411,7 @@ function TeamPropsEditor({ value, onChange }: { value: TeamProperty[]; onChange:
   );
 }
 
-function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void; formId: string }) {
+function SettingsPanel({ schema, onPatch, formId, showMeta = true }: { schema: FormSchema; onPatch: (patch: Partial<FormSchema>) => void; formId: string; showMeta?: boolean }) {
   const settings: FormSettings = schema.settings ?? {};
   const setSettings = (patch: Partial<FormSettings>) => onPatch({ settings: { ...settings, ...patch } });
 
@@ -2444,11 +2615,15 @@ function SettingsPanel({ schema, onPatch, formId }: { schema: FormSchema; onPatc
         )}
       </div>
 
-      {/* §9 — Meta Conversions (Pixel + CAPI) + webhook */}
-      <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 14, marginTop: 4 }}>
-        <span style={{ ...paneTitle, display: "block", marginBottom: 10 }}>Meta Conversions & webhook</span>
-        <MetaSettings formId={formId} />
-      </div>
+      {/* §9 — Meta Conversions (Pixel + CAPI) + webhook. W nowym układzie Meta
+          i webhook żyją w zakładce „Integracje"; tu pokazujemy je tylko gdy
+          panel jest używany samodzielnie (showMeta). */}
+      {showMeta && (
+        <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 14, marginTop: 4 }}>
+          <span style={{ ...paneTitle, display: "block", marginBottom: 10 }}>Meta Conversions & webhook</span>
+          <MetaSettings formId={formId} />
+        </div>
+      )}
     </div>
   );
 }

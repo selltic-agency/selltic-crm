@@ -223,23 +223,33 @@ export default function FormRenderer({
       const next: Record<string, string | null> = {};
       let ok = true;
       for (const f of stepFields(current)) {
-        const raw = f.type === "multi_choice" ? "" : ((answers[f.id] as string) || "");
-        // Wielokrotny wybór: „wymagane” = min. jedna zaznaczona opcja.
-        if (f.type === "multi_choice") {
+        // Wielokrotny wybór (multi_choice lub dropdown „multiple"): „wymagane"
+        // = min. jedna zaznaczona opcja.
+        const multiSelect = f.type === "multi_choice" || (f.type === "dropdown" && f.multiple);
+        if (multiSelect) {
           const sel = (answers[f.id] as string[]) || [];
           const msg = f.required && sel.length === 0 ? "Zaznacz co najmniej jedną opcję." : null;
           next[f.id] = msg;
           if (msg) ok = false;
           continue;
         }
-        if (isChoice(f.type)) {
+        // Checkbox zgody: „wymagane" = zaznaczone.
+        if (f.type === "checkbox") {
+          const msg = f.required && (answers[f.id] as string) !== "true" ? "Zaznacz, aby kontynuować." : null;
+          next[f.id] = msg;
+          if (msg) ok = false;
+          continue;
+        }
+        // Pojedynczy wybór (single_choice / dropdown / tak-nie).
+        const singleSelect = isChoice(f.type) || f.type === "dropdown" || f.type === "yes_no";
+        if (singleSelect) {
           const sel = (answers[f.id] as string) || "";
           const msg = f.required && !sel ? "Wybierz opcję." : null;
           next[f.id] = msg;
           if (msg) ok = false;
           continue;
         }
-        const msg = validateFieldValue(f, raw);
+        const msg = validateFieldValue(f, (answers[f.id] as string) || "");
         next[f.id] = msg;
         if (msg) ok = false;
       }
@@ -352,6 +362,7 @@ export default function FormRenderer({
   const cardRadius = Math.min(28, radius + 8);
   const cardMaxWidth = 560;
   const showChoiceHint = themeChoiceHint(theme);
+  const lettering = theme.choiceLettering ?? "letters";
 
   // Własne tło formularza (URL lub wgrany plik). W trybie „karta” prześwituje
   // wokół karty; w trybie „pełne tło” pod treścią dokładamy delikatną przesłonę
@@ -384,10 +395,9 @@ export default function FormRenderer({
   // Nagłówek kroku: dla kontenera pokazujemy tylko, gdy podano tekst.
   const heading = current.question || (container ? "" : "—");
 
-  const canBack = history.length > 0 && current.type !== "end";
+  const canBack = history.length > 0 && current.type !== "end" && theme.allowBack !== false;
   const showCounter = current.type !== "end" && current.type !== "welcome" && steps.length > 2;
   const showKrok = !!theme.showStepNumber && current.type !== "end" && current.type !== "welcome" && current.type !== "statement";
-  const showStepAvatar = !!branding?.showAvatarOnSteps && !!branding?.logo && current.type !== "welcome" && current.type !== "end";
 
   // ── Logo marki przypięte w lewym górnym rogu ──────────────────────────
   // Jedno, stałe logo (jak na stronach lądowania). Zastępuje dawny podwójny
@@ -505,23 +515,6 @@ export default function FormRenderer({
         transition={spring}
         style={{ textAlign: align as React.CSSProperties["textAlign"] }}
       >
-        {showStepAvatar && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={branding!.logo}
-            alt=""
-            style={{
-              width: 54,
-              height: 54,
-              borderRadius: "50%",
-              objectFit: "cover",
-              border: `2px solid ${accent}`,
-              display: "block",
-              margin: align === "center" ? "0 auto 14px" : "0 0 14px",
-            }}
-          />
-        )}
-
         {!isSplit && current.image && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -563,6 +556,7 @@ export default function FormRenderer({
                 showLabel={container}
                 showChoiceHint={showChoiceHint}
                 optionStyle={optStyle}
+                lettering={lettering}
                 radius={radius}
                 value={answers[f.id]}
                 error={errors[f.id] ?? null}
@@ -767,6 +761,7 @@ function FieldControl({
   showLabel,
   showChoiceHint,
   optionStyle,
+  lettering,
   radius,
   value,
   error,
@@ -787,6 +782,7 @@ function FieldControl({
   showLabel: boolean;
   showChoiceHint: boolean;
   optionStyle: OptionStyle;
+  lettering: "letters" | "numbers" | "none";
   radius: number;
   value: string | string[] | undefined;
   error: string | null;
@@ -813,7 +809,7 @@ function FieldControl({
       {showLabel && field.question && (
         <div style={{ textAlign: align as React.CSSProperties["textAlign"] }}>
           <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.3 }}>{field.question}</span>
-          {field.description && (
+          {field.description && field.type !== "checkbox" && (
             <div style={{ fontSize: 14, opacity: 0.65, marginTop: 2 }}>{field.description}</div>
           )}
         </div>
@@ -883,6 +879,32 @@ function FieldControl({
         />
       )}
 
+      {field.type === "link" && (
+        <input
+          autoFocus={autoFocusFirst}
+          type="url"
+          inputMode="url"
+          value={strVal}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlurValidate}
+          placeholder={field.placeholder || "https://…"}
+          style={fieldStyle(text, invalid)}
+        />
+      )}
+
+      {field.type === "number" && (
+        <input
+          autoFocus={autoFocusFirst}
+          type="text"
+          inputMode="decimal"
+          value={strVal}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlurValidate}
+          placeholder={field.placeholder}
+          style={fieldStyle(text, invalid)}
+        />
+      )}
+
       {isChoice(field.type) && showChoiceHint && (
         <div
           style={{
@@ -901,7 +923,7 @@ function FieldControl({
         <div style={{ display: "grid", gap: 10 }}>
           {(field.options ?? []).map((o, i) => {
             const selected = field.type === "multi_choice" ? arrVal.includes(o.label) : strVal === o.label;
-            const inner = <OptionInner option={o} index={i} accent={accent} selected={selected} cards={cards} radius={radius} />;
+            const inner = <OptionInner option={o} index={i} accent={accent} selected={selected} cards={cards} radius={radius} lettering={lettering} />;
             const style = optionRowStyle(accent, text, selected, radius, cards);
             return field.type === "single_choice" ? (
               <motion.button
@@ -922,6 +944,66 @@ function FieldControl({
             );
           })}
         </div>
+      )}
+
+      {field.type === "dropdown" && !field.multiple && (
+        <select
+          autoFocus={autoFocusFirst}
+          value={strVal}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlurValidate}
+          style={fieldStyle(text, invalid)}
+        >
+          <option value="">{field.placeholder || "Wybierz…"}</option>
+          {(field.options ?? []).map((o) => (
+            <option key={o.id} value={o.label}>{o.label}</option>
+          ))}
+        </select>
+      )}
+
+      {field.type === "dropdown" && field.multiple && (
+        <select
+          multiple
+          value={arrVal}
+          onChange={(e) => onChange(Array.from(e.target.selectedOptions).map((o) => o.value))}
+          onBlur={onBlurValidate}
+          style={{ ...fieldStyle(text, invalid), minHeight: 120 }}
+        >
+          {(field.options ?? []).map((o) => (
+            <option key={o.id} value={o.label}>{o.label}</option>
+          ))}
+        </select>
+      )}
+
+      {field.type === "yes_no" && (
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+          {["Tak", "Nie"].map((label) => {
+            const selected = strVal === label;
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => (onChooseSingle ? onChooseSingle(label, NEXT) : onChange(label))}
+                style={{ ...optionRowStyle(accent, text, selected, radius, cards), justifyContent: "center", textAlign: "center" }}
+              >
+                <span style={{ fontSize: 16, fontWeight: 600 }}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {field.type === "checkbox" && (
+        <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", fontSize: 15, lineHeight: 1.45, textAlign: "left" }}>
+          <input
+            type="checkbox"
+            checked={strVal === "true"}
+            onChange={(e) => onChange(e.target.checked ? "true" : "")}
+            onBlur={onBlurValidate}
+            style={{ width: 20, height: 20, marginTop: 1, accentColor: accent, flexShrink: 0 }}
+          />
+          <span>{field.description || "Zaznacz, aby wyrazić zgodę."}</span>
+        </label>
       )}
 
       {error && <p style={{ color: ERROR_COLOR, fontSize: 14, margin: "2px 0 0" }}>{error}</p>}
@@ -951,6 +1033,7 @@ function OptionInner({
   selected,
   cards,
   radius,
+  lettering = "letters",
 }: {
   option: StepOption;
   index: number;
@@ -958,12 +1041,21 @@ function OptionInner({
   selected: boolean;
   cards: boolean;
   radius: number;
+  lettering?: "letters" | "numbers" | "none";
 }) {
+  // Znacznik opcji: emoji (jeśli ustawione), litera A/B/C, cyfra 1/2/3 lub brak.
+  const marker = option.icon
+    ? option.icon
+    : lettering === "numbers"
+      ? String(index + 1)
+      : lettering === "none"
+        ? ""
+        : String.fromCharCode(65 + index);
   return (
     <>
-      <span style={optionTile(accent, !!option.icon, cards, selected, radius)}>
-        {option.icon ? option.icon : String.fromCharCode(65 + index)}
-      </span>
+      {(marker !== "" || cards) && (
+        <span style={optionTile(accent, !!option.icon, cards, selected, radius)}>{marker}</span>
+      )}
       <span style={{ display: "grid", gap: 2, minWidth: 0, flex: 1 }}>
         <span style={{ fontWeight: 600, fontSize: cards ? 16.5 : 16, lineHeight: 1.25 }}>{option.label}</span>
         {option.description && (

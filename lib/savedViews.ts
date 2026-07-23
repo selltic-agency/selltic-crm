@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Filter, Sort } from "@/lib/filters";
 
-export type SavedViewPage = "deals" | "prospecting";
+export type SavedViewPage = "deals" | "prospecting" | "forms" | "submissions";
 export type ViewMode = "kanban" | "table";
 
 // Gdzie faktycznie żyją widoki: baza ('db') czy zapasowo localStorage ('local').
