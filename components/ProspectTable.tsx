@@ -310,7 +310,7 @@ function getVal(p: Prospect, key: string, viewByKey: Map<string, PropertyView>):
   if (key === "rating") return p.rating ?? -1;
   if (key === "created_at") return new Date(p.created_at).getTime();
   if (key === "prospecting_status") return STATUS_LABEL[displayStatusOf(p)];
-  if (key === "website_status") return p.website_status ?? "";
+  if (key === "website_status") return p.website ?? p.website_status ?? "";
   if (key === "category") return p.category ?? "";
   if (key === "purposes") return (p.purposes ?? []).join(",");
   if (key === "contact_attempts") return attemptsFromProps(p.props);
@@ -346,8 +346,27 @@ function renderCell(p: Prospect, key: string, viewByKey: Map<string, PropertyVie
     );
   if (key === "created_at") return formatDateTime(p.created_at);
   if (key === "website_status") {
-    if (!p.website_status) return "—";
-    return WEBSITE_STATUS_LABEL[p.website_status] ?? p.website_status;
+    // Priorytet: pokaż adres strony, jeśli jest (scraper często zapisuje samo
+    // `website` bez `website_status`). Status używamy tylko jako fallback, a
+    // "Brak strony" gdy jednoznacznie wiemy, że strony nie ma.
+    if (p.website) {
+      const host = p.website.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+      return (
+        <a
+          href={p.website}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          title={p.website}
+          style={{ color: tokens.accent, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        >
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{host}</span>
+          <MIcon name="open_in_new" size={11} />
+        </a>
+      );
+    }
+    if (p.website_status) return WEBSITE_STATUS_LABEL[p.website_status] ?? p.website_status;
+    return "—";
   }
   if (key === "prospecting_status") {
     const s = displayStatusOf(p);
