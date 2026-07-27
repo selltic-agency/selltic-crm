@@ -1457,11 +1457,8 @@ function ProspectingDataCard({ deal }: { deal: Deal }) {
             <a href={website.url} target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
               {website.host}
             </a>
-          ) : website.status === "none" ? (
-            <span style={{ color: tokens.success, fontWeight: 700 }}>Brak strony</span>
           ) : (
-            // Puste kolumny ≠ „brak strony" — o rekordzie po prostu nic nie wiemy.
-            <span style={{ color: tokens.muted }}>— brak danych</span>
+            <span style={{ color: tokens.success, fontWeight: 700 }}>{website.label}</span>
           )}
         </DealRow>
         {website.statusLabel && <DealRow label="Status strony">{website.statusLabel}</DealRow>}

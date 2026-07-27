@@ -1391,7 +1391,7 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
                 const info = websiteInfo(l);
                 if (info.host) return <span style={{ fontSize: 12.5, color: tokens.muted }}>{info.host.split("/")[0]}</span>;
                 if (info.status === "none") return <span style={{ fontSize: 12.5, color: tokens.success }}>Brak strony</span>;
-                return <span style={{ fontSize: 12.5, color: tokens.muted }}>{info.statusLabel ?? "—"}</span>;
+                return <span style={{ fontSize: 12.5, color: tokens.muted }}>{info.statusLabel}</span>;
               })()}
             </div>
             <div style={{ width: 50, flexShrink: 0, textAlign: "right" }}>

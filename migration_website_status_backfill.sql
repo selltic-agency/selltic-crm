@@ -71,6 +71,16 @@ where website is null
     where lower(reason) like '%brak strony%'
   );
 
--- 3. Kontrolka po migracji — ile rekordów wciąż nie ma żadnej informacji
---    o stronie (UI pokaże dla nich „—"; to poprawny stan „nie wiemy").
---    select count(*) from prospects where website is null and website_status is null;
+-- 2d. Zostały rekordy bez adresu i bez statusu. Reguła produktowa: dane
+--     pochodzą z Google Maps, gdzie adres WWW jest podany zawsze, gdy firma go
+--     ma — pusta kolumna znaczy więc „brak strony". Zapisujemy to wprost, żeby
+--     filtr „Status strony = Brak strony" łapał te same rekordy, które UI
+--     opisuje jako „Brak strony" (UI stosuje tę samą regułę w lib/website.ts).
+update prospects
+set website_status = 'none'
+where website is null and website_status is null;
+
+-- 3. Kontrolka po migracji — rozkład stanów strony:
+--    select coalesce(website_status, '(null)') as stan, count(*)
+--    from prospects group by 1 order by 2 desc;
+--    Rekordy ze statusem NULL mają adres, ale nieznany stan (patrz 2a).

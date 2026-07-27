@@ -12,9 +12,10 @@
 // ("Brak strony/domeny"). Dlatego UI NIE czyta tych kolumn wprost — woła
 // `websiteInfo()`, które scala wszystkie źródła w jeden, spójny wynik.
 //
-// Zasada rozstrzygania: adres strony > zapisany status > opis ze scoringu.
-// Nigdy nie zgadujemy „Brak strony", gdy po prostu nie mamy danych — wtedy
-// stan jest `unknown` i UI pokazuje „—".
+// Zasada rozstrzygania: adres strony > zapisany status > opis ze scoringu >
+// „brak strony" (pusta kolumna `website` przy danych z Google Maps znaczy, że
+// firma strony nie ma). Dzięki temu kolumna „Strona" nigdy nie pokazuje pustki
+// ani osobnego „brak danych" — zawsze albo adres, albo stan strony.
 import type { WebsiteStatus } from "@/lib/types";
 
 export const WEBSITE_STATUS_LABEL: Record<WebsiteStatus, string> = {
@@ -197,11 +198,15 @@ export type WebsiteInfo = {
   url: string | null;
   /** Adres do wyświetlenia (bez schematu i „www."). */
   host: string | null;
-  /** Rozstrzygnięty stan; 'unknown' = brak jakichkolwiek danych o stronie. */
+  /**
+   * Rozstrzygnięty stan. 'unknown' występuje wyłącznie razem z adresem (wiemy,
+   * że strona jest, nie wiemy w jakim stanie) — przy braku adresu zawsze
+   * wychodzi 'none', patrz reguła w `websiteInfo()`.
+   */
   status: WebsiteStatus | "unknown";
-  /** Czy firma ma stronę: true / false / null (nie wiadomo). */
-  hasWebsite: boolean | null;
-  /** Gotowy tekst do UI: adres, etykieta statusu albo „—". */
+  /** Czy firma ma stronę. */
+  hasWebsite: boolean;
+  /** Gotowy tekst do UI: adres albo etykieta statusu. */
   label: string;
   /** Dopisek dla tooltipa, np. status przy działającym linku. */
   statusLabel: string | null;
@@ -222,21 +227,25 @@ export function websiteInfo(p: WebsiteSource | null | undefined): WebsiteInfo {
     props?.score_reasons
   );
 
-  let status: WebsiteStatus | "unknown" = stored ?? scored ?? "unknown";
-  // Sprzeczność: mamy działający adres, a zapisany status mówi „brak strony"
-  // (typowe dla rekordów, gdzie status pochodzi ze starszego przebiegu
-  // scrapera). Adres jest twardszym dowodem — status ignorujemy.
+  // Reguła produktowa: brak adresu = brak strony. Prospekty pochodzą z Google
+  // Maps, gdzie adres WWW jest podawany zawsze, gdy firma go ma — pusta
+  // kolumna znaczy więc „firma nie ma strony", a nie „nie sprawdziliśmy".
+  // Dzięki temu w całym CRM-ie widać jeden komunikat („Brak strony"), a nie
+  // raz „Brak strony", raz „brak danych".
+  let status: WebsiteStatus | "unknown" = stored ?? scored ?? (url ? "unknown" : "none");
+  // Sprzeczność: mamy adres, a zapisany status mówi „brak strony" (typowe dla
+  // rekordów, gdzie status pochodzi ze starszego przebiegu scrapera). Adres
+  // jest twardszym dowodem — status ignorujemy.
   if (url && status === "none") status = "unknown";
 
-  const hasWebsite = url ? true : status === "unknown" ? null : status !== "none";
   const statusLabel = status === "unknown" ? null : WEBSITE_STATUS_LABEL[status];
 
   return {
     url,
     host: url ? websiteHost(url) : null,
     status,
-    hasWebsite,
-    label: url ? websiteHost(url) : (statusLabel ?? "—"),
+    hasWebsite: !!url || status !== "none",
+    label: url ? websiteHost(url) : (statusLabel ?? WEBSITE_STATUS_LABEL.none),
     statusLabel,
   };
 }

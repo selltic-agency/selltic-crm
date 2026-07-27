@@ -117,15 +117,20 @@ assert.equal(websiteStatusFromScoring(null, null), null);
   assert.equal(info.label, "Brak strony");
 }
 
-// 6. Kompletny brak danych → „—" i hasWebsite === null. Nigdy nie zgadujemy
-//    „Brak strony" tylko dlatego, że kolumny są puste.
+// 6. Puste kolumny → „Brak strony". Dane pochodzą z Google Maps, gdzie adres
+//    jest podany zawsze, gdy firma go ma, więc pustka = firma nie ma strony.
+//    Jeden komunikat w całym CRM-ie, bez osobnego „brak danych".
 {
   const info = websiteInfo({ website: null, website_status: null });
-  assert.equal(info.status, "unknown");
-  assert.equal(info.hasWebsite, null);
-  assert.equal(info.label, "—");
+  assert.equal(info.status, "none");
+  assert.equal(info.hasWebsite, false);
+  assert.equal(info.label, "Brak strony");
 }
-assert.equal(websiteInfo(null).label, "—");
+assert.equal(websiteInfo(null).label, "Brak strony");
+// Pusty string i placeholder w kolumnie `website` dają to samo co NULL.
+assert.equal(websiteInfo({ website: "" }).label, "Brak strony");
+assert.equal(websiteInfo({ website: "   " }).label, "Brak strony");
+assert.equal(websiteInfo({ website: "brak" }).label, "Brak strony");
 
 // 7. Stary rekord z props.score_reasons.
 {

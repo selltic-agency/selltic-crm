@@ -369,14 +369,12 @@ export default function CallingMode({
                         );
                       }
                       if (info.status === "none") return <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>;
-                      if (info.statusLabel)
-                        return (
-                          <span>
-                            {info.statusLabel}
-                            <span style={{ color: tokens.muted }}> · brak adresu</span>
-                          </span>
-                        );
-                      return <span style={{ color: tokens.muted }}>— brak danych</span>;
+                      return (
+                        <span>
+                          {info.statusLabel}
+                          <span style={{ color: tokens.muted }}> · brak adresu</span>
+                        </span>
+                      );
                     })()}
                   </InfoRow>
                   <InfoRow label="Miasto">{current.city || "—"}</InfoRow>

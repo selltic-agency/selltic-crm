@@ -304,11 +304,10 @@ function getVal(p: Prospect, key: string, viewByKey: Map<string, PropertyView>):
   if (key === "rating") return p.rating ?? -1;
   if (key === "created_at") return new Date(p.created_at).getTime();
   if (key === "prospecting_status") return STATUS_LABEL[displayStatusOf(p)];
-  // Sortujemy po tym, co widać w komórce (adres / etykieta statusu), a rekordy
-  // bez danych o stronie lądują na dole (null → patrz `sorted`).
+  // Sortujemy po tym, co widać w komórce (adres albo etykieta stanu strony).
   if (key === "website_status") {
     const info = websiteInfo(p);
-    return info.host ?? info.statusLabel ?? null;
+    return info.host ?? info.statusLabel;
   }
   if (key === "category") return p.category ?? "";
   if (key === "purposes") return (p.purposes ?? []).join(",");
@@ -365,13 +364,7 @@ function renderCell(p: Prospect, key: string, viewByKey: Map<string, PropertyVie
     }
     // Brak strony = sygnał sprzedażowy, więc wyróżniony (tak samo jak w szufladzie).
     if (info.status === "none") return <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>;
-    if (info.statusLabel)
-      return <span title="Strona wykryta przy scrapowaniu, brak zapisanego adresu">{info.statusLabel}</span>;
-    return (
-      <span style={{ color: tokens.muted }} title="Brak danych o stronie — rekord nie był sprawdzany">
-        —
-      </span>
-    );
+    return <span title="Strona wykryta przy scrapowaniu, brak zapisanego adresu">{info.statusLabel}</span>;
   }
   if (key === "prospecting_status") {
     const s = displayStatusOf(p);

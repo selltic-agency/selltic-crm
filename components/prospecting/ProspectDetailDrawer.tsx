@@ -486,15 +486,12 @@ function WebsiteValue({ p }: { p: Prospect }) {
     );
   }
   if (info.status === "none") return <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>;
-  if (info.statusLabel)
-    return (
-      <span title="Strona wykryta przy scrapowaniu, brak zapisanego adresu">
-        {info.statusLabel}
-        <span style={{ color: tokens.muted, fontSize: 12 }}> · brak adresu</span>
-      </span>
-    );
-  // Puste kolumny ≠ „brak strony" — o rekordzie po prostu nic nie wiemy.
-  return <span style={{ color: tokens.muted }}>— brak danych</span>;
+  return (
+    <span title="Strona wykryta przy scrapowaniu, brak zapisanego adresu">
+      {info.statusLabel}
+      <span style={{ color: tokens.muted, fontSize: 12 }}> · brak adresu</span>
+    </span>
+  );
 }
 
 // Edycja inline pojedynczej właściwości: pola tekstowe zapisują na blur,
