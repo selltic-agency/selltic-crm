@@ -26,6 +26,7 @@ import {
   googleMapsUrl,
 } from "@/lib/prospectStatus";
 import { attemptsFromProps } from "@/lib/prospectHistory";
+import { websiteInfo } from "@/lib/website";
 import { useScrollLock } from "@/lib/useScrollLock";
 import { logNoAnswer, markNotOurTarget, markNotInterested, addProspectNote, revertProspect } from "@/lib/prospectActions";
 import ProspectTimeline from "@/components/prospecting/ProspectTimeline";
@@ -398,13 +399,7 @@ export default function ProspectDetailDrawer({
                 )}
               </PropRow>
               <PropRow label="Strona">
-                {p.website ? (
-                  <a href={p.website} target="_blank" rel="noreferrer" style={{ color: tokens.accent, textDecoration: "none", wordBreak: "break-all", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                    {p.website.replace(/^https?:\/\//, "")} <MIcon name="open_in_new" size={11} />
-                  </a>
-                ) : (
-                  <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>
-                )}
+                <WebsiteValue p={p} />
               </PropRow>
               <PropRow label="Adres">{p.address || "—"}</PropRow>
               <PropRow label="Miasto">{p.city || "—"}</PropRow>
@@ -474,6 +469,32 @@ function PropRow({ label, children }: { label: string; children: React.ReactNode
       <span style={{ minWidth: 0, flex: 1, color: tokens.text }}>{children}</span>
     </div>
   );
+}
+
+// Stan strony WWW — ta sama logika co w kolumnie „Strona" w tabeli
+// (lib/website.ts), żeby szuflada nigdy nie przeczyła liście.
+function WebsiteValue({ p }: { p: Prospect }) {
+  const info = websiteInfo(p);
+  if (info.url) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <a href={info.url} target="_blank" rel="noreferrer" style={{ color: tokens.accent, textDecoration: "none", wordBreak: "break-all", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          {info.host} <MIcon name="open_in_new" size={11} />
+        </a>
+        {info.statusLabel && <span style={{ color: tokens.muted, fontSize: 12 }}>· {info.statusLabel}</span>}
+      </span>
+    );
+  }
+  if (info.status === "none") return <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>;
+  if (info.statusLabel)
+    return (
+      <span title="Strona wykryta przy scrapowaniu, brak zapisanego adresu">
+        {info.statusLabel}
+        <span style={{ color: tokens.muted, fontSize: 12 }}> · brak adresu</span>
+      </span>
+    );
+  // Puste kolumny ≠ „brak strony" — o rekordzie po prostu nic nie wiemy.
+  return <span style={{ color: tokens.muted }}>— brak danych</span>;
 }
 
 // Edycja inline pojedynczej właściwości: pola tekstowe zapisują na blur,

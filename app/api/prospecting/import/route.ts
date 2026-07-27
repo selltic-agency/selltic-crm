@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { checkScraperApiKey } from "@/lib/prospectingAuth";
+import { normalizeWebsiteUrl, websiteStatusForWrite } from "@/lib/website";
 
 type ImportRow = {
   place_id?: string | null;
@@ -83,6 +84,15 @@ export async function POST(req: Request) {
     if (r.priority_label != null) props.priority_label = r.priority_label;
     if (r.score_reasons != null) props.score_reasons = r.score_reasons;
 
+    // Stan strony normalizujemy przy zapisie, bo scraper przysyła go w kilku
+    // konwencjach ('brak'/'dziala'/'nie_dziala' vs. 'none'/'active'/...), a
+    // kolumna ma CHECK na wartości angielskie — nierozpoznany status wywalał
+    // cały wiersz błędem constraintu. Adres dostaje schemat i traci
+    // placeholdery ("", "-", "brak"), żeby link w CRM zawsze działał.
+    const websiteSent = "website" in r;
+    const website = websiteSent ? normalizeWebsiteUrl(r.website) : undefined;
+    const websiteStatus = websiteStatusForWrite(r.website_status, website ?? null, websiteSent);
+
     // Tylko „twarde” pola scrapera — celowo NIE wysyłamy prospecting_status/
     // note/last_contact_attempt_at, więc upsert ich nie nadpisze (ustawiane
     // ręcznie w CRM). Na insert prospecting_status dostaje wartość domyślną 'new'.
@@ -91,7 +101,9 @@ export async function POST(req: Request) {
       place_id: placeId,
       name,
       phone: r.phone ?? null,
-      website: r.website ?? null,
+      // `undefined` = pole nie przyszło w payloadzie → PostgREST pominie je w
+      // ON CONFLICT DO UPDATE i nie skasuje adresu zapisanego wcześniej.
+      website,
       address: r.address ?? null,
       rating: r.rating ?? null,
       review_count: r.review_count ?? null,
@@ -100,8 +112,8 @@ export async function POST(req: Request) {
       city: r.city ?? null,
       lead_score: r.priority_score ?? r.lead_score ?? null,
       lead_score_breakdown: r.lead_score_breakdown ?? null,
-      website_status: r.website_status ?? null,
-      website_last_checked_at: r.website_status != null ? new Date().toISOString() : undefined,
+      website_status: websiteStatus,
+      website_last_checked_at: websiteStatus != null ? new Date().toISOString() : undefined,
       props,
     };
 

@@ -14,6 +14,7 @@ import type { Prospect } from "@/lib/types";
 import MIcon from "@/components/MaterialIcon";
 import ProspectTable, { PROSPECT_COLUMNS, type SortConfig } from "@/components/ProspectTable";
 import { STATUS_LABEL, isCallable } from "@/lib/prospectStatus";
+import { WEBSITE_STATUS_LABEL } from "@/lib/website";
 import { appendConvertEvent } from "@/lib/prospectActions";
 import ProspectDetailDrawer from "@/components/prospecting/ProspectDetailDrawer";
 import CallingMode from "@/components/prospecting/CallingMode";
@@ -37,13 +38,6 @@ import {
 } from "@/lib/properties";
 
 const DEFAULT_SORT: SortConfig = { key: "lead_score", direction: "desc" };
-
-const WEBSITE_STATUS_LABEL: Record<string, string> = {
-  none: "Brak strony",
-  active: "Aktywna",
-  broken: "Zepsuta",
-  slow: "Wolna",
-};
 
 const PROSPECT_BUILT_IN_FIELDS: FieldDef[] = [
   {

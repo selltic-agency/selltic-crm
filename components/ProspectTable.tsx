@@ -11,18 +11,12 @@ import { ScoreBadge } from "@/components/ScoreBreakdown";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { STATUS_LABEL, STATUS_COLOR, displayStatusOf } from "@/lib/prospectStatus";
 import { attemptsFromProps } from "@/lib/prospectHistory";
+import { websiteInfo } from "@/lib/website";
 import { asArray, readPropValue, type PropertyView } from "@/lib/properties";
 import { PropertyValueDisplay } from "@/components/PropertyFields";
 import BulkEditBar from "@/components/BulkEditBar";
 import EmptyState from "@/components/EmptyState";
 import MIcon from "@/components/MaterialIcon";
-
-const WEBSITE_STATUS_LABEL: Record<string, string> = {
-  none: "Brak strony",
-  active: "Aktywna",
-  broken: "Zepsuta",
-  slow: "Wolna",
-};
 
 export type SortConfig = { key: string; direction: "asc" | "desc" };
 
@@ -310,7 +304,12 @@ function getVal(p: Prospect, key: string, viewByKey: Map<string, PropertyView>):
   if (key === "rating") return p.rating ?? -1;
   if (key === "created_at") return new Date(p.created_at).getTime();
   if (key === "prospecting_status") return STATUS_LABEL[displayStatusOf(p)];
-  if (key === "website_status") return p.website ?? p.website_status ?? "";
+  // Sortujemy po tym, co widać w komórce (adres / etykieta statusu), a rekordy
+  // bez danych o stronie lądują na dole (null → patrz `sorted`).
+  if (key === "website_status") {
+    const info = websiteInfo(p);
+    return info.host ?? info.statusLabel ?? null;
+  }
   if (key === "category") return p.category ?? "";
   if (key === "purposes") return (p.purposes ?? []).join(",");
   if (key === "contact_attempts") return attemptsFromProps(p.props);
@@ -346,27 +345,33 @@ function renderCell(p: Prospect, key: string, viewByKey: Map<string, PropertyVie
     );
   if (key === "created_at") return formatDateTime(p.created_at);
   if (key === "website_status") {
-    // Priorytet: pokaż adres strony, jeśli jest (scraper często zapisuje samo
-    // `website` bez `website_status`). Status używamy tylko jako fallback, a
-    // "Brak strony" gdy jednoznacznie wiemy, że strony nie ma.
-    if (p.website) {
-      const host = p.website.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    // Jedno źródło prawdy dla całego CRM-u (adres > status > opis ze scoringu),
+    // żeby tabela, szuflada i tryb dzwonienia mówiły to samo — patrz lib/website.ts.
+    const info = websiteInfo(p);
+    if (info.url) {
       return (
         <a
-          href={p.website}
+          href={info.url}
           target="_blank"
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
-          title={p.website}
+          title={info.statusLabel ? `${info.url} · ${info.statusLabel}` : info.url}
           style={{ color: tokens.accent, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{host}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{info.host}</span>
           <MIcon name="open_in_new" size={11} />
         </a>
       );
     }
-    if (p.website_status) return WEBSITE_STATUS_LABEL[p.website_status] ?? p.website_status;
-    return "—";
+    // Brak strony = sygnał sprzedażowy, więc wyróżniony (tak samo jak w szufladzie).
+    if (info.status === "none") return <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>;
+    if (info.statusLabel)
+      return <span title="Strona wykryta przy scrapowaniu, brak zapisanego adresu">{info.statusLabel}</span>;
+    return (
+      <span style={{ color: tokens.muted }} title="Brak danych o stronie — rekord nie był sprawdzany">
+        —
+      </span>
+    );
   }
   if (key === "prospecting_status") {
     const s = displayStatusOf(p);

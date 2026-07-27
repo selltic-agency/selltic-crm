@@ -50,6 +50,7 @@ import { useToast } from "@/components/Toast";
 import { ScoreBreakdownList } from "@/components/ScoreBreakdown";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { parseScoreBreakdown } from "@/lib/scoreBreakdown";
+import { websiteInfo } from "@/lib/website";
 import { normalizeOptions, propLabel, defInScope, type PropertyView } from "@/lib/properties";
 import { PropertyValueInput } from "@/components/PropertyFields";
 import { SendEmailModal } from "@/components/email/SendEmailModal";
@@ -1427,13 +1428,6 @@ function hexSoft(hex: string): string {
   return `rgba(${r},${g},${b},0.12)`;
 }
 
-const WEBSITE_STATUS_LABEL: Record<string, string> = {
-  none: "Brak strony",
-  active: "Aktywna",
-  broken: "Zepsuta",
-  slow: "Wolna",
-};
-
 // Dane z Google Maps + wyjaśnienie lead score, przeniesione przy konwersji
 // prospekt → deal. Renderuje się tylko, gdy deal faktycznie pochodzi ze scrapera.
 function ProspectingDataCard({ deal }: { deal: Deal }) {
@@ -1446,6 +1440,9 @@ function ProspectingDataCard({ deal }: { deal: Deal }) {
     !!deal.business_status;
   if (!hasData) return null;
 
+  // Ten sam rozstrzygacz co w Prospectingu (lib/website.ts) — deal dziedziczy
+  // te kolumny przy konwersji, więc nie może pokazywać czegoś innego.
+  const website = websiteInfo(deal);
   const scoreReasonsFallback = (deal.props as Record<string, unknown> | null)?.score_reasons;
   const mapsUrl = (deal.props as Record<string, unknown> | null)?.google_maps_url as string | undefined;
   const hasBreakdown =
@@ -1456,19 +1453,18 @@ function ProspectingDataCard({ deal }: { deal: Deal }) {
       <SectionTitle>Dane z Google Maps</SectionTitle>
       <div style={{ display: "grid", gap: 10 }}>
         <DealRow label="Strona">
-          {deal.website ? (
-            <a href={deal.website} target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
-              {deal.website}
+          {website.url ? (
+            <a href={website.url} target="_blank" rel="noreferrer" style={{ color: tokens.accent }}>
+              {website.host}
             </a>
-          ) : (
+          ) : website.status === "none" ? (
             <span style={{ color: tokens.success, fontWeight: 700 }}>Brak strony</span>
+          ) : (
+            // Puste kolumny ≠ „brak strony" — o rekordzie po prostu nic nie wiemy.
+            <span style={{ color: tokens.muted }}>— brak danych</span>
           )}
         </DealRow>
-        {deal.website_status && (
-          <DealRow label="Status strony">
-            {WEBSITE_STATUS_LABEL[deal.website_status] ?? deal.website_status}
-          </DealRow>
-        )}
+        {website.statusLabel && <DealRow label="Status strony">{website.statusLabel}</DealRow>}
         <DealRow label="Adres">{deal.address || "—"}</DealRow>
         <DealRow label="Ocena">
           {deal.google_rating != null

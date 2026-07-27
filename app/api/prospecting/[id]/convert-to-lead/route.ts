@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
 import type { Prospect } from "@/lib/types";
 import { CONTACT_SOURCE_KEY, ensureContactSourceDef } from "@/lib/contactSource";
+import { websiteInfo } from "@/lib/website";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -72,6 +73,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Rdzeń deala + PEŁNY snapshot danych scrapera w props (jsonb bez ograniczeń).
   // props to źródło prawdy dla danych przeniesionych z prospektu — dedykowane
   // kolumny niżej są tylko odpytywalnym duplikatem tego, co i tak jest w props.
+  // Stan strony przenosimy w postaci znormalizowanej (lib/website.ts), żeby
+  // deal nie odziedziczył pustego stringa / adresu bez schematu ze starych
+  // rekordów prospektów.
+  const website = websiteInfo(p);
+  const websiteUrl = website.url;
+  const websiteStatus = website.status === "unknown" ? null : website.status;
+
   const corePayload = {
     owner: user.id,
     name: body.name?.trim() || p.name,
@@ -83,7 +91,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     // props zachowane dla zgodności wstecznej (google_maps_url, score_reasons)
     // oraz komplet danych zdublowany, żeby nic nie zginęło.
     props: {
-      website: p.website,
+      website: websiteUrl,
       address: p.address,
       industry: p.industry,
       category: p.category ?? p.industry,
@@ -94,7 +102,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       business_status: p.business_status,
       lead_score: p.lead_score,
       lead_score_breakdown: p.lead_score_breakdown,
-      website_status: p.website_status,
+      website_status: websiteStatus,
       google_maps_url: googleMapsUrl,
       score_reasons: props.score_reasons ?? null,
       // Właściwość „Źródło kontaktu" (select, edytowalna później na dealu).
@@ -109,14 +117,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const extendedPayload = {
     ...corePayload,
     place_id: p.place_id,
-    website: p.website,
+    website: websiteUrl,
     address: p.address,
     google_rating: p.rating,
     review_count: p.review_count,
     business_status: p.business_status,
     industry: p.industry,
     city: p.city,
-    website_status: p.website_status,
+    website_status: websiteStatus,
     lead_score: p.lead_score,
     lead_score_breakdown: p.lead_score_breakdown,
     // Kuratorowana kategoria branży (Feature 1) — przeniesiona na deala, żeby

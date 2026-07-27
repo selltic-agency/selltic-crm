@@ -18,6 +18,7 @@ import { humanizeScrapeError, ZERO_RESULTS_MESSAGE, formatFound } from "@/lib/sc
 import { ScoreBadge } from "@/components/ScoreBreakdown";
 import { useClassification } from "@/lib/classification";
 import { useIsMobile } from "@/lib/responsive";
+import { websiteInfo } from "@/lib/website";
 import type { LeadCategory, ScrapeJob, ScrapeBatch, ScrapeBatchStatus, ScrapedLead, Prospect } from "@/lib/types";
 import MIcon from "@/components/MaterialIcon";
 
@@ -1384,11 +1385,14 @@ function LeadsTab({ leads, onMoved }: { leads: ScrapedLead[]; onMoved: () => voi
               ⭐ {l.rating ?? "—"} ({l.review_count ?? 0})
             </div>
             <div style={{ width: 90, flexShrink: 0 }}>
-              {l.website ? (
-                <span style={{ fontSize: 12.5, color: tokens.muted }}>{l.website.replace(/^https?:\/\//, "").split("/")[0]}</span>
-              ) : (
-                <span style={{ fontSize: 12.5, color: tokens.success }}>Brak strony</span>
-              )}
+              {(() => {
+                // Ta sama normalizacja co w Prospectingu (lib/website.ts) — pusty
+                // string / "brak" w kolumnie `website` to brak adresu, nie adres.
+                const info = websiteInfo(l);
+                if (info.host) return <span style={{ fontSize: 12.5, color: tokens.muted }}>{info.host.split("/")[0]}</span>;
+                if (info.status === "none") return <span style={{ fontSize: 12.5, color: tokens.success }}>Brak strony</span>;
+                return <span style={{ fontSize: 12.5, color: tokens.muted }}>{info.statusLabel ?? "—"}</span>;
+              })()}
             </div>
             <div style={{ width: 50, flexShrink: 0, textAlign: "right" }}>
               <ScoreBadge score={l.score} breakdown={l.score_breakdown} />

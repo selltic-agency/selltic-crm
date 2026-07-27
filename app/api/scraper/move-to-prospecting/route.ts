@@ -16,17 +16,12 @@
 // funkcja serverless nie zmieści się w limicie czasu.
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase/server";
-import type { ScrapedLead, WebsiteStatus } from "@/lib/types";
+import type { ScrapedLead } from "@/lib/types";
+import { normalizeWebsiteUrl, websiteStatusForWrite } from "@/lib/website";
 
 // Bulk-move kilkuset leadów to dziesiątki zapytań do Supabase — domyślny
 // limit czasu funkcji może nie wystarczyć.
 export const maxDuration = 60;
-
-const WEBSITE_STATUS_MAP: Record<string, WebsiteStatus> = {
-  brak: "none",
-  dziala: "active",
-  nie_dziala: "broken",
-};
 
 // Paczka bezpieczna dla długości URL-a: 100 UUID-ów ≈ 4 KB parametru filtra.
 const CHUNK_SIZE = 100;
@@ -40,10 +35,17 @@ function chunk<T>(arr: T[], size = CHUNK_SIZE): T[][] {
 // Pola prospekta pochodzące ze scrapowania — wspólne dla insertu nowego
 // prospekta i odświeżenia przywracanego z Archiwum.
 function prospectFields(lead: ScrapedLead) {
+  // Stan strony normalizujemy wspólnym helperem (lib/website.ts): scraper
+  // zapisuje status po polsku, a kolumna prospects.website_status ma CHECK na
+  // wartości angielskie. Gdy scoring był wyłączony (brak statusu), wyprowadzamy
+  // 'none' z pustego adresu — inaczej prospekt trafiał do CRM-u z kompletnie
+  // pustą kolumną „Strona".
+  const website = normalizeWebsiteUrl(lead.website);
+  const websiteStatus = websiteStatusForWrite(lead.website_status, website, true);
   return {
     name: lead.business_name,
     phone: lead.phone,
-    website: lead.website,
+    website,
     address: lead.address,
     rating: lead.rating,
     review_count: lead.review_count,
@@ -55,8 +57,8 @@ function prospectFields(lead: ScrapedLead) {
     category: lead.category ?? null,
     lead_score: lead.score,
     lead_score_breakdown: lead.score_breakdown,
-    website_status: lead.website_status ? WEBSITE_STATUS_MAP[lead.website_status] ?? null : null,
-    website_last_checked_at: lead.website_status ? lead.scraped_at : null,
+    website_status: websiteStatus ?? null,
+    website_last_checked_at: websiteStatus ? lead.scraped_at : null,
   };
 }
 

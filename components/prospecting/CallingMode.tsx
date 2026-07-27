@@ -17,17 +17,11 @@ import MIcon from "@/components/MaterialIcon";
 import { CategoryBadge, PurposeBadges } from "@/components/ClassificationBadges";
 import { googleMapsUrl } from "@/lib/prospectStatus";
 import { attemptsFromProps, type ProspectSnapshot } from "@/lib/prospectHistory";
+import { websiteInfo } from "@/lib/website";
 import { useScrollLock } from "@/lib/useScrollLock";
 import { logNoAnswer, markNotOurTarget, markNotInterested, addProspectNote, revertProspect } from "@/lib/prospectActions";
 import ProspectTimeline from "@/components/prospecting/ProspectTimeline";
 import ConvertModal, { type ConvertOptions } from "@/components/prospecting/ConvertModal";
-
-const WEBSITE_STATUS_LABEL: Record<string, string> = {
-  none: "Brak strony",
-  active: "Aktywna",
-  broken: "Zepsuta",
-  slow: "Wolna",
-};
 
 // Wpis stosu cofania: pozycja w kolejce + migawka do pełnego odwrócenia akcji
 // (null dla „Pomiń" — nic nie zapisał). Konwersji nie cofamy (deal już
@@ -360,17 +354,30 @@ export default function CallingMode({
                   </InfoRow>
                   <InfoRow label="Adres">{current.address || "—"}</InfoRow>
                   <InfoRow label="Strona">
-                    {current.website ? (
-                      <a href={current.website} target="_blank" rel="noreferrer" style={{ color: tokens.accent, display: "inline-flex", gap: 5, alignItems: "center", wordBreak: "break-all" }}>
-                        <MIcon name="language" size={13} /> {current.website.replace(/^https?:\/\//, "")}
-                        <MIcon name="open_in_new" size={11} />
-                      </a>
-                    ) : (
-                      <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>
-                    )}
-                    {current.website_status && current.website && (
-                      <span style={{ color: tokens.muted }}> · {WEBSITE_STATUS_LABEL[current.website_status] ?? current.website_status}</span>
-                    )}
+                    {/* Ten sam wynik co w tabeli i szufladzie — patrz lib/website.ts. */}
+                    {(() => {
+                      const info = websiteInfo(current);
+                      if (info.url) {
+                        return (
+                          <>
+                            <a href={info.url} target="_blank" rel="noreferrer" style={{ color: tokens.accent, display: "inline-flex", gap: 5, alignItems: "center", wordBreak: "break-all" }}>
+                              <MIcon name="language" size={13} /> {info.host}
+                              <MIcon name="open_in_new" size={11} />
+                            </a>
+                            {info.statusLabel && <span style={{ color: tokens.muted }}> · {info.statusLabel}</span>}
+                          </>
+                        );
+                      }
+                      if (info.status === "none") return <span style={{ color: tokens.success, fontWeight: 600 }}>Brak strony</span>;
+                      if (info.statusLabel)
+                        return (
+                          <span>
+                            {info.statusLabel}
+                            <span style={{ color: tokens.muted }}> · brak adresu</span>
+                          </span>
+                        );
+                      return <span style={{ color: tokens.muted }}>— brak danych</span>;
+                    })()}
                   </InfoRow>
                   <InfoRow label="Miasto">{current.city || "—"}</InfoRow>
                   <InfoRow label="Status firmy">{current.business_status || "—"}</InfoRow>
