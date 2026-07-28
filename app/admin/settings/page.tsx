@@ -9,6 +9,7 @@ import { useIsMobile } from "@/lib/responsive";
 import type {
   AppSettings,
   CategoryKeyword,
+  LeadCategory,
   PipelineStage,
   PropertyDef,
   PropertyOption,
@@ -55,7 +56,7 @@ const TAB_GROUPS: TabGroup[] = [
     items: [
       { key: "properties", label: "Właściwości", icon: "tune", hint: "Pola własne leadów" },
       { key: "stages", label: "Etapy lejka", icon: "account_tree", hint: "Kolumny pipeline'u" },
-      { key: "categories", label: "Kategorie branż", icon: "sell", hint: "Mapowanie słów kluczowych" },
+      { key: "categories", label: "Kategorie branż", icon: "sell", hint: "Kategorie i słowa kluczowe" },
     ],
   },
   {
@@ -648,18 +649,30 @@ function Section({ children }: { children: React.ReactNode }) {
 }
 
 /* ── Kategorie branż (Feature 1) ──────────────────────────────────────────
-   Stała lista 13 kategorii (z kontekstu klasyfikacji). Ekran zarządza
-   MAPOWANIEM słów kluczowych scrapera → kategoria (wiele słów → jedna
-   kategoria): dodaj / usuń / przenieś słowo między kategoriami. Mapowanie
-   dotyczy PRZYSZŁYCH zadań scrapowania (istniejące leady nie są przeklejane). */
+   Dwie rzeczy w jednym ekranie:
+   1) SAME KATEGORIE — dodaj / zmień nazwę i kolor / usuń. Kategoria żyje na
+      leadach pod STAŁYM kluczem (`key`), więc zmiana nazwy niczego nie odpina.
+      Usunięcie pyta, co zrobić z leadami i słowami kluczowymi (przepnij do
+      innej kategorii albo wyczyść) — nic nie znika po cichu.
+   2) MAPOWANIE słów kluczowych scrapera → kategoria (wiele słów → jedna
+      kategoria): dodaj / usuń / przenieś słowo między kategoriami. Mapowanie
+      dotyczy PRZYSZŁYCH zadań scrapowania (istniejące leady nie są przeklejane). */
 function CategoriesTab() {
   const supabase = useMemo(() => createClient(), []);
   const toast = useToast();
-  const { categories, loading: catLoading } = useClassification();
+  const { categories, loading: catLoading, reload: reloadCategories } = useClassification();
   const [keywords, setKeywords] = useState<CategoryKeyword[]>([]);
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [newColor, setNewColor] = useState("#6C5CE7");
+  const [addingCat, setAddingCat] = useState(false);
+  const [deleting, setDeleting] = useState<LeadCategory | null>(null);
+
+  // Gdy tabela `lead_categories` jest niedostępna (przed migracją), kontekst
+  // podaje wartości domyślne bez właściciela — wtedy nie ma czego edytować.
+  const editable = categories.length > 0 && categories.every((c) => !!c.owner);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -745,6 +758,93 @@ function CategoriesTab() {
     }
   }
 
+  // ── Kategorie: dodaj / zmień nazwę i kolor / usuń ───────────────────────
+
+  async function addCategory() {
+    const label = newLabel.trim();
+    if (!label || addingCat) return;
+    setAddingCat(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setAddingCat(false);
+      return;
+    }
+    // Klucz to stabilny slug trzymany na leadach — musi być unikalny u właściciela.
+    const existing = new Set(categories.map((c) => c.key));
+    let key = slugify(label) || "kategoria";
+    if (existing.has(key)) key = `${key}_${Math.random().toString(36).slice(2, 5)}`;
+    const position = categories.length ? Math.max(...categories.map((c) => c.position)) + 1 : 0;
+    const { error } = await supabase
+      .from("lead_categories")
+      .insert({ owner: user.id, key, label, color: newColor, position });
+    setAddingCat(false);
+    if (error) {
+      toast.error("Nie udało się dodać kategorii.");
+      return;
+    }
+    setNewLabel("");
+    await reloadCategories();
+    toast.success("Kategoria dodana.");
+  }
+
+  // Nazwa i kolor są czysto prezentacyjne — `key` zostaje, więc leady z tą
+  // kategorią nadal ją mają (zmieniają tylko etykietę i kolor badge'a).
+  async function patchCategory(cat: LeadCategory, patch: { label?: string; color?: string }) {
+    const { error } = await supabase.from("lead_categories").update(patch).eq("id", cat.id);
+    if (error) {
+      toast.error("Nie udało się zapisać kategorii.");
+      return;
+    }
+    await reloadCategories();
+  }
+
+  // Usuwanie: przepnij kategorię na CAŁYM łańcuchu leada (zadanie scrapera →
+  // zescrapowany lead → prospekt → deal) albo ją wyczyść. Słowa kluczowe idą za
+  // kategorią, a bez kategorii zastępczej nie mają sensu — kasujemy je.
+  async function confirmDeleteCategory(replacementKey: string) {
+    if (!deleting) return;
+    const key = deleting.key;
+    const next = replacementKey || null;
+
+    const results = await Promise.all([
+      supabase.from("scrape_jobs").update({ category: next }).eq("category", key),
+      supabase.from("scraped_leads").update({ category: next }).eq("category", key),
+      supabase.from("prospects").update({ category: next }).eq("category", key),
+      supabase.from("deals").update({ category: next }).eq("category", key),
+      next
+        ? supabase.from("category_keywords").update({ category_key: next }).eq("category_key", key)
+        : supabase.from("category_keywords").delete().eq("category_key", key),
+    ]);
+    if (results.some((r) => r.error)) {
+      toast.error("Nie udało się przepiąć leadów — kategoria nie została usunięta.");
+      setDeleting(null);
+      load();
+      return;
+    }
+
+    const { error } = await supabase.from("lead_categories").delete().eq("id", deleting.id);
+    setDeleting(null);
+    if (error) {
+      toast.error("Nie udało się usunąć kategorii.");
+      load();
+      return;
+    }
+    await Promise.all([reloadCategories(), load()]);
+    toast.success("Kategoria usunięta.");
+  }
+
+  function requestDelete(cat: LeadCategory) {
+    // Pusta tabela = kontekst zasieje domyślne 13 kategorii przy następnym
+    // wczytaniu, więc ostatniej nie oddajemy — inaczej „usunięcie” wraca.
+    if (categories.length <= 1) {
+      toast.error("Musi pozostać co najmniej jedna kategoria.");
+      return;
+    }
+    setDeleting(cat);
+  }
+
   if (catLoading || loading) {
     return (
       <Section>
@@ -756,124 +856,469 @@ function CategoriesTab() {
   return (
     <Section>
       <p style={{ fontSize: 14, color: tokens.muted, margin: "0 0 18px" }}>
-        Przypisz słowa kluczowe scrapera do kategorii branży (wiele słów → jedna kategoria).
-        Nowe zadanie scrapowania z niezmapowanym słowem poprosi o wskazanie kategorii,
-        zanim ruszy. Zmiany dotyczą <b>przyszłych</b> zadań — istniejących leadów nie
-        przepinamy automatycznie (kategorię pojedynczego leada zmienisz w jego widoku
-        lub zbiorczo na liście).
+        Kategorie branż porządkują leady w całym CRM — możesz je dodawać, przemianowywać
+        (nazwa i kolor) oraz usuwać. Kategoria trzymana jest na leadzie pod stałym kluczem,
+        więc zmiana nazwy nie odpina istniejących leadów. Do każdej kategorii przypisujesz
+        słowa kluczowe scrapera (wiele słów → jedna kategoria); zadanie scrapowania z
+        niezmapowanym słowem poprosi o wskazanie kategorii, zanim ruszy. Mapowanie dotyczy{" "}
+        <b>przyszłych</b> zadań — istniejących leadów nie przepinamy automatycznie
+        (kategorię pojedynczego leada zmienisz w jego widoku lub zbiorczo na liście).
       </p>
 
-      <div style={{ display: "grid", gap: 12 }}>
-        {categories.map((c) => {
-          const list = byCategory[c.key] ?? [];
-          return (
-            <div key={c.key} style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, padding: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <span style={{ width: 12, height: 12, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{c.label}</span>
-                <span style={{ fontSize: 12, color: tokens.muted, fontWeight: 600 }}>({list.length})</span>
-              </div>
-
-              {list.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                  {list.map((k) => (
-                    <span
-                      key={k.id}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "4px 6px 4px 12px",
-                        borderRadius: 999,
-                        background: `${c.color}14`,
-                        border: `1px solid ${c.color}33`,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: tokens.text,
-                      }}
-                    >
-                      {k.keyword}
-                      <select
-                        value={c.key}
-                        onChange={(e) => moveKeyword(k, e.target.value)}
-                        title="Przenieś do innej kategorii"
-                        style={{
-                          border: `1px solid ${tokens.border}`,
-                          borderRadius: 8,
-                          background: "#fff",
-                          fontSize: 11,
-                          padding: "2px 4px",
-                          cursor: "pointer",
-                          maxWidth: 130,
-                        }}
-                      >
-                        {categories.map((opt) => (
-                          <option key={opt.key} value={opt.key}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => removeKeyword(k)}
-                        aria-label={`Usuń słowo ${k.keyword}`}
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: 7,
-                          border: "none",
-                          background: "none",
-                          display: "grid",
-                          placeItems: "center",
-                          cursor: "pointer",
-                          color: tokens.muted,
-                        }}
-                      >
-                        <MIcon name="close" size={13} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <input
-                  placeholder="Dodaj słowo kluczowe (możesz wkleić kilka po przecinku)"
-                  value={drafts[c.key] ?? ""}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [c.key]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addKeyword(c.key);
-                    }
-                  }}
-                  style={{ ...inputStyle, flex: "1 1 240px", minWidth: 0 }}
-                />
-                <button
-                  onClick={() => addKeyword(c.key)}
-                  disabled={busy || !(drafts[c.key] ?? "").trim()}
-                  style={{
-                    ...ghostButton,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    opacity: busy || !(drafts[c.key] ?? "").trim() ? 0.5 : 1,
-                  }}
-                >
-                  <MIcon name="add" size={16} /> Dodaj
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {unmapped.length > 0 && (
-        <p style={{ fontSize: 12.5, color: tokens.warning, marginTop: 14 }}>
-          {unmapped.length} słów jest przypisanych do nieistniejących kategorii — przenieś je do
-          jednej z powyższych.
+      {!editable && (
+        <p style={{ fontSize: 12.5, color: tokens.warning, margin: "0 0 14px", fontWeight: 600 }}>
+          Widok pokazuje kategorie domyślne — tabela kategorii jest niedostępna (brak
+          migracji <code>migration_lead_categories.sql</code>). Edycja ruszy po jej uruchomieniu.
         </p>
       )}
+
+      <div style={{ display: "grid", gap: 12 }}>
+        {categories.map((c) => (
+          <CategoryCard
+            key={c.id}
+            category={c}
+            categories={categories}
+            keywords={byCategory[c.key] ?? []}
+            editable={editable}
+            busy={busy}
+            draft={drafts[c.key] ?? ""}
+            onDraftChange={(v) => setDrafts((d) => ({ ...d, [c.key]: v }))}
+            onAddKeyword={() => addKeyword(c.key)}
+            onMoveKeyword={moveKeyword}
+            onRemoveKeyword={removeKeyword}
+            onRename={(label) => patchCategory(c, { label })}
+            onRecolor={(color) => patchCategory(c, { color })}
+            onDelete={() => requestDelete(c)}
+          />
+        ))}
+      </div>
+
+      {/* ── Nowa kategoria ── */}
+      {editable && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+            marginTop: 16,
+            paddingTop: 14,
+            borderTop: `1px solid ${tokens.borderSoft}`,
+          }}
+        >
+          <input
+            type="color"
+            value={newColor}
+            onChange={(e) => setNewColor(e.target.value)}
+            aria-label="Kolor nowej kategorii"
+            style={{ width: 34, height: 34, padding: 0, border: `1px solid ${tokens.border}`, borderRadius: 8, cursor: "pointer", flexShrink: 0 }}
+          />
+          <input
+            placeholder="Nazwa nowej kategorii (np. Rehabilitacja)"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addCategory();
+              }
+            }}
+            style={{ ...inputStyle, flex: "1 1 240px", minWidth: 0 }}
+          />
+          <button
+            onClick={addCategory}
+            disabled={addingCat || !newLabel.trim()}
+            style={{
+              ...primaryButton,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              opacity: addingCat || !newLabel.trim() ? 0.5 : 1,
+              cursor: addingCat || !newLabel.trim() ? "not-allowed" : "pointer",
+            }}
+          >
+            <MIcon name="add" size={16} /> {addingCat ? "Dodawanie…" : "Dodaj kategorię"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Słowa wskazujące na nieistniejącą kategorię ── */}
+      {unmapped.length > 0 && (
+        <div style={{ marginTop: 18, border: `1px solid ${tokens.warning}55`, borderRadius: 12, padding: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <MIcon name="warning" size={16} color={tokens.warning} />
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Słowa bez kategorii ({unmapped.length})</span>
+          </div>
+          <p style={{ fontSize: 12.5, color: tokens.muted, margin: "0 0 10px" }}>
+            Wskazują na kategorię, której już nie ma. Przenieś je do jednej z powyższych albo usuń.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {unmapped.map((k) => (
+              <KeywordChip
+                key={k.id}
+                keyword={k}
+                color={tokens.warning}
+                categories={categories}
+                onMove={moveKeyword}
+                onRemove={removeKeyword}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <DeleteCategoryDialog
+          category={deleting}
+          others={categories.filter((c) => c.id !== deleting.id)}
+          keywordCount={(byCategory[deleting.key] ?? []).length}
+          supabase={supabase}
+          onCancel={() => setDeleting(null)}
+          onConfirm={confirmDeleteCategory}
+        />
+      )}
     </Section>
+  );
+}
+
+// Karta jednej kategorii: nagłówek do edycji (kolor + nazwa + usuwanie) i lista
+// przypisanych słów kluczowych scrapera. Nazwę zapisujemy przy wyjściu z pola
+// (lub Enterem) — kolor od razu, bo to pojedyncze kliknięcie.
+function CategoryCard({
+  category,
+  categories,
+  keywords,
+  editable,
+  busy,
+  draft,
+  onDraftChange,
+  onAddKeyword,
+  onMoveKeyword,
+  onRemoveKeyword,
+  onRename,
+  onRecolor,
+  onDelete,
+}: {
+  category: LeadCategory;
+  categories: LeadCategory[];
+  keywords: CategoryKeyword[];
+  editable: boolean;
+  busy: boolean;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onAddKeyword: () => void;
+  onMoveKeyword: (k: CategoryKeyword, categoryKey: string) => void;
+  onRemoveKeyword: (k: CategoryKeyword) => void;
+  onRename: (label: string) => void;
+  onRecolor: (color: string) => void;
+  onDelete: () => void;
+}) {
+  const [label, setLabel] = useState(category.label);
+  useEffect(() => setLabel(category.label), [category.label]);
+
+  function commitLabel() {
+    const v = label.trim();
+    if (v && v !== category.label) onRename(v);
+    else setLabel(category.label);
+  }
+
+  return (
+    <div style={{ border: `1px solid ${tokens.border}`, borderRadius: 12, padding: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        {editable ? (
+          <label
+            aria-label={`Kolor kategorii ${category.label}`}
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 7,
+              flexShrink: 0,
+              background: category.color,
+              border: `1px solid ${tokens.border}`,
+              cursor: "pointer",
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <input
+              type="color"
+              value={category.color}
+              onChange={(e) => onRecolor(e.target.value)}
+              style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }}
+            />
+          </label>
+        ) : (
+          <span style={{ width: 12, height: 12, borderRadius: "50%", background: category.color, flexShrink: 0 }} />
+        )}
+
+        {editable ? (
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={commitLabel}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              } else if (e.key === "Escape") {
+                setLabel(category.label);
+              }
+            }}
+            aria-label="Nazwa kategorii"
+            style={{ ...inputStyle, flex: 1, minWidth: 0, fontWeight: 600, padding: "5px 10px" }}
+          />
+        ) : (
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 700 }}>{category.label}</span>
+        )}
+
+        <span style={{ fontSize: 12, color: tokens.muted, fontWeight: 600, flexShrink: 0 }}>
+          {keywords.length} {keywords.length === 1 ? "słowo" : "słów"}
+        </span>
+
+        {editable && (
+          <button onClick={onDelete} title="Usuń kategorię" aria-label={`Usuń kategorię ${category.label}`} style={iconBtn}>
+            <MIcon name="delete" size={15} color={tokens.muted} />
+          </button>
+        )}
+      </div>
+
+      {keywords.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+          {keywords.map((k) => (
+            <KeywordChip
+              key={k.id}
+              keyword={k}
+              color={category.color}
+              categories={categories}
+              onMove={onMoveKeyword}
+              onRemove={onRemoveKeyword}
+            />
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          placeholder="Dodaj słowo kluczowe (możesz wkleić kilka po przecinku)"
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onAddKeyword();
+            }
+          }}
+          style={{ ...inputStyle, flex: "1 1 240px", minWidth: 0 }}
+        />
+        <button
+          onClick={onAddKeyword}
+          disabled={busy || !draft.trim()}
+          style={{
+            ...ghostButton,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            opacity: busy || !draft.trim() ? 0.5 : 1,
+          }}
+        >
+          <MIcon name="add" size={16} /> Dodaj
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Chip słowa kluczowego: nazwa + wybór kategorii (przeniesienie) + usunięcie.
+// Gdy słowo wskazuje na nieistniejącą kategorię, select startuje z pustej opcji.
+function KeywordChip({
+  keyword,
+  color,
+  categories,
+  onMove,
+  onRemove,
+}: {
+  keyword: CategoryKeyword;
+  color: string;
+  categories: LeadCategory[];
+  onMove: (k: CategoryKeyword, categoryKey: string) => void;
+  onRemove: (k: CategoryKeyword) => void;
+}) {
+  const known = categories.some((c) => c.key === keyword.category_key);
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "4px 6px 4px 12px",
+        borderRadius: 999,
+        background: `${color}14`,
+        border: `1px solid ${color}33`,
+        fontSize: 13,
+        fontWeight: 600,
+        color: tokens.text,
+      }}
+    >
+      {keyword.keyword}
+      <select
+        value={known ? keyword.category_key : ""}
+        onChange={(e) => {
+          if (e.target.value) onMove(keyword, e.target.value);
+        }}
+        title="Przenieś do innej kategorii"
+        style={{
+          border: `1px solid ${tokens.border}`,
+          borderRadius: 8,
+          background: "#fff",
+          fontSize: 11,
+          padding: "2px 4px",
+          cursor: "pointer",
+          maxWidth: 130,
+        }}
+      >
+        {!known && <option value="">— wybierz kategorię —</option>}
+        {categories.map((opt) => (
+          <option key={opt.key} value={opt.key}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={() => onRemove(keyword)}
+        aria-label={`Usuń słowo ${keyword.keyword}`}
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 7,
+          border: "none",
+          background: "none",
+          display: "grid",
+          placeItems: "center",
+          cursor: "pointer",
+          color: tokens.muted,
+        }}
+      >
+        <MIcon name="close" size={13} />
+      </button>
+    </span>
+  );
+}
+
+// Usunięcie kategorii — pokazujemy, ilu leadów dotyczy, i pozwalamy przepiąć je
+// na inną kategorię (albo świadomie wyczyścić). Słowa kluczowe idą razem z
+// leadami; przy „wyczyść” są kasowane, bo bez kategorii nic nie znaczą.
+function DeleteCategoryDialog({
+  category,
+  others,
+  keywordCount,
+  supabase,
+  onCancel,
+  onConfirm,
+}: {
+  category: LeadCategory;
+  others: LeadCategory[];
+  keywordCount: number;
+  supabase: ReturnType<typeof createClient>;
+  onCancel: () => void;
+  onConfirm: (replacementKey: string) => void;
+}) {
+  useScrollLock();
+  const [count, setCount] = useState<number | null>(null);
+  const [replacement, setReplacement] = useState<string>(others[0]?.key ?? "");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const [prospects, deals] = await Promise.all([
+        supabase.from("prospects").select("id", { count: "exact", head: true }).eq("category", category.key),
+        supabase.from("deals").select("id", { count: "exact", head: true }).eq("category", category.key),
+      ]);
+      setCount((prospects.count ?? 0) + (deals.count ?? 0));
+    })();
+  }, [supabase, category.key]);
+
+  const affected = (count ?? 0) > 0 || keywordCount > 0;
+
+  return (
+    <>
+      <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: "rgba(15,18,28,0.40)", zIndex: 40 }} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "min(460px, calc(100vw - 32px))",
+          background: tokens.card,
+          borderRadius: tokens.radius,
+          border: `1px solid ${tokens.border}`,
+          boxShadow: "0 24px 60px rgba(15,18,28,0.18)",
+          zIndex: 41,
+          padding: 22,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Usuń kategorię „{category.label}”</h2>
+          <button onClick={onCancel} aria-label="Zamknij" style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${tokens.border}`, background: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}>
+            <MIcon name="close" size={15} color={tokens.muted} />
+          </button>
+        </div>
+
+        {count === null ? (
+          <p style={{ fontSize: 14, color: tokens.muted }}>Sprawdzanie leadów…</p>
+        ) : (
+          <>
+            <p style={{ fontSize: 14, margin: "0 0 12px" }}>
+              {affected ? (
+                <>
+                  Kategoria jest na <b>{count}</b> {count === 1 ? "leadzie" : "leadach"}
+                  {keywordCount > 0 && (
+                    <>
+                      {" "}
+                      i ma <b>{keywordCount}</b> {keywordCount === 1 ? "słowo kluczowe" : "słów kluczowych"}
+                    </>
+                  )}
+                  . Wskaż, co z nimi zrobić:
+                </>
+              ) : (
+                <>Ta kategoria nie jest nigdzie używana. Usunąć ją?</>
+              )}
+            </p>
+            {affected && (
+              <select value={replacement} onChange={(e) => setReplacement(e.target.value)} style={{ ...inputStyle, marginBottom: 8 }}>
+                {others.map((o) => (
+                  <option key={o.id} value={o.key}>
+                    Przenieś do: {o.label}
+                  </option>
+                ))}
+                <option value="">Wyczyść kategorię (leady zostaną bez niej, słowa usunięte)</option>
+              </select>
+            )}
+            <p style={{ fontSize: 12.5, color: tokens.muted, margin: "0 0 18px" }}>
+              Dotyczy całego łańcucha leada: zadań scrapera, zescrapowanych leadów, prospektów i dealów.
+            </p>
+          </>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button onClick={onCancel} style={ghostButton}>
+            Anuluj
+          </button>
+          <button
+            disabled={busy || count === null}
+            onClick={() => {
+              setBusy(true);
+              onConfirm(affected ? replacement : "");
+            }}
+            style={{ ...primaryButton, background: tokens.danger, opacity: busy || count === null ? 0.6 : 1 }}
+          >
+            {busy ? "Usuwanie…" : "Usuń kategorię"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 

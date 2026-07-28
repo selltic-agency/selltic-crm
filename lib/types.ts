@@ -468,9 +468,11 @@ export const DEFAULT_STAGES: StageSeed[] = [
 ];
 
 // ── Klasyfikacja leadów: KATEGORIA BRANŻY (Feature 1) ────────────────────
-// Stała lista 13 kategorii medyczno-okołozdrowotnych. Zasiewana per-owner
-// (jak pipeline_stages) — edytowalna kolorystycznie i rozszerzalna, ale
-// `key` jest stabilnym identyfikatorem trzymanym jako tekst na leadach.
+// 13 kategorii medyczno-okołozdrowotnych jako PUNKT STARTOWY — zasiewane
+// per-owner (jak pipeline_stages) i w pełni edytowalne w Ustawieniach →
+// „Kategorie branż” (dodanie, zmiana nazwy/koloru, usunięcie). `key` jest
+// stabilnym identyfikatorem trzymanym jako tekst na leadach, więc zmiana
+// nazwy niczego nie odpina.
 export type LeadCategory = {
   id: string;
   owner: string;
