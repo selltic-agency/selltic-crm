@@ -228,5 +228,8 @@ produkcyjne będą trafiać wyłącznie do podglądu testowego.
 | `"error": "Brak field_data"` | Moduł HTTP w Make nie mapuje odpowiedzi z modułu 1 |
 | Lead w CRM bez telefonu/e-maila | Pytanie własne zamiast pola standardowego — zmapuj je (4.4) |
 | Log pokazuje `błąd (400)` | Zwykle zły token, zły Dataset ID albo `lead_id` spoza tego konta |
+| **Make: `(#100) Missing Permission`** | Konto połączone w Make nie ma dostępu do leadów strony. Wymagane: rola **administratora lub „Potencjalni klienci"** na stronie (Meta Business Suite → Ustawienia → Osoby) oraz zgody `leads_retrieval`, `pages_manage_ads`, `pages_show_list` przy połączeniu. Napraw rolę → w Make usuń i dodaj połączenie od nowa (istniejące nie dobierze zgód samo). |
+| **Make: `(#100)` mimo poprawnej roli** | Strona nie jest przypisana do portfela biznesowego (Business Manager), albo lead jest starszy niż 90 dni — Graph API nie wyda jego treści |
+| **CRM: `(#100) Missing Permission` przy „Sprawdź połączenie"** | Naprawione — test uderza teraz w endpoint zdarzeń, a nie w metadane zbioru danych. Jeśli błąd wraca, token nie należy do wskazanego Dataset ID |
 | Cisza w Events Managerze, log pusty | Wyłączony przełącznik w 4.2 albo brak nazwy zdarzenia przy etapie (4.3) |
 | Zdarzenie wysłane, ale niewidoczne | Ustawiony kod zdarzeń testowych → zdarzenia idą tylko do podglądu testowego |

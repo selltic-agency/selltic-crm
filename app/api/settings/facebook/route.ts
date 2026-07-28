@@ -108,25 +108,70 @@ async function testConnection(
     return NextResponse.json({ ok: false, error: "Uzupełnij identyfikator zbioru danych i token." });
   }
 
+  // Sprawdzamy DOKŁADNIE tę ścieżkę, z której korzysta integracja: POST na
+  // /{dataset_id}/events z pustą tablicą zdarzeń. Nic nie wysyła (0 zdarzeń),
+  // ale przechodzi przez to samo uwierzytelnienie co realna wysyłka.
+  //
+  // Odczyt metadanych (GET /{dataset_id}) wyglądałby prościej, ale wymaga
+  // uprawnień do zarządzania reklamami — token wygenerowany w Events Managerze
+  // pod Conversions API ich nie ma i zwracał „(#100) Missing Permission”
+  // mimo w pełni sprawnej konfiguracji.
   try {
-    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(
-      id
-    )}?fields=name,id&access_token=${encodeURIComponent(accessToken)}`;
-    const res = await fetch(url);
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(id)}/events`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: [], access_token: accessToken }),
+    });
     const body = (await res.json().catch(() => null)) as
-      | { name?: string; id?: string; error?: { message?: string } }
+      | { events_received?: number; error?: { message?: string; code?: number; error_subcode?: number } }
       | null;
-    if (!res.ok) {
-      return NextResponse.json({
-        ok: false,
-        error: body?.error?.message || `Meta odrzuciła zapytanie (HTTP ${res.status}).`,
-      });
-    }
-    return NextResponse.json({ ok: true, datasetName: body?.name || body?.id || id });
+
+    if (res.ok) return NextResponse.json({ ok: true, datasetName: id });
+
+    const verdict = explainGraphError(body?.error, id, res.status);
+    return NextResponse.json(
+      verdict.authenticated ? { ok: true, datasetName: id } : { ok: false, error: verdict.message }
+    );
   } catch (e) {
     return NextResponse.json({
       ok: false,
       error: e instanceof Error ? e.message : "Błąd sieci przy połączeniu z Meta.",
     });
+  }
+}
+
+// Tłumaczy kod błędu Graph API na wskazówkę, co konkretnie poprawić — surowy
+// komunikat Meta („Missing Permission”) nie mówi, gdzie szukać przyczyny.
+//
+// `authenticated: true` oznacza, że Meta odrzuciła sam payload (pusta tablica
+// zdarzeń), ale token i zbiór danych są poprawne — z punktu widzenia testu
+// połączenia to sukces.
+function explainGraphError(
+  error: { message?: string; code?: number; error_subcode?: number } | undefined,
+  datasetId: string,
+  status: number
+): { authenticated: boolean; message: string } {
+  const raw = error?.message || `Meta odrzuciła zapytanie (HTTP ${status}).`;
+  const fail = (message: string) => ({ authenticated: false, message });
+
+  switch (error?.code) {
+    case 190:
+      return fail(
+        `Token nieprawidłowy lub wygasł — wygeneruj nowy w Events Managerze (Ustawienia → Conversions API). [${raw}]`
+      );
+    case 100:
+      // Błąd walidacji parametru `data` (a nie uprawnień) = token przeszedł
+      // uwierzytelnienie przy tym zbiorze danych.
+      if (/\bdata\b/i.test(raw) && !/permission/i.test(raw)) {
+        return { authenticated: true, message: "" };
+      }
+      return fail(
+        `Token nie ma dostępu do zbioru danych ${datasetId}. Sprawdź, czy token wygenerowano w Events Managerze DLA TEGO zbioru danych i czy Dataset ID jest poprawny. [${raw}]`
+      );
+    case 803:
+      return fail(`Nie znaleziono zbioru danych o ID ${datasetId} — sprawdź identyfikator. [${raw}]`);
+    default:
+      return fail(raw);
   }
 }
