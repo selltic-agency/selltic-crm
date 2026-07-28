@@ -17,6 +17,7 @@ import {
 } from "@/lib/forms";
 import { createLeadFromForm } from "@/lib/server/leads";
 import { fireCapiLead, fireWebhook } from "@/lib/server/meta";
+import { mailConfigFrom, sendNewLeadEmail, type MailConfig } from "@/lib/server/leadMail";
 
 // Walidacja telefonu po stronie serwera (spójna z frontendem).
 function validatePhones(answers: Record<string, unknown>, steps: Step[]): string | null {
@@ -161,14 +162,10 @@ export async function POST(req: Request) {
       .select("email_new_lead, notify_email, resend_api_key, resend_from, resend_reply_to")
       .eq("owner", form.owner)
       .maybeSingle();
-    const mail: MailConfig = {
-      apiKey: settings?.resend_api_key || process.env.RESEND_API_KEY || "",
-      from: settings?.resend_from || process.env.RESEND_FROM || "Selltic <leady@twoja-domena.pl>",
-      replyTo: settings?.resend_reply_to || undefined,
-    };
+    const mail = mailConfigFrom(settings ?? null);
 
     if (settings?.email_new_lead && settings.notify_email) {
-      await notifyNewLead(mail, settings.notify_email, { name, email, phone, returning: dealExisted });
+      await sendNewLeadEmail(mail, settings.notify_email, { name, email, phone, returning: dealExisted });
     }
 
     // 5. Auto-mail „dziękujemy” do zgłaszającego (odporny na błędy).
@@ -263,36 +260,9 @@ async function linkOrCreateSession(
 }
 
 // ── E-mail (Resend) ────────────────────────────────────────────────────────
-type MailConfig = { apiKey: string; from: string; replyTo?: string };
-
-async function notifyNewLead(
-  mail: MailConfig,
-  to: string,
-  lead: { name: string; email: string; phone: string; returning: boolean }
-) {
-  if (!mail.apiKey) return;
-  const kind = lead.returning ? "Powracający e-mail — nowy lead" : "Nowy lead";
-  try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${mail.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: mail.from,
-        to,
-        ...(mail.replyTo ? { reply_to: mail.replyTo } : {}),
-        subject: `🎯 ${kind}: ${lead.name}`,
-        html: `<h2>${kind}</h2>
-               <p>Nowa szansa sprzedaży z formularza${lead.returning ? " (ten e-mail już wcześniej zostawił zgłoszenie)" : ""}.</p>
-               <p><b>Imię:</b> ${lead.name}</p>
-               <p><b>Email:</b> ${lead.email || "—"}</p>
-               <p><b>Telefon:</b> ${lead.phone || "—"}</p>`,
-      }),
-    });
-  } catch (e) {
-    console.error("[notifyNewLead]", e);
-  }
-}
-
+// Powiadomienie „nowy lead” mieszka w lib/server/leadMail.ts — dzieli je
+// z ingestem leadów z Facebooka. Tutaj zostaje tylko auto-mail „dziękujemy”,
+// który jest specyficzny dla formularzy na stronie.
 async function sendThankYouEmail(mail: MailConfig, to: string, name: string, settings: FormSettings) {
   try {
     if (!mail.apiKey) return;

@@ -74,6 +74,17 @@ Fundament gotowy. Reszta dokłada się warstwami, każda samodzielna:
   dołącza go jako `Authorization: Bearer <CRON_SECRET>`. Bez sekretu w produkcji
   endpoint zwraca 503 (świadomie zablokowany przed nieautoryzowanym wywołaniem).
 
+### Facebook Lead Ads (formularze błyskawiczne)
+- Leady z formularzy błyskawicznych trafiają do CRM przez Make.com →
+  `POST /api/leads/facebook` (auth: `X-API-Key: FB_LEADS_KEY`). Endpoint jest
+  idempotentny — ten sam `leadgen_id` nigdy nie utworzy drugiego deala.
+- Zmiana etapu takiego leada wysyła do Meta zdarzenie jakości przez Conversions
+  API (`action_source: system_generated`, dopasowanie po `lead_id`, bez PII),
+  dzięki czemu Facebook uczy się dowozić lepsze leady. Mapowanie etap →
+  zdarzenie ustawia się w Ustawieniach → Facebook Lead Ads.
+- Migracja: `migration_facebook_leads.sql`. Pełna instrukcja konfiguracji
+  (Make + Meta + test end-to-end): **`FACEBOOK_LEADS.md`**.
+
 ### Limit zgłoszeń
 - `/api/submit` ma limiter w pamięci: maks. 10 zgłoszeń na IP na minutę (ochrona
   przed oczywistym spamem). Do dużej skali przenieś licznik do Redis/Upstash.

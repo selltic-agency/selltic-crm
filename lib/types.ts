@@ -13,6 +13,11 @@ export type PipelineStage = {
   position: number;
   is_won: boolean;
   is_lost: boolean;
+  // Mapowanie na zdarzenie Conversions API dla leadów z formularzy
+  // błyskawicznych Facebooka (migration_facebook_leads.sql). Pusta nazwa albo
+  // wyłączony przełącznik = etap nic nie raportuje do Meta.
+  meta_event_name?: string | null;
+  meta_event_enabled?: boolean;
 };
 
 export type ActivityType = "note" | "call" | "email" | "submission" | "stage" | "task" | "sms";
@@ -73,6 +78,58 @@ export type Deal = {
   // §6 — lead z porzuconego wypełnienia formularza (dane kontaktowe, ale bez
   // ukończenia). Filtrowalny i wizualnie odróżnialny w liście Leadów.
   incomplete?: boolean;
+  // Facebook Lead Ads (migration_facebook_leads.sql). `fb_lead_id` to
+  // `leadgen_id` z Meta — jedyny klucz, po którym Conversions API potrafi
+  // powiązać nasz sygnał jakości z konkretnym leadem. Null dla dealów
+  // z formularzy na stronie i z prospectingu.
+  fb_lead_id?: string | null;
+  fb_form_id?: string | null;
+  fb_form_name?: string | null;
+  fb_page_id?: string | null;
+  fb_ad_id?: string | null;
+  fb_adset_id?: string | null;
+  fb_campaign_id?: string | null;
+  fb_platform?: string | null;
+  fb_is_organic?: boolean | null;
+  fb_created_at?: string | null;
+};
+
+// ── Facebook Lead Ads ─────────────────────────────────────────────────────
+// Konfiguracja jednego formularza błyskawicznego: mapowanie nazw pól z Meta
+// na pola deala (patrz lib/fbFieldMapping.ts) + etap startowy.
+export type FbLeadForm = {
+  fb_form_id: string;
+  owner: string;
+  label: string | null;
+  field_map: Record<string, string>;
+  // Nazwy pól zaobserwowane w dotychczasowych leadach — z nich UI buduje
+  // listę do zmapowania.
+  known_fields: string[];
+  default_stage: string | null;
+  lead_title: string | null;
+  enabled: boolean;
+  last_lead_at: string | null;
+  leads_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+// Log wysyłek zdarzeń jakości leada do Conversions API — zarazem kolejka
+// ponowień (wiersze z ok=false podnosi /api/cron/meta-lead-events).
+export type MetaLeadEvent = {
+  id: string;
+  owner: string;
+  deal_id: string | null;
+  fb_lead_id: string;
+  event_name: string;
+  stage_key: string | null;
+  event_time: string;
+  ok: boolean;
+  attempts: number;
+  status: number | null;
+  error: string | null;
+  sent_at: string | null;
+  created_at: string;
 };
 
 // Prospekt = zimny lead z Google Maps (Faza 10), zanim wykaże zainteresowanie.
@@ -204,6 +261,14 @@ export type AppSettings = {
   // Adres, na który trafiają ODPOWIEDZI na wysłane maile (nagłówek Reply-To).
   // Pozwala kierować odpowiedzi np. na Gmaila zespołu, mimo wysyłki z domeny.
   resend_reply_to?: string | null;
+  // Conversions API dla zdarzeń CRM (Facebook Lead Ads). Token trzymany
+  // server-side; do klienta wraca tylko informacja, że jest ustawiony.
+  meta_crm_dataset_id?: string | null;
+  meta_crm_token?: string | null;
+  meta_crm_test_event_code?: string | null;
+  meta_crm_enabled?: boolean;
+  // Czy lead z Facebooka ma wywołać mail „nowy lead”.
+  fb_leads_notify?: boolean;
 };
 
 // Szablon e-mail (Integracje → Szablony e-mail). Body to HTML; subject i body

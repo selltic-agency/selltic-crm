@@ -23,6 +23,7 @@ import { PROPERTY_TYPES, TYPE_LABEL, hasOptions, normalizeOptions, propLabel, sl
 import { ensureContactSourceDef } from "@/lib/contactSource";
 import { EmailTemplatesTab } from "@/components/email/EmailTemplatesTab";
 import { SmsTemplatesTab } from "@/components/sms/SmsTemplatesTab";
+import { FacebookLeadsTab } from "@/components/facebook/FacebookLeadsTab";
 import MIcon from "@/components/MaterialIcon";
 import { useScrollLock } from "@/lib/useScrollLock";
 
@@ -36,6 +37,7 @@ type Tab =
   | "sms-gateway"
   | "templates"
   | "sms-templates"
+  | "facebook"
   | "scraper";
 
 // Definicja nawigacji: pogrupowane zakładki z ikoną i krótkim opisem. Grupy
@@ -67,8 +69,16 @@ const TAB_GROUPS: TabGroup[] = [
     ],
   },
   {
-    group: "Zaawansowane",
-    items: [{ key: "scraper", label: "Scraper", icon: "smart_toy", hint: "Google Maps + scoring" }],
+    group: "Pozyskiwanie leadów",
+    items: [
+      {
+        key: "facebook",
+        label: "Facebook Lead Ads",
+        icon: "ads_click",
+        hint: "Formularze błyskawiczne + Conversions API",
+      },
+      { key: "scraper", label: "Scraper", icon: "smart_toy", hint: "Google Maps + scoring" },
+    ],
   },
 ];
 
@@ -236,6 +246,8 @@ function TabContent({ tab }: { tab: Tab }) {
       return <EmailTemplatesTab />;
     case "sms-templates":
       return <SmsTemplatesTab />;
+    case "facebook":
+      return <FacebookLeadsTab />;
     case "scraper":
       return <ScraperTab />;
     default:
