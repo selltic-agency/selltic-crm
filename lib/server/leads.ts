@@ -73,7 +73,8 @@ export async function buildPropTypeLookup(db: Db, owner: string): Promise<PropTy
   return (key: string) => map.get(key);
 }
 
-async function firstStageKey(db: Db, owner: string): Promise<string> {
+// Pierwszy etap lejka właściciela — startowy dla każdego nowego leada.
+export async function firstStageKey(db: Db, owner: string): Promise<string> {
   const { data } = await db
     .from("pipeline_stages")
     .select("key")
@@ -227,31 +228,42 @@ export async function createLeadFromForm(args: CreateLeadArgs): Promise<CreateLe
     : dealExisted
     ? "Powracający e-mail — nowy lead"
     : "Nowy lead";
-  await db.from("notifications").insert({
-    owner,
-    deal_id: dealId,
-    type: "new_lead",
-    body: `${kindLabel}: ${title}`,
-  });
+  await notifyNewDeal(db, owner, dealId, `${kindLabel}: ${title}`);
 
   // Flaga duplikatu: telefon pasuje do INNEGO deala.
-  if (phone) {
-    const { data: matches } = await db
-      .from("deals")
-      .select("id")
-      .eq("owner", owner)
-      .eq("phone", phone)
-      .neq("id", dealId)
-      .limit(1);
-    if (matches?.[0]) {
-      await db.from("duplicate_flags").insert({
-        owner,
-        deal_a: dealId,
-        deal_b: matches[0].id,
-        reason: "phone match, different email",
-      });
-    }
-  }
+  await flagPhoneDuplicate(db, owner, dealId, phone);
 
   return { dealId, name: title, email, phone, dealExisted, warnings: mapped.warnings };
+}
+
+// Powiadomienie „dzwonek” o nowym leadzie. Wspólne dla formularzy na stronie
+// i leadów z formularzy błyskawicznych Facebooka.
+export async function notifyNewDeal(db: Db, owner: string, dealId: string, body: string): Promise<void> {
+  await db.from("notifications").insert({ owner, deal_id: dealId, type: "new_lead", body });
+}
+
+// Flaga duplikatu: ten sam telefon na INNYM dealu → wpis do ręcznej
+// weryfikacji (bez automatycznego scalania — to osobna, przyszła faza).
+export async function flagPhoneDuplicate(
+  db: Db,
+  owner: string,
+  dealId: string,
+  phone: string
+): Promise<void> {
+  if (!phone) return;
+  const { data: matches } = await db
+    .from("deals")
+    .select("id")
+    .eq("owner", owner)
+    .eq("phone", phone)
+    .neq("id", dealId)
+    .limit(1);
+  if (matches?.[0]) {
+    await db.from("duplicate_flags").insert({
+      owner,
+      deal_a: dealId,
+      deal_b: matches[0].id,
+      reason: "phone match, different email",
+    });
+  }
 }

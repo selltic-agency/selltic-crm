@@ -85,29 +85,41 @@ export function buildUserData(input: CapiUserInput): Record<string, unknown> {
   return ud;
 }
 
-export type CapiEventResult = { ok: boolean; status?: number; error?: string };
+export type CapiEventResult = { ok: boolean; status?: number; error?: string; response?: unknown };
 
-// §9c. Wyślij zdarzenie „Lead” do Conversions API. Fire-and-forget — wywołujący
-// NIGDY nie blokuje odpowiedzi do wypełniającego. Zwraca wynik do zalogowania
-// (żeby cisza w Events Managerze była diagnozowalna, a nie zgadywana).
-export async function sendCapiLead(params: {
+// Wersja Graph API używana przez wszystkie wywołania CAPI (jedno miejsce do
+// podbicia przy migracji).
+export const GRAPH_API_VERSION = "v21.0";
+
+// Skąd pochodzi zdarzenie. 'website' — Pixel/formularz na stronie.
+// 'system_generated' — zdarzenie wygenerowane przez system (CRM), używane dla
+// sygnałów jakości leada z formularzy błyskawicznych.
+export type CapiActionSource = "website" | "system_generated" | "phone_call" | "chat" | "other";
+
+// Generyczna wysyłka pojedynczego zdarzenia do Conversions API. Zwraca wynik
+// do zalogowania (żeby cisza w Events Managerze była diagnozowalna, a nie
+// zgadywana). NIGDY nie rzuca — wywołujący traktuje wysyłkę jako poboczną.
+export async function sendCapiEvent(params: {
   config: MetaConfig;
-  eventId: string; // ten sam co Pixel (id sesji) → deduplikacja
+  eventName: string;
+  eventId: string; // deduplikacja po stronie Meta
+  eventTime?: number; // sekundy uniksowe; domyślnie „teraz”
+  actionSource?: CapiActionSource;
   eventSourceUrl?: string | null;
   userData: Record<string, unknown>;
   customData?: Record<string, unknown>;
 }): Promise<CapiEventResult> {
-  const { config, eventId, eventSourceUrl, userData, customData } = params;
+  const { config, eventName, eventId, eventTime, actionSource, eventSourceUrl, userData, customData } = params;
   if (!config.pixelId || !config.capiToken) {
     return { ok: false, error: "brak pixel_id lub tokenu" };
   }
   const body: Record<string, unknown> = {
     data: [
       {
-        event_name: "Lead",
-        event_time: Math.floor(Date.now() / 1000),
+        event_name: eventName,
+        event_time: eventTime ?? Math.floor(Date.now() / 1000),
         event_id: eventId,
-        action_source: "website",
+        action_source: actionSource ?? "website",
         ...(eventSourceUrl ? { event_source_url: eventSourceUrl } : {}),
         user_data: userData,
         ...(customData ? { custom_data: customData } : {}),
@@ -117,7 +129,7 @@ export async function sendCapiLead(params: {
   };
 
   try {
-    const url = `https://graph.facebook.com/v19.0/${config.pixelId}/events?access_token=${encodeURIComponent(
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${config.pixelId}/events?access_token=${encodeURIComponent(
       config.capiToken
     )}`;
     const res = await fetch(url, {
@@ -125,12 +137,35 @@ export async function sendCapiLead(params: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    const text = await res.text().catch(() => "");
     if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      return { ok: false, status: res.status, error: detail.slice(0, 300) };
+      return { ok: false, status: res.status, error: text.slice(0, 300) };
     }
-    return { ok: true, status: res.status };
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      /* odpowiedź nie-JSON — wynik i tak jest OK */
+    }
+    return { ok: true, status: res.status, response: parsed };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network error" };
   }
+}
+
+// §9c. Wyślij zdarzenie „Lead” do Conversions API (zgłoszenie formularza na
+// stronie). Fire-and-forget — wywołujący NIGDY nie blokuje odpowiedzi do
+// wypełniającego.
+export async function sendCapiLead(params: {
+  config: MetaConfig;
+  eventId: string; // ten sam co Pixel (id sesji) → deduplikacja
+  eventSourceUrl?: string | null;
+  userData: Record<string, unknown>;
+  customData?: Record<string, unknown>;
+}): Promise<CapiEventResult> {
+  return sendCapiEvent({
+    ...params,
+    eventName: "Lead",
+    actionSource: "website",
+  });
 }

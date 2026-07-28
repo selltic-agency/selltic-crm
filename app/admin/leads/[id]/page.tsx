@@ -255,6 +255,20 @@ export default function DealPage() {
     // UI, ale nie połykaj błędu po cichu (ułatwia diagnostykę luk w timeline).
     if (actErr) console.error("Nie zapisano wpisu aktywności (zmiana etapu):", actErr);
     reloadFeed();
+    reportStageToMeta(deal.id, stage);
+  }
+
+  // Sygnał jakości leada do Meta (Conversions API). Dotyczy WYŁĄCZNIE leadów
+  // z formularzy błyskawicznych — serwer sam pomija dealy bez fb_lead_id oraz
+  // etapy bez zmapowanego zdarzenia. Fire-and-forget: wysyłka do Facebooka
+  // nigdy nie może opóźnić ani zablokować pracy w CRM.
+  function reportStageToMeta(dealId: string, stage: Stage) {
+    fetch("/api/meta/lead-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dealId, stage }),
+      keepalive: true,
+    }).catch((e) => console.error("Nie wysłano zdarzenia jakości leada do Meta:", e));
   }
 
   // Zwraca true, gdy etap jest terminalny (wygrany lub przegrany).
