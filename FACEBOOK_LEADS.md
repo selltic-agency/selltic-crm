@@ -143,30 +143,50 @@ wskaż stronę i formularz. Moduł sam pobiera treść odpowiedzi z Graph API.
 | Headers | `X-API-Key` : `<FB_LEADS_KEY>` |
 | Body type | `Raw` → `JSON (application/json)` |
 
-Treść (mapuj wartości z modułu 1):
+Treść — wzór poniżej, ale **numeru modułu nie przepisuj na ślepo**:
 
 ```json
 {
-  "leadgen_id": "{{1.id}}",
-  "form_id": "{{1.form_id}}",
-  "form_name": "{{1.form_name}}",
-  "page_id": "{{1.page_id}}",
-  "ad_id": "{{1.ad_id}}",
-  "adset_id": "{{1.adset_id}}",
-  "campaign_id": "{{1.campaign_id}}",
-  "platform": "{{1.platform}}",
-  "is_organic": "{{1.is_organic}}",
-  "created_time": "{{1.created_time}}",
-  "field_data": {{1.field_data}}
+  "leadgen_id": "{{N.id}}",
+  "form_id": "{{N.form_id}}",
+  "form_name": "{{N.form_name}}",
+  "page_id": "{{N.page_id}}",
+  "ad_id": "{{N.ad_id}}",
+  "adset_id": "{{N.adset_id}}",
+  "campaign_id": "{{N.campaign_id}}",
+  "platform": "{{N.platform}}",
+  "is_organic": "{{N.is_organic}}",
+  "created_time": "{{N.created_time}}",
+  "field_data": {
+    "full_name": "{{N.full_name}}",
+    "email": "{{N.email}}",
+    "phone_number": "{{N.phone_number}}"
+  }
 }
 ```
 
-`field_data` może być tablicą `[{ name, values }]` (surowy kształt z Graph API)
-albo płaskim obiektem `{ "email": "…" }` — endpoint przyjmuje oba, więc sposób
-mapowania w Make nie ma znaczenia.
+> **`N` to identyfikator Twojego modułu „Watch Leads”, a nie zawsze `1`.**
+> Make nadaje ID przy tworzeniu modułu i nigdy ich nie przenumerowuje — po
+> usunięciu i dodaniu modułu pierwszy w scenariuszu może mieć ID np. `9`.
+> Wklejenie `{{1.id}}`, gdy modułu 1 nie ma, kończy się błędem:
+> *„'HTTP - Make a request' [module ID 11] references non-existing module
+> [module ID 1]”*.
+>
+> **Nie zgaduj numeru — mapuj klikaniem.** Ustaw kursor w polu *Request
+> content* i wybieraj pozycje z panelu mapowania po prawej; Make sam wstawi
+> właściwą referencję. Numer modułu podejrzysz też, najeżdżając na jego
+> kółko w scenariuszu (dymek pokazuje nazwę i ID).
 
-Wystarczy sam `leadgen_id` + `field_data`; reszta pól to atrybucja kampanii
-(przydatna w raportach, nieobowiązkowa).
+**Pola w `field_data`** zależą od tego, o co pyta Twój formularz — wpisz te,
+które faktycznie masz (panel mapowania pokazuje je po nazwach z Facebooka).
+Moduł Make zwykle spłaszcza odpowiedzi do osobnych pól (`email`,
+`full_name`, `phone_number`, plus pytania własne). Gdyby Twój moduł oddawał
+surową tablicę, możesz zamiast obiektu wstawić `"field_data": {{N.field_data}}`
+— endpoint przyjmuje oba kształty: tablicę `[{ name, values }]` i płaski
+obiekt `{ "email": "…" }`.
+
+Obowiązkowe są tylko `leadgen_id` i `field_data`; reszta to atrybucja
+kampanii — przydatna w raportach, ale nie blokuje ingestu.
 
 **3. Error handler** (prawy klik na moduł HTTP → *Add error handler* → **Break**)
 Endpoint jest idempotentny — ponowienie tego samego leada **nigdy** nie utworzy
@@ -225,7 +245,8 @@ produkcyjne będą trafiać wyłącznie do podglądu testowego.
 |---|---|
 | Make dostaje `503` | Brak `FB_LEADS_KEY` w Vercel albo brak redeployu po dodaniu |
 | Make dostaje `401` | Nagłówek `X-API-Key` nie zgadza się z `FB_LEADS_KEY` |
-| `"error": "Brak field_data"` | Moduł HTTP w Make nie mapuje odpowiedzi z modułu 1 |
+| `"error": "Brak field_data"` | Moduł HTTP w Make nie mapuje odpowiedzi z modułu Watch Leads |
+| **Make: `references non-existing module [module ID N]`** | W treści żądania jest `{{N.…}}` wskazujące na nieistniejący moduł (np. przepisane `{{1.id}}`, gdy moduł ma inne ID). Wyczyść pole *Request content* i zmapuj wartości klikaniem z panelu po prawej — patrz §5 |
 | Lead w CRM bez telefonu/e-maila | Pytanie własne zamiast pola standardowego — zmapuj je (4.4) |
 | Log pokazuje `błąd (400)` | Zwykle zły token, zły Dataset ID albo `lead_id` spoza tego konta |
 | **Make: `(#100) Missing Permission`** | Konto połączone w Make nie ma dostępu do leadów strony. Wymagane: rola **administratora lub „Potencjalni klienci"** na stronie (Meta Business Suite → Ustawienia → Osoby) oraz zgody `leads_retrieval`, `pages_manage_ads`, `pages_show_list` przy połączeniu. Napraw rolę → w Make usuń i dodaj połączenie od nowa (istniejące nie dobierze zgód samo). |
